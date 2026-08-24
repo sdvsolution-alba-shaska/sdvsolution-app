@@ -8236,7 +8236,6 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             style={{ fontSize: 12, color: ((selected && activeSystem === id) || selected === id) ? "#101828" : stub ? "#98A2B3" : "#344054", fontWeight: ((selected && activeSystem === id) || selected === id) ? 600 : 400 }}>
             {(n && /L1/.test(n.subtype || "")) ? titleCase(n.label) : n.label}
           </button>
-          {stub && <span style={{ fontSize: 9, color: "#C4CBD4", fontFamily: "ui-monospace, monospace" }}>not loaded</span>}
           {gap && <AlertTriangle size={11} color="#B42318" />}
         </div>
         {isOpen && kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />)}
@@ -8848,12 +8847,11 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           </div>
           <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid #F2F4F7" }}>
             <div className="flex items-center gap-1 p-0.5 rounded-md" style={{ background: "#F2F4F7" }}>
-              {[["system", "SYSTEM"], ["ecu", "HARDWARE"]].map(([m, lbl]) => (
+              {[["system", "SYSTEM"], ["ecu", "ECUs"]].map(([m, lbl]) => (
                 <button key={m} onClick={() => setTreeMode(m)} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, padding: "2px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: treeMode === m ? "#fff" : "transparent", color: treeMode === m ? "#175CD3" : "#98A2B3", boxShadow: treeMode === m ? "0 1px 2px rgba(16,24,40,0.08)" : "none" }}>{lbl}</button>
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <span style={{ fontSize: 10, color: "#98A2B3", fontFamily: "ui-monospace, monospace" }}>{treeMode === "ecu" ? ((readiness.disciplines.find((d) => d.key === "HWE") || {}).primary || 0) + " ECUs" : "L0 · 37"}</span>
               <button onClick={() => setLeftHidden(true)} title="Hide panel" style={{ display: "flex", cursor: "pointer" }}><ChevronLeft size={14} color="#98A2B3" /></button>
             </div>
           </div>
@@ -8908,22 +8906,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 </button>))
               : L0S.map((r) => <TreeRow key={r.id} id={r.id} depth={0} />)}
           </div>
-          <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderTop: "1px solid #E4E7EC", background: treeSel.size ? "#EAF2FF" : "#F9FAFB" }}>
-            {treeSel.size > 0 ? (
-              <>
-                <Check size={12} color="#175CD3" />
-                <span style={{ fontSize: 10.5, color: "#175CD3", fontWeight: 700 }}>{treeSel.size} selected</span>
-                <button onClick={() => setTreeSel(new Set())} style={{ marginLeft: "auto", fontSize: 10.5, color: "#667085", fontWeight: 600 }}>Clear</button>
-              </>
-            ) : (
-              <>
-                <Package size={12} color="#175CD3" />
-                <span style={{ fontSize: 10.5, color: "#475467" }}>
-                  {L0S.length} L0 · {Object.values(nodes).filter((n) => isL1(n)).length} L1 loaded — downstream generated on open
-                </span>
-              </>
-            )}
-          </div>
+          {treeSel.size > 0 && (
+            <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderTop: "1px solid #E4E7EC", background: "#EAF2FF" }}>
+              <Check size={12} color="#175CD3" />
+              <span style={{ fontSize: 10.5, color: "#175CD3", fontWeight: 700 }}>{treeSel.size} selected</span>
+              <button onClick={() => setTreeSel(new Set())} style={{ marginLeft: "auto", fontSize: 10.5, color: "#667085", fontWeight: 600 }}>Clear</button>
+            </div>
+          )}
         </div>
 
         {/* ===== SECTION: Main content ===== */}
