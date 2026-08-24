@@ -117,14 +117,13 @@ export default function AuthGate({ children }) {
     return <div style={{ ...wrap, color: "#667085" }}>Loading…</div>;
   }
 
-  // Authenticated → render the actual app.
+  // Authenticated → render the actual app. Expose sign-out to the (import-free)
+  // app so it can show a "Sign out" button in its own top bar next to App Feedback.
   if (session) {
-    return (
-      <>
-        <SignedInBar email={session.user?.email} />
-        {children}
-      </>
-    );
+    if (typeof window !== "undefined") {
+      window.__sdvAuth = { signOut: () => supabase.auth.signOut(), email: session.user?.email || "" };
+    }
+    return <>{children}</>;
   }
 
   const reset = () => { setErr(""); setMsg(""); };
@@ -230,29 +229,6 @@ export default function AuthGate({ children }) {
           )}
         </div>
       </form>
-    </div>
-  );
-}
-
-// Thin top strip so a signed-in user can see who they are and sign out.
-function SignedInBar({ email }) {
-  return (
-    <div style={{
-      position: "fixed", bottom: 12, left: 12, zIndex: 9999,
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "6px 12px", fontSize: 12,
-      fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
-      color: "#475467", background: "rgba(255,255,255,.92)",
-      borderRadius: 10, border: "1px solid #E4E7EC",
-      boxShadow: "0 6px 20px rgba(16,24,40,.12)",
-      backdropFilter: "blur(6px)",
-    }}>
-      <span title={email} style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
-      <button
-        onClick={() => supabase.auth.signOut()}
-        style={{ border: "1px solid #E4E7EC", background: "#F9FAFB", borderRadius: 8, padding: "3px 10px", fontSize: 12, fontWeight: 600, color: "#344054", cursor: "pointer" }}>
-        Sign out
-      </button>
     </div>
   );
 }

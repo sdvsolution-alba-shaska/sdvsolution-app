@@ -8258,7 +8258,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
   );
 
   return (
-    <div className="w-full flex flex-col relative" style={{ height: "100vh", background: "#F6F8FA", fontFamily: "Inter, system-ui, -apple-system, sans-serif" }}>
+    <div className="w-full flex flex-col relative overflow-x-hidden" style={{ height: "100vh", maxWidth: "100vw", background: "#F6F8FA", fontFamily: "Inter, system-ui, -apple-system, sans-serif" }}>
       {toast && (
         <div className="absolute left-1/2 flex items-center gap-2 px-3.5 py-2 rounded-lg"
           style={{ bottom: 18, transform: "translateX(-50%)", zIndex: 60, background: BRAND.ink,
@@ -8564,6 +8564,12 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 {proj.kind === "template" ? "TEMPLATE" : "REUSED"}
               </span>)}
           </span>
+          <button onClick={() => setExecOpen((v) => !v)}
+            className="flex items-center gap-1 rounded"
+            style={{ marginLeft: 8, padding: "3px 9px", background: execOpen ? "#1D2939" : "transparent", color: "#D0D5DD", fontSize: 12, fontWeight: 600, border: "1px solid #1D2939", cursor: "pointer" }}
+            title="Show or hide the Engineering Readiness dashboard">
+            Dashboard {execOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <button onClick={openFeedback}
@@ -8572,6 +8578,14 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             title="Report a bug or suggest an improvement">
             <MessageSquarePlus size={14} color="#9CFF3A" /> App Feedback
           </button>
+          {typeof window !== "undefined" && window.__sdvAuth && (
+            <button onClick={() => window.__sdvAuth.signOut()}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
+              style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+              title="Sign out">
+              Sign out
+            </button>
+          )}
         </div>
       </div>
       {acctOpen && (() => {
@@ -8669,27 +8683,10 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
         );
       })()}
 
-      {/* ===== SECTION: Executive readiness band ===== */}
-      <div className="shrink-0" style={{ background: BRAND.ink, borderTop: "1px solid #1D2939" }}>
-        <div className="flex items-center px-4" style={{ height: 30 }}>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: BRAND.accent, letterSpacing: 0.6 }}>
-            ENGINEERING READINESS
-          </span>
-          <span style={{ fontSize: 10, color: "#667085", marginLeft: 10, fontFamily: "ui-monospace, monospace" }}>
-            live from graph · {readiness.N.toLocaleString()} L1 · {readiness.l0} L0 · maturity: Draft · baseline: {baselines[0] ? baselines[0].name + " (" + new Date(baselines[0].ts).toLocaleDateString() + ")" : "none"}
-          </span>
-          <span style={{ fontSize: 9.5, color: "#475467", marginLeft: 12 }}>
-            click a card to open · expand SYS / SWE for ASPICE processes
-          </span>
-          <button onClick={() => setExecOpen((v) => !v)}
-            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded"
-            style={{ fontSize: 10.5, color: "#98A2B3" }}>
-            {execOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            {execOpen ? "Hide" : "Show"}
-          </button>
-        </div>
-        {execOpen && (
-          <div className="flex overflow-x-auto" style={{ borderTop: "1px solid #1D2939" }}>
+      {/* ===== SECTION: Engineering Readiness dashboard — toggled from the top-bar "Dashboard" control ===== */}
+      {execOpen && (
+        <div className="shrink-0" style={{ background: BRAND.ink, borderTop: "1px solid #1D2939" }}>
+          <div className="flex overflow-x-auto">
             {readiness.disciplines.map((d) => (
               <ExecCard key={d.key} d={d}
                 expanded={procOpen === d.key}
@@ -8724,8 +8721,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         {/* ===== SECTION: Sidebar ===== */}
@@ -8931,7 +8928,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
 
         {/* ===== SECTION: Main content ===== */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center px-4 py-2 gap-3 shrink-0" style={{ background: "#fff", borderBottom: "1px solid #E4E7EC" }}>
+          <div className="flex items-center flex-wrap px-4 py-2 gap-3 shrink-0" style={{ background: "#fff", borderBottom: "1px solid #E4E7EC" }}>
             {view === "ecureq" && selectedEcu ? (() => { const ecu = ecuRecordFor(selectedEcu); return (
               <div className="flex items-center gap-1.5">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: ecu.smart ? "#9E77ED" : (isPrimaryEcu(selectedEcu) ? "#175CD3" : "#B54708") }} />
