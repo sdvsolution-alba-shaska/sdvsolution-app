@@ -23,6 +23,12 @@ Total time: ~20–30 minutes. Free tier is fine to start.
    You should see "Success." This creates the `organizations` and `memberships`
    tables, the sign-up trigger that assigns each user to their company by email
    domain, and the RLS policies that keep companies separated.
+3. **Phase 2 (per-company data persistence):** open a new query, paste all of
+   `supabase/phase2_workspaces.sql`, and **Run**. This adds the `workspaces`
+   table (one JSON document per company) with RLS, so everything each company
+   does in the tool — requirements, K-Matrix, imported DBC/LDF/ARXML, baselines,
+   review status, standards — is saved to their own isolated row and reloaded on
+   next sign-in. Skip this only if you want sign-in isolation without saved data.
 
 ## Part 3 — Configure auth behavior
 

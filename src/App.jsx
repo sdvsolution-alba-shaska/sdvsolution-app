@@ -2753,6 +2753,98 @@ function parseKMatrixAoa(aoa) {
   }
   return { lin, txt, run: (KM_STORE.data.run || ["Authenticate", "ValidateInput", "CheckMirrorState", "SendMotorCommand", "LogErrors"]), msgs };
 }
+/* ----------------------------------------------------------------------------
+   Bus-database import (in-session). Parse a real DBC / LDF / ARXML that an owner
+   drops into the tool and merge its ECUs, messages and signals into the live
+   K-Matrix. Files are read in the browser and never uploaded to any server.
+   DBC and LDF are fully parsed; ARXML is best-effort (CAN frames + I-signal PDU
+   mappings). Signal shape matches the store: [name, startBit, lenBits, cm=null, mux?].
+---------------------------------------------------------------------------- */
+function sanitizeNode(n) { return (n && String(n).trim().replace(/[^A-Za-z0-9_]/g, "_")) || ""; }
+function dbcRealId(rawStr) { const rid = parseInt(rawStr, 10) >>> 0; const ext = (rid & 0x80000000) !== 0; return { id: ext ? (rid & 0x1FFFFFFF) : rid, ext }; }
+function parseDbcText(text) {
+  const lines = String(text).split(/\r?\n/);
+  const msgs = []; let cur = null; const cyc = {};
+  for (const raw of lines) {
+    const line = raw.replace(/\t/g, " ");
+    let m = line.match(/^\s*BO_\s+(\d+)\s+([^:]+?)\s*:\s*(\d+)\s+(\S+)/);
+    if (m) { const { id, ext } = dbcRealId(m[1]); cur = { name: m[2].trim(), id, ext, dir: "", cyc: null, dlc: parseInt(m[3], 10) || 8, sig: [], note: "", sender: sanitizeNode(m[4]) || undefined, recv: [], l1: "" }; msgs.push(cur); continue; }
+    m = line.match(/^\s*SG_\s+(\w+)\s*(M|m\d+)?\s*:\s*(\d+)\|(\d+)@([01])([+-])\s*\(([^,]+),([^)]+)\)\s*\[[^\]]*\]\s*"([^"]*)"\s*(.*)$/);
+    if (m && cur) {
+      const name = m[1]; let mux; if (m[2] === "M") mux = "M"; else if (m[2] && m[2][0] === "m") mux = parseInt(m[2].slice(1), 10);
+      const start = parseInt(m[3], 10) || 0, len = parseInt(m[4], 10) || 1;
+      (m[10] || "").split(",").map((s) => sanitizeNode(s)).filter((s) => s && s !== "Vector__XXX").forEach((r) => { if (!cur.recv.includes(r)) cur.recv.push(r); });
+      cur.sig.push(mux === undefined ? [name, start, len, null] : [name, start, len, null, mux]); continue;
+    }
+    m = line.match(/^\s*CM_\s+BO_\s+(\d+)\s+"([\s\S]*?)"\s*;?/);
+    if (m) { const { id } = dbcRealId(m[1]); const t = msgs.find((x) => x.id === id); if (t) { if (/^L1:\s*/.test(m[2])) t.l1 = m[2].replace(/^L1:\s*/, "").trim(); else t.note = m[2].trim(); } continue; }
+    m = line.match(/^\s*BA_\s+"GenMsgCycleTime"\s+BO_\s+(\d+)\s+([\d.]+)/);
+    if (m) { const { id } = dbcRealId(m[1]); cyc[id] = Math.round(parseFloat(m[2])); continue; }
+  }
+  msgs.forEach((mm) => { if (cyc[mm.id] != null) mm.cyc = cyc[mm.id]; });
+  return { msgs };
+}
+function ldfBlock(text, name) { const re = new RegExp(name + "\\s*\\{", "i"); const i = text.search(re); if (i < 0) return ""; let d = 0; const start = text.indexOf("{", i) + 1; for (let j = start - 1; j < text.length; j++) { if (text[j] === "{") d++; else if (text[j] === "}") { d--; if (d === 0) return text.slice(start, j); } } return ""; }
+function parseLdfText(text) {
+  const sigInfo = {}; ldfBlock(text, "Signals").split(";").forEach((s) => { const m = s.match(/(\w+)\s*:\s*(\d+)\s*,\s*[^,]+,\s*(.+)/); if (m) { const nodes = m[3].split(",").map((x) => sanitizeNode(x)).filter(Boolean); const pub = nodes.shift(); sigInfo[m[1]] = { size: parseInt(m[2], 10) || 1, pub, subs: nodes }; } });
+  const cyc = {}; (ldfBlock(text, "Schedule_Tables").match(/(\w+)\s+delay\s+([\d.]+)\s*ms/gi) || []).forEach((t) => { const mm = t.match(/(\w+)\s+delay\s+([\d.]+)/i); if (mm) cyc[mm[1]] = Math.round(parseFloat(mm[2])); });
+  const msgs = []; const framesBlk = ldfBlock(text, "Frames");
+  const frameRe = /(\w+)\s*:\s*(0x[0-9A-Fa-f]+|\d+)\s*,\s*(\w+)\s*,\s*(\d+)\s*\{([\s\S]*?)\}/g; let fm;
+  while ((fm = frameRe.exec(framesBlk))) {
+    const name = fm[1], id = fm[2].toLowerCase().startsWith("0x") ? parseInt(fm[2], 16) : parseInt(fm[2], 10), pub = sanitizeNode(fm[3]), dlc = parseInt(fm[4], 10) || 8;
+    const sig = [], recv = new Set();
+    fm[5].split(";").forEach((row) => { const rm = row.match(/(\w+)\s*,\s*(\d+)/); if (rm) { const info = sigInfo[rm[1]] || {}; (info.subs || []).forEach((r) => recv.add(r)); sig.push([rm[1], parseInt(rm[2], 10) || 0, info.size || 1, null]); } });
+    msgs.push({ name, id, ext: false, dir: "", cyc: cyc[name] != null ? cyc[name] : null, dlc, sig, note: "LIN frame", sender: pub || undefined, recv: Array.from(recv), l1: "" });
+  }
+  return { msgs };
+}
+function parseArxmlText(text) {
+  let doc; try { doc = new DOMParser().parseFromString(text, "application/xml"); } catch (e) { return { msgs: [] }; }
+  if (!doc || doc.getElementsByTagName("parsererror").length) return { msgs: [] };
+  const local = (el) => el.localName || String(el.nodeName).replace(/^.*:/, "");
+  const all = (name) => Array.from(doc.getElementsByTagName("*")).filter((e) => local(e) === name);
+  const childText = (el, name) => { for (const c of Array.from(el.children || [])) { if (local(c) === name) return (c.textContent || "").trim(); } return ""; };
+  const shortName = (el) => childText(el, "SHORT-NAME");
+  const lastRef = (ref) => { const t = (ref || "").trim(); const i = t.lastIndexOf("/"); return i >= 0 ? t.slice(i + 1) : t; };
+  const sigLen = {}; all("I-SIGNAL").forEach((s) => { const n = shortName(s); if (n) sigLen[n] = parseInt(childText(s, "LENGTH"), 10) || 1; });
+  const pduSigs = {}; all("I-SIGNAL-I-PDU").forEach((p) => { const pn = shortName(p); const arr = []; Array.from(p.getElementsByTagName("*")).filter((e) => local(e) === "I-SIGNAL-TO-I-PDU-MAPPING").forEach((mp) => { let sref = ""; Array.from(mp.getElementsByTagName("*")).forEach((e) => { if (local(e) === "I-SIGNAL-REF") sref = e.textContent; }); const sn = lastRef(sref); if (sn) arr.push([sn, parseInt(childText(mp, "START-POSITION"), 10) || 0]); }); if (pn) pduSigs[pn] = arr; });
+  const frameLen = {}; all("CAN-FRAME").forEach((f) => { const n = shortName(f); if (n) frameLen[n] = parseInt(childText(f, "FRAME-LENGTH"), 10) || 8; });
+  const msgs = [];
+  all("CAN-FRAME-TRIGGERING").forEach((ft) => {
+    const id = parseInt(childText(ft, "IDENTIFIER"), 10); if (isNaN(id)) return;
+    const ext = /EXTENDED/i.test(childText(ft, "CAN-ADDRESSING-MODE"));
+    let frameRef = ""; Array.from(ft.getElementsByTagName("*")).forEach((e) => { if (local(e) === "FRAME-REF") frameRef = e.textContent; });
+    const fname = lastRef(frameRef) || shortName(ft);
+    const pk = Object.keys(pduSigs); const key = pk.find((k) => k === fname) || pk.find((k) => k.replace(/_?PDU$/i, "") === fname) || pk.find((k) => k.indexOf(fname) >= 0 || fname.indexOf(k) >= 0);
+    const sig = key ? pduSigs[key].map(([sn, st]) => [sn, st, sigLen[sn] || 1, null]) : [];
+    msgs.push({ name: fname, id, ext, dir: "", cyc: null, dlc: frameLen[fname] || 8, sig, note: "imported from ARXML", sender: undefined, recv: [], l1: "" });
+  });
+  if (!msgs.length) { Object.keys(pduSigs).forEach((pn) => { msgs.push({ name: pn, id: 0, ext: false, dir: "", cyc: null, dlc: 8, sig: pduSigs[pn].map(([sn, st]) => [sn, st, sigLen[sn] || 1, null]), note: "imported from ARXML (PDU)", sender: undefined, recv: [], l1: "" }); }); }
+  return { msgs };
+}
+function parseBusFile(fileName, text) {
+  const ext = (String(fileName).split(".").pop() || "").toLowerCase();
+  if (ext === "dbc") return { fmt: "DBC", parsed: parseDbcText(text) };
+  if (ext === "ldf") return { fmt: "LDF", parsed: parseLdfText(text) };
+  if (ext === "arxml" || ext === "xml") return { fmt: "ARXML", parsed: parseArxmlText(text) };
+  if (/^\s*BO_\s/m.test(text)) return { fmt: "DBC", parsed: parseDbcText(text) };
+  if (/LIN_description_file/i.test(text)) return { fmt: "LDF", parsed: parseLdfText(text) };
+  return { fmt: "ARXML", parsed: parseArxmlText(text) };
+}
+function mergeBusIntoKM(newMsgs, srcTag) {
+  const K = KM_STORE.data; if (!Array.isArray(K.msgs)) K.msgs = [];
+  let added = 0, updated = 0, signals = 0;
+  newMsgs.forEach((nm) => {
+    signals += (nm.sig || []).length;
+    const ex = K.msgs.find((m) => (nm.id && m.id === nm.id && !!m.ext === !!nm.ext) || String(m.name).toLowerCase() === String(nm.name).toLowerCase());
+    if (ex) {
+      ex.dlc = nm.dlc || ex.dlc; if (nm.cyc != null) ex.cyc = nm.cyc; if (nm.sender) ex.sender = nm.sender;
+      if (nm.recv && nm.recv.length) ex.recv = Array.from(new Set([...(ex.recv || []), ...nm.recv]));
+      if (nm.sig && nm.sig.length) ex.sig = nm.sig; if (nm.l1 && !ex.l1) ex.l1 = nm.l1; ex.note = ex.note || ("imported from " + srcTag); updated++;
+    } else { nm.note = nm.note || ("imported from " + srcTag); K.msgs.push(nm); added++; }
+  });
+  return { added, updated, signals };
+}
 function buildDcmFlArxml() {
   const K = KM_STORE.data, M = K.msgs;
   const e = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -3307,6 +3399,14 @@ const STANDARDS_STORE = { data: [
    Keyed by ECU id → flattened HW rows [{ level, id, title, statement, from, alloc, icd? }]; seeded from the
    allocation on first edit, then authoritative for that ECU. */
 const HWREQ_STORE = { data: {} };
+/* ---- Per-company persistence (Phase 2) --------------------------------------
+   collectStores / applyStores serialize every module-level working store into a
+   single plain object and restore it. The App layer adds its React-state parts
+   (node edits, review status, regulation edits, baselines) to build the full
+   "workspace" document that is saved per company. */
+const WS_STORES = { KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
+function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k] = JSON.parse(JSON.stringify(WS_STORES[k].data)); } catch (e) {} } return o; }
+function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } }
 const icdRowsToAoa = (groups) => { const aoa = [["Connector", "Signal / Interface", "Pins", "Class", "Dir", "Wired to", "From"]]; (groups || []).forEach((g) => (g.rows || []).forEach((r) => aoa.push([g.conn, r.signal, r.pins, r.cls, r.dir, r.wired, r.from]))); return aoa; };
 const icdAoaToGroups = (aoa) => { const H = (aoa[0] || []).map((x) => String(x).toLowerCase()); const ci = (frag) => H.findIndex((h) => h.indexOf(frag) >= 0); const iC = ci("connect"), iS = ci("signal") >= 0 ? ci("signal") : ci("interface"), iP = ci("pin"), iCl = ci("class"), iD = ci("dir"), iW = ci("wired") >= 0 ? ci("wired") : ci("to"), iF = ci("from"); const groups = []; aoa.slice(1).forEach((row) => { if (!row || !row.length) return; const conn = String(row[iC] != null ? row[iC] : "—") || "—"; let g = groups.find((x) => x.conn === conn); if (!g) { g = { conn, rows: [] }; groups.push(g); } g.rows.push({ signal: String(row[iS] != null ? row[iS] : ""), pins: Number(row[iP]) || 1, cls: String(row[iCl] != null ? row[iCl] : "—"), dir: String(row[iD] != null ? row[iD] : "—"), wired: String(row[iW] != null ? row[iW] : "—"), from: String(row[iF] != null ? row[iF] : "—") }); }); return groups.filter((g) => g.rows.length); };
 
@@ -3644,6 +3744,17 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       alert("Imported " + parsed.msgs.length + " messages (" + parsed.msgs.reduce((s, m) => s + m.sig.length, 0) + " signals). Applied everywhere.");
     } catch (e) { alert("Import failed: " + (e && e.message ? e.message : e)); }
   };
+  const busFileRef = useRef(null);
+  const importBus = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { fmt, parsed } = parseBusFile(file.name, text);
+      if (!parsed || !parsed.msgs || !parsed.msgs.length) { alert("No CAN/LIN messages found in " + file.name + ".\n\nDBC and LDF are fully supported; ARXML import is best-effort (CAN frames + I-signal PDU mappings)."); return; }
+      const r = mergeBusIntoKM(parsed.msgs, fmt); kmBump();
+      alert("Imported " + file.name + " (" + fmt + "):\n" + r.added + " new message(s), " + r.updated + " updated, " + r.signals + " signal(s).\n\nMerged into the K-Matrix — applied to the ARXML and all exports. The file stayed in your browser (nothing uploaded).");
+    } catch (e) { alert("Import failed: " + (e && e.message ? e.message : e)); }
+  };
   const kmJsonRef = useRef(null);
   const saveKmJson = () => dl("K-Matrix.json", JSON.stringify(KM_STORE.data, null, 2), "application/json");
   const loadKmJson = async (file) => {
@@ -3671,8 +3782,10 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
               <div style={{ fontWeight: 700, color: "#101828", fontSize: 13 }}>K-Matrix · {ecuId ? KM_ECU_TO_SHORT(ecuId) + " communication matrix" : "aggregate communication matrix"} <span style={{ fontWeight: 400, color: "#98A2B3", fontSize: 11 }}>{ecuId ? "· this ECU's Tx/Rx frames (" + viewMsgs.length + " of " + KM.msgs.length + ") · edits apply to the shared cluster matrix" : (canWrite ? "· collected from every L1's Interfaces & Signals · edits apply everywhere (ARXML, Excel, exports)" : "· read-only (Viewer)")}</span></div>
               <div className="flex items-center gap-2">
                 <input ref={kmFileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importKMatrix(f); }} />
+                <input ref={busFileRef} type="file" accept=".dbc,.ldf,.arxml,.xml" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importBus(f); }} />
                 {canWrite && <button onClick={autoPack} title="Auto-assign every signal's start bit (base then mux groups) and grow DLC to fit — fixes overlaps, gaps and overflow" style={{ ...btnS, color: "#067647", borderColor: "#A6F4C5" }}>Auto-pack bits</button>}
-                {canWrite && <button onClick={() => kmFileRef.current && kmFileRef.current.click()} title="Import a K-Matrix Excel file — replaces the live data (use for major changes)" style={{ ...btnS, color: "#B54708", borderColor: "#F0C9A0" }}>Import</button>}
+                {canWrite && <button onClick={() => busFileRef.current && busFileRef.current.click()} title="Import a real bus database — DBC, LDF or ARXML — and merge its ECUs, messages and signals into the K-Matrix. Parsed in your browser; the file is never uploaded." style={{ ...btnS, color: "#0E7090", borderColor: "#7CD4FD" }}>Import DBC/LDF/ARXML</button>}
+                {canWrite && <button onClick={() => kmFileRef.current && kmFileRef.current.click()} title="Import a K-Matrix Excel file — replaces the live data (use for major changes)" style={{ ...btnS, color: "#B54708", borderColor: "#F0C9A0" }}>Import Excel</button>}
                 <button onClick={genKMatrix} title="Export the current K-Matrix as Excel" style={btnS}>Export</button>
                 <button onClick={exportDbc} title="Export a Vector CAN database (.dbc) from the current K-Matrix" style={{ ...btnS, color: "#7A5AF8", borderColor: "#D9D6FE" }}>DBC</button>
                 <button onClick={exportLdf} title="Export a LIN Description File (.ldf) scaffold from the current K-Matrix" style={{ ...btnS, color: "#7A5AF8", borderColor: "#D9D6FE" }}>LDF</button>
@@ -6840,6 +6953,67 @@ export default function App() {
   const [impactSel, setImpactSel] = useState(null);        // focus: L1 id or "KM:<frameName>"
   const [impactQ, setImpactQ] = useState("");              // focus picker search
   const [kmOpenReq, setKmOpenReq] = useState(null);        // ECU id whose K-Matrix modal should auto-open (from Impact frame click)
+  /* ===== Per-company cloud persistence (Phase 2) ===============================
+     The whole working state (every store + node edits, review status, regulation
+     edits, baselines) is one "workspace" document saved per company. It talks to
+     an optional host-provided API on window.__sdvWorkspaceApi ({ getOrgId, load,
+     save }); when that's absent (e.g. standalone artifact preview) persistence is
+     a silent no-op and the app runs session-only exactly as before. Save is
+     event-driven + debounced (no tight interval) to keep the UI responsive. */
+  const WSAPI = (typeof window !== "undefined" && window.__sdvWorkspaceApi) || null;
+  const [, setWsHydrated] = useState(false);
+  const wsReadyRef = useRef(false);   // true once initial load finished (gates autosave)
+  const wsOrgRef = useRef(null);
+  const wsSigRef = useRef("");        // signature of last-saved doc
+  const wsTimerRef = useRef(null);
+  const collectAll = useCallback(() => ({
+    v: 2,
+    ...collectStores(),
+    nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { statement: n.props?.statement }])),
+    reqStatus, regEdits, baselines,
+  }), [nodes, reqStatus, regEdits, baselines]);
+  const applyAll = useCallback((d) => {
+    if (!d) return;
+    applyStores(d);
+    if (d.reqStatus) setReqStatus(clone(d.reqStatus));
+    if (d.regEdits) setRegEdits(clone(d.regEdits));
+    if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
+    if (d.nodeEdits) setNodes((prev) => { const nx = { ...prev }; Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement: e.statement }, edited: true }; }); return nx; });
+    kmForceRef.current++;
+  }, []);
+  const collectRef = useRef(collectAll); collectRef.current = collectAll;
+  const wsBadge = useCallback((txt) => { if (typeof document === "undefined") return; let el = document.getElementById("ws-status-badge"); if (!el) { el = document.createElement("div"); el.id = "ws-status-badge"; el.style.cssText = "position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:9998;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#475467;background:rgba(255,255,255,.94);border:1px solid #E4E7EC;border-radius:10px;padding:4px 12px;box-shadow:0 6px 20px rgba(16,24,40,.12);pointer-events:none"; document.body.appendChild(el); } el.textContent = txt || ""; el.style.display = txt ? "block" : "none"; }, []);
+  // initial hydrate
+  useEffect(() => {
+    if (!WSAPI) { wsReadyRef.current = true; setWsHydrated(true); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const org = await WSAPI.getOrgId(); if (!alive) return; wsOrgRef.current = org;
+        if (org) { const data = await WSAPI.load(org); if (!alive) return; if (data) { applyAll(data); } }
+      } catch (e) { /* offline / not configured: run session-only */ }
+      finally { if (alive) { wsReadyRef.current = true; setWsHydrated(true); try { wsSigRef.current = JSON.stringify(collectRef.current()); } catch (e) {} } }
+    })();
+    return () => { alive = false; };
+  }, []);
+  // event-driven debounced autosave
+  useEffect(() => {
+    if (!WSAPI) return;
+    const maybeSave = async () => {
+      if (!wsReadyRef.current || !wsOrgRef.current) return;
+      let doc; try { doc = collectRef.current(); } catch (e) { return; }
+      const sig = JSON.stringify(doc); if (sig === wsSigRef.current) return;
+      wsSigRef.current = sig; wsBadge("Saving…");
+      try { await WSAPI.save(wsOrgRef.current, doc); wsBadge("Saved " + new Date().toLocaleTimeString()); }
+      catch (e) { wsBadge("Save failed — will retry"); wsSigRef.current = ""; }
+    };
+    const schedule = () => { if (!wsReadyRef.current) return; clearTimeout(wsTimerRef.current); wsTimerRef.current = setTimeout(maybeSave, 1800); };
+    const onVis = () => { if (document.visibilityState === "hidden") maybeSave(); };
+    document.addEventListener("pointerup", schedule, true);
+    document.addEventListener("keyup", schedule, true);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { document.removeEventListener("pointerup", schedule, true); document.removeEventListener("keyup", schedule, true); document.removeEventListener("visibilitychange", onVis); clearTimeout(wsTimerRef.current); };
+  }, []);
   const snapshotWorking = useCallback(() => ({
     km: clone(KM_STORE.data),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { statement: n.props?.statement }])),
