@@ -8234,7 +8234,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           </button>
           <button className="text-left truncate flex-1" onClick={() => { refocus(id); if (n?.type === "Requirement") { pendingReaderScrollRef.current = id; setView("reader"); } }}
             style={{ fontSize: 12, color: ((selected && activeSystem === id) || selected === id) ? "#101828" : stub ? "#98A2B3" : "#344054", fontWeight: ((selected && activeSystem === id) || selected === id) ? 600 : 400 }}>
-            {(n && /L1/.test(n.subtype || "")) ? titleCase(n.label) : n.label}
+            {titleCase(n ? n.label : "")}
           </button>
           {gap && <AlertTriangle size={11} color="#B42318" />}
         </div>
