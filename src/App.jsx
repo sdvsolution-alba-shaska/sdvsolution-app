@@ -8083,6 +8083,9 @@ Use these only when the user explicitly asks to add/change/remove model data. Co
 - Add interfaces to an ECU (one per line: name, class, protocol, direction, endpoint[, connector][, pins]): <action>{"type":"addInterfaces","ecu":"ECU-CZM","rows":"Platform CAN, CAN, CAN FD, Bidir, Central Compute Unit, J1356.4, 2\\nRoof LIN, LIN, LIN, Bidir, Roof module, J1356.5, 1"}</action>
 - Edit a node's properties: <action>{"type":"editNode","id":"CZM-IF-001","props":{"protocol":"CAN FD","pins":2}}</action>
 - Delete a node: <action>{"type":"deleteNode","id":"CZM-IF-999"}</action>
+- Add system requirements under a function (L1): <action>{"type":"addSysReq","l1":"L1-BODY-00187","items":[{"title":"Fold on lock","statement":"When the vehicle is locked, the system shall fold both exterior mirrors within 3 s.","ears":"Event-driven","method":"Test","asil":"QM"},{"title":"...","statement":"..."}]}</action> \u2014 l1 may be a function id (L1-...) or its exact name; each item needs at least a statement (write it in EARS form). Use a single item with top-level fields, or many via "items".
+- Add software requirements under a function (L1): <action>{"type":"addSwReq","l1":"Auto-Dim Interior Mirror","items":[{"title":"...","statement":"The software shall ...","ears":"Ubiquitous","method":"Test"}]}</action>
+When turning a dropped Word/Excel spec into requirements: map each spec item to the right function (L1), rewrite it as one testable EARS statement (fields: title, statement, ears, method, criterion, rationale, asil), then emit addSysReq / addSwReq. Briefly list what you're adding first; if the target function is unclear, ask instead of guessing.
 If role = Viewer, do NOT emit write actions \u2014 tell the user to switch to Owner (top-right role toggle).
 
 The user may attach files (PDF, Excel, Word, CSV, text). Their extracted text is included in the message under "[Attached files]". Read them and, when the user asks you to apply/import/update something from a file, use the write actions above to make the change (e.g., turn a spreadsheet of interfaces into addInterfaces rows, correct a property from a spec with editNode). Always state, in one sentence, what you are changing before the action tag, and if a file is ambiguous, summarize what you found and ask before writing.
@@ -8137,6 +8140,27 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           if (!canWrite) { done.push("write blocked — switch from Viewer to Owner to edit"); }
           else if (!nodes[a.id]) { done.push(`unknown node ${a.id}`); }
           else { const lbl = nodes[a.id].label || a.id; setNodes((prev) => { const c = { ...prev }; delete c[a.id]; return c; }); setEdges((prev) => prev.filter((e) => e.s !== a.id && e.t !== a.id)); if (selected === a.id) setSelected(null); notify(`Assistant deleted ${lbl}.`); done.push(`deleted ${lbl}`); }
+        }
+        /* ---- Add system / software requirements (e.g. from a dropped spec) ---- */
+        else if ((a.type === "addSysReq" || a.type === "addSwReq") && a.l1) {
+          if (!canWrite) { done.push("write blocked — switch from Viewer to Owner to edit"); }
+          else {
+            const isSys = a.type === "addSysReq";
+            const store = isSys ? SYSREQ_STORE : SWREQ_STORE, prefix = isSys ? "SYS-USR-" : "SW-USR-";
+            // resolve L1: accept an exact id (L1-...) or match a function by label
+            let l1 = a.l1;
+            if (!nodes[l1]) { const match = Object.values(nodes).find((nn) => isL1(nn) && String(nn.label || "").toLowerCase() === String(a.l1).toLowerCase()); if (match) l1 = match.id; }
+            if (!nodes[l1]) { done.push(`unknown function "${a.l1}" for ${isSys ? "system" : "software"} requirement`); }
+            else {
+              const items = Array.isArray(a.items) && a.items.length ? a.items : [{ title: a.title, statement: a.statement, ears: a.ears, method: a.method, criterion: a.criterion, rationale: a.rationale, asil: a.asil }];
+              if (!store.data[l1]) store.data[l1] = [];
+              const arr = store.data[l1]; let cnt = 0;
+              items.forEach((it) => { if (!it || !(it.statement || it.title)) return; arr.push({ id: prefix + l1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: it.title || "New requirement", ears: it.ears || "Event-driven", statement: it.statement || "", method: it.method || "Test", criterion: it.criterion || "", rationale: it.rationale || "", asil: it.asil || "QM" }); cnt++; });
+              if (isSys) setSysReqV((v) => v + 1); else setSwReqV((v) => v + 1);
+              notify(`Assistant added ${cnt} ${isSys ? "system" : "software"} requirement(s) to ${nodes[l1].label || l1}.`);
+              done.push(`added ${cnt} ${isSys ? "system" : "software"} requirement(s) to ${nodes[l1].label || l1}`);
+            }
+          }
         }
       } catch (e) { /* ignore malformed action */ }
     }
