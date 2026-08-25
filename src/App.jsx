@@ -2970,7 +2970,7 @@ function ensurePdfJs() {
     document.head.appendChild(s);
   });
 }
-const CHAT_FILE_RE = /\.(pdf|xlsx|xls|csv|docx|txt|md)$/i;
+const CHAT_FILE_RE = /\.(pdf|xlsx|xls|csv|docx|txt|md|dbc|ldf|arxml|xml)$/i;
 async function parseAttachmentFile(file) {
   const name = (file && file.name) || "file";
   const ext = (name.split(".").pop() || "").toLowerCase();
@@ -2994,6 +2994,17 @@ async function parseAttachmentFile(file) {
       let out = "";
       for (let p = 1; p <= doc.numPages && out.length < CAP; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); out += tc.items.map((i) => i.str).join(" ") + "\n"; }
       return { name, kind: "pdf", text: cap(out) };
+    }
+    if (ext === "dbc" || ext === "ldf" || ext === "arxml" || ext === "xml") {
+      const raw = await file.text();
+      const { fmt, parsed } = parseBusFile(name, raw);
+      const msgs = (parsed && parsed.msgs) || [];
+      if (msgs.length) {
+        const nsig = msgs.reduce((s, m) => s + ((m.sig && m.sig.length) || 0), 0);
+        return { name, kind: "bus", fmt, busMsgs: msgs, text: fmt + " bus database: " + msgs.length + " message(s), " + nsig + " signal(s) — will merge into the K-Matrix." };
+      }
+      // .xml that isn't a recognizable bus file → fall back to raw text for the LLM
+      return { name, kind: ext, text: cap(raw) };
     }
     return { name, kind: ext || "text", text: cap(await file.text()) };
   } catch (e) {
@@ -8198,10 +8209,23 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
   const sendChat = async () => {
     const text = chatInput.trim();
     if ((!text && chatImages.length === 0 && chatFiles.length === 0) || chatBusy) return;
+    // Bus databases (DBC / LDF / ARXML) are merged straight into the K-Matrix —
+    // deterministic, no LLM needed. Everything else is sent to the assistant.
+    const busFiles = chatFiles.filter((f) => f.kind === "bus" && Array.isArray(f.busMsgs));
+    const docFiles = chatFiles.filter((f) => !(f.kind === "bus" && Array.isArray(f.busMsgs)));
+    let busSummary = "";
+    if (busFiles.length) {
+      if (!canWrite) { busSummary = "Bus import blocked — Owner only."; }
+      else {
+        const lines = busFiles.map((f) => { const r = mergeBusIntoKM(f.busMsgs, f.fmt || "bus"); return "• " + f.name + " (" + (f.fmt || "bus") + "): " + r.added + " new, " + r.updated + " updated, " + r.signals + " signal(s)"; });
+        kmBump();
+        busSummary = "Imported into the K-Matrix (applied to the ARXML and all exports):\n" + lines.join("\n");
+      }
+    }
     const imgHint = "Transcribe the pin-out in this screenshot into interfaces (name, class, protocol, direction, endpoint, connector, pins). If I am the Owner, add them to the relevant ECU with addInterfaces; otherwise show me the rows.";
-    const fileBlock = chatFiles.length
+    const fileBlock = docFiles.length
       ? "\n\n[Attached files — extracted text follows. Read them and, if I asked for changes, apply them using the actions available to you.]\n" +
-        chatFiles.map((f) => "--- " + f.name + " (" + f.kind + ") ---\n" + (f.error ? "[could not read: " + f.error + "]" : f.text)).join("\n\n")
+        docFiles.map((f) => "--- " + f.name + " (" + f.kind + ") ---\n" + (f.error ? "[could not read: " + f.error + "]" : f.text)).join("\n\n")
       : "";
     const fullText = ((text || "") + fileBlock).trim();
     const textForModel = fullText || (chatImages.length ? imgHint : "");
@@ -8212,7 +8236,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const displayContent = (text || "") + (fileNames.length ? ((text ? "\n" : "") + "📎 " + fileNames.join(", ")) : "");
     const userMsg = { role: "user", content: displayContent || "(screenshot attached)", apiContent, images: chatImages.map((im) => im.url) };
     const history = [...chatMsgs, userMsg];
-    setChatMsgs(history); setChatInput(""); setChatImages([]); setChatFiles([]); setChatBusy(true);
+    setChatMsgs(history); setChatInput(""); setChatImages([]); setChatFiles([]);
+    // Only bus files and nothing to ask the model → reply locally, skip the API.
+    if (busFiles.length && !text && !docFiles.length && chatImages.length === 0) {
+      setChatMsgs((prev) => [...prev, { role: "assistant", content: busSummary || "(nothing imported)" }]);
+      return;
+    }
+    setChatBusy(true);
     try {
       const resp = await fetch("/api/assistant", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -8223,10 +8253,10 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
       if (data && data.error) { throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "assistant error")); }
       const reply = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n") || "(no response)";
       const { clean, done } = runChatActions(reply);
-      const body = clean + (done.length ? `\n\n\u2192 ${done.join("; ")}.` : "");
+      const body = (busSummary ? busSummary + "\n\n" : "") + clean + (done.length ? `\n\n\u2192 ${done.join("; ")}.` : "");
       setChatMsgs((prev) => [...prev, { role: "assistant", content: body || "(done)" }]);
     } catch (e) {
-      setChatMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — the assistant service returned an error (" + (e && e.message || "error") + "). Make sure the backend proxy is deployed and ANTHROPIC_API_KEY is set in your hosting environment (see AUTH_SETUP.md)." }]);
+      setChatMsgs((prev) => [...prev, { role: "assistant", content: (busSummary ? busSummary + "\n\n" : "") + "Sorry — the assistant service returned an error (" + (e && e.message || "error") + "). Make sure the backend proxy is deployed and ANTHROPIC_API_KEY is set in your hosting environment (see AUTH_SETUP.md)." }]);
     } finally { setChatBusy(false); }
   };
 
@@ -9325,8 +9355,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                     {chatFileBusy && <span style={{ fontSize: 11, color: "#98A2B3", fontStyle: "italic", alignSelf: "center" }}>Reading file…</span>}
                   </div>)}
                 <div className="max-w-2xl mx-auto flex items-end gap-2" onDragOver={(e) => e.preventDefault()} onDrop={onChatDrop}>
-                  <input ref={chatFileRef} type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md" style={{ display: "none" }} onChange={(e) => { const fs = e.target.files; e.target.value = ""; addChatFiles(fs); }} />
-                  <button onClick={() => chatFileRef.current && chatFileRef.current.click()} title="Attach a PDF, Excel or Word file"
+                  <input ref={chatFileRef} type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.dbc,.ldf,.arxml,.xml" style={{ display: "none" }} onChange={(e) => { const fs = e.target.files; e.target.value = ""; addChatFiles(fs); }} />
+                  <button onClick={() => chatFileRef.current && chatFileRef.current.click()} title="Attach a PDF, Excel, Word, or DBC / LDF / ARXML file"
                     className="flex items-center justify-center rounded-lg" style={{ width: 38, height: 38, fontSize: 16, color: "#667085", background: "#F9FAFB", border: "1px solid #D0D5DD", cursor: "pointer", flexShrink: 0 }}>📎</button>
                   <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                     onPaste={canWrite ? onChatPaste : undefined}
