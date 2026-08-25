@@ -88,6 +88,24 @@ then `npm install && npm run dev`.
   Company X can never read Company Y — even if someone tampers with the
   browser code, because the rule runs on Supabase's servers.
 
+## Assistant — enable file reading & changes (Anthropic API)
+
+The in-app **Assistant** (attach a PDF / Excel / Word file, or ask it to make
+changes) calls Claude through a secure serverless proxy at `api/assistant.js`
+so your API key never ships to the browser. To turn it on:
+
+1. Get an API key from **console.anthropic.com → API Keys** (`sk-ant-...`).
+2. Vercel → your project → **Settings → Environment Variables**, add:
+   - `ANTHROPIC_API_KEY` = your key  (Production + Preview)
+   - `ANTHROPIC_MODEL` = `claude-sonnet-5`  (optional — set a current model id)
+3. **Redeploy.** The `api/` folder deploys automatically as a Vercel function.
+
+Notes: API usage is billed to your Anthropic account. Attached files are read
+in the browser; only the extracted text is sent with your message. The Assistant
+can apply changes it's allowed to make (e.g. add interfaces, edit a node); it
+states what it's changing first. Without the key set, the Assistant returns a
+clear "backend not configured" message and the rest of the app is unaffected.
+
 ## Customizing
 
 - **Allow-list your own domain / admins**: edit `OWNER_EMAILS` in `AuthGate.jsx`.

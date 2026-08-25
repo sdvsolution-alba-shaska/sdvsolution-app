@@ -2947,6 +2947,59 @@ function ensureXLSXLib() {
     document.head.appendChild(s);
   });
 }
+/* ---- Assistant file attachments: read PDF / Word / Excel in the browser -------
+   Load parsers on demand from CDN (same pattern as XLSX) and extract plain text
+   so the Assistant can read the file and act on it. Files stay in the browser. */
+function ensureMammoth() {
+  return new Promise((resolve, reject) => {
+    if (window.mammoth) return resolve(window.mammoth);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+    s.onload = () => window.mammoth ? resolve(window.mammoth) : reject(new Error("Word reader unavailable"));
+    s.onerror = () => reject(new Error("Word reader load failed"));
+    document.head.appendChild(s);
+  });
+}
+function ensurePdfJs() {
+  return new Promise((resolve, reject) => {
+    if (window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = () => { if (window.pdfjsLib) { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; } catch (e) {} resolve(window.pdfjsLib); } else reject(new Error("PDF reader unavailable")); };
+    s.onerror = () => reject(new Error("PDF reader load failed"));
+    document.head.appendChild(s);
+  });
+}
+const CHAT_FILE_RE = /\.(pdf|xlsx|xls|csv|docx|txt|md)$/i;
+async function parseAttachmentFile(file) {
+  const name = (file && file.name) || "file";
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  const CAP = 20000;
+  const cap = (t) => { t = String(t || ""); return t.length > CAP ? t.slice(0, CAP) + "\n…[truncated]" : t; };
+  try {
+    if (ext === "xlsx" || ext === "xls" || ext === "csv") {
+      const XLSX = await ensureXLSXLib();
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const parts = wb.SheetNames.map((sn) => "## Sheet: " + sn + "\n" + XLSX.utils.sheet_to_csv(wb.Sheets[sn]));
+      return { name, kind: "excel", text: cap(parts.join("\n\n")) };
+    }
+    if (ext === "docx") {
+      const mammoth = await ensureMammoth();
+      const out = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+      return { name, kind: "word", text: cap(out && out.value) };
+    }
+    if (ext === "pdf") {
+      const pdfjs = await ensurePdfJs();
+      const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      let out = "";
+      for (let p = 1; p <= doc.numPages && out.length < CAP; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); out += tc.items.map((i) => i.str).join(" ") + "\n"; }
+      return { name, kind: "pdf", text: cap(out) };
+    }
+    return { name, kind: ext || "text", text: cap(await file.text()) };
+  } catch (e) {
+    return { name, kind: ext || "file", text: "", error: (e && e.message) || String(e) };
+  }
+}
 function kmatrixData() {
   const K = KM_STORE.data, M = K.msgs;
   const LINm = Object.fromEntries(K.lin.map(([n, f, o, u]) => [n, [f, o, u]]));
@@ -6788,6 +6841,9 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatImages, setChatImages] = useState([]); // pasted/attached screenshots [{url, media_type, data}]
+  const [chatFiles, setChatFiles] = useState([]); // attached PDF/Excel/Word [{name, kind, text, error?}]
+  const [chatFileBusy, setChatFileBusy] = useState(false); // reading an attachment
+  const chatFileRef = useRef(null); // hidden file input for attachments
   const chatScrollRef = useRef(null); // Assistant message list — auto-scrolls to newest
   const [regEdits, setRegEdits] = useState({}); // regulation lifecycle: { [reqId]: { [code]: "approved" | "removed" } }
   const [regRegion, setRegRegion] = useState(() => new Set()); // region filter (empty = all)
@@ -8028,6 +8084,8 @@ Use these only when the user explicitly asks to add/change/remove model data. Co
 - Edit a node's properties: <action>{"type":"editNode","id":"CZM-IF-001","props":{"protocol":"CAN FD","pins":2}}</action>
 - Delete a node: <action>{"type":"deleteNode","id":"CZM-IF-999"}</action>
 If role = Viewer, do NOT emit write actions \u2014 tell the user to switch to Owner (top-right role toggle).
+
+The user may attach files (PDF, Excel, Word, CSV, text). Their extracted text is included in the message under "[Attached files]". Read them and, when the user asks you to apply/import/update something from a file, use the write actions above to make the change (e.g., turn a spreadsheet of interfaces into addInterfaces rows, correct a property from a spec with editNode). Always state, in one sentence, what you are changing before the action tag, and if a file is ambiguous, summarize what you found and ask before writing.
 Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Module." <action>{"type":"select","id":"ECU-CZM"}</action>`;
   };
   const VIEW_MAP = { blocks: "blocks", graph: "tree", tree: "tree", topology: "deploy", deploy: "deploy", logicals: "logicals", table: "table", reader: "reader", assistant: "assistant" };
@@ -8096,28 +8154,55 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     for (const it of items) { if (it.type && it.type.indexOf("image") === 0) { const f = it.getAsFile(); if (f) imgs.push(f); } }
     if (imgs.length) { e.preventDefault(); addChatImages(imgs); }
   };
+  /* Accept dropped/attached PDF, Excel, Word (and txt/csv). Read in the browser
+     and keep the extracted text so the Assistant can act on it. */
+  const addChatFiles = async (files) => {
+    const list = Array.from(files || []).filter((f) => CHAT_FILE_RE.test(f.name || ""));
+    if (!list.length) return;
+    setChatFileBusy(true);
+    for (const f of list) { const parsed = await parseAttachmentFile(f); setChatFiles((prev) => [...prev, parsed]); }
+    setChatFileBusy(false);
+  };
+  const onChatDrop = (e) => {
+    e.preventDefault();
+    const dt = e.dataTransfer; if (!dt || !dt.files || !dt.files.length) return;
+    const imgs = [], docs = [];
+    Array.from(dt.files).forEach((f) => { if (/^image\//.test(f.type)) imgs.push(f); else docs.push(f); });
+    if (imgs.length) addChatImages(imgs);
+    if (docs.length) addChatFiles(docs);
+  };
   const sendChat = async () => {
     const text = chatInput.trim();
-    if ((!text && chatImages.length === 0) || chatBusy) return;
+    if ((!text && chatImages.length === 0 && chatFiles.length === 0) || chatBusy) return;
+    const imgHint = "Transcribe the pin-out in this screenshot into interfaces (name, class, protocol, direction, endpoint, connector, pins). If I am the Owner, add them to the relevant ECU with addInterfaces; otherwise show me the rows.";
+    const fileBlock = chatFiles.length
+      ? "\n\n[Attached files — extracted text follows. Read them and, if I asked for changes, apply them using the actions available to you.]\n" +
+        chatFiles.map((f) => "--- " + f.name + " (" + f.kind + ") ---\n" + (f.error ? "[could not read: " + f.error + "]" : f.text)).join("\n\n")
+      : "";
+    const fullText = ((text || "") + fileBlock).trim();
+    const textForModel = fullText || (chatImages.length ? imgHint : "");
     const apiContent = chatImages.length
-      ? [...chatImages.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } })), { type: "text", text: text || "Transcribe the pin-out in this screenshot into interfaces (name, class, protocol, direction, endpoint, connector, pins). If I am the Owner, add them to the relevant ECU with addInterfaces; otherwise show me the rows." }]
-      : text;
-    const userMsg = { role: "user", content: text || "(screenshot attached)", apiContent, images: chatImages.map((im) => im.url) };
+      ? [...chatImages.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } })), { type: "text", text: textForModel || imgHint }]
+      : textForModel;
+    const fileNames = chatFiles.map((f) => f.name);
+    const displayContent = (text || "") + (fileNames.length ? ((text ? "\n" : "") + "📎 " + fileNames.join(", ")) : "");
+    const userMsg = { role: "user", content: displayContent || "(screenshot attached)", apiContent, images: chatImages.map((im) => im.url) };
     const history = [...chatMsgs, userMsg];
-    setChatMsgs(history); setChatInput(""); setChatImages([]); setChatBusy(true);
+    setChatMsgs(history); setChatInput(""); setChatImages([]); setChatFiles([]); setChatBusy(true);
     try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("/api/assistant", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, system: buildAssistantContext(),
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, system: buildAssistantContext(),
           messages: history.map((m) => ({ role: m.role, content: m.apiContent || m.content })) }),
       });
       const data = await resp.json();
+      if (data && data.error) { throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "assistant error")); }
       const reply = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n") || "(no response)";
       const { clean, done } = runChatActions(reply);
       const body = clean + (done.length ? `\n\n\u2192 ${done.join("; ")}.` : "");
       setChatMsgs((prev) => [...prev, { role: "assistant", content: body || "(done)" }]);
     } catch (e) {
-      setChatMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — I couldn't reach the assistant service (" + (e && e.message || "error") + "). In a deployment this would route through your backend." }]);
+      setChatMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — the assistant service returned an error (" + (e && e.message || "error") + "). Make sure the backend proxy is deployed and ANTHROPIC_API_KEY is set in your hosting environment (see AUTH_SETUP.md)." }]);
     } finally { setChatBusy(false); }
   };
 
@@ -9162,7 +9247,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#101828" }}>SDVsolution Assistant</span>
                 </div>
                 <p style={{ fontSize: 12, color: "#667085", marginTop: 2 }}>
-                  Ask about this project — ECUs, requirements, ASIL/safety, interfaces, regulations — or tell it to navigate ("show me the CZM", "go to Logicals"). Grounded in the live data; classifications are proposed.
+                  Ask about this project — ECUs, requirements, ASIL/safety, interfaces, regulations — or tell it to navigate ("show me the CZM", "go to Logicals"). Attach a PDF, Excel or Word file (📎 or drag it in) and it will read the file and apply the changes you ask for. Grounded in the live data; classifications are proposed.
                 </p>
               </div>
               <div ref={chatScrollRef} className="flex-1 overflow-auto px-6 py-4">
@@ -9205,15 +9290,28 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           style={{ position: "absolute", top: -6, right: -6, background: "#fff", border: "1px solid #E4E7EC", borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} color="#667085" /></button>
                       </div>))}
                   </div>)}
-                <div className="max-w-2xl mx-auto flex items-end gap-2">
+                {(chatFiles.length > 0 || chatFileBusy) && (
+                  <div className="max-w-2xl mx-auto flex gap-2 flex-wrap mb-2">
+                    {chatFiles.map((f, k) => (
+                      <div key={k} className="flex items-center gap-1.5" style={{ fontSize: 11, color: f.error ? "#B42318" : "#344054", background: "#F2F4F7", border: "1px solid #E4E7EC", borderRadius: 8, padding: "4px 8px" }} title={f.error ? "Could not read: " + f.error : (f.text ? f.text.slice(0, 240) : "")}>
+                        <span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: 8.5, color: "#667085" }}>{f.kind}</span>
+                        <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                        <button onClick={() => setChatFiles((prev) => prev.filter((_, j) => j !== k))} title="Remove" style={{ display: "flex", cursor: "pointer", border: "none", background: "transparent", padding: 0 }}><X size={11} color="#98A2B3" /></button>
+                      </div>))}
+                    {chatFileBusy && <span style={{ fontSize: 11, color: "#98A2B3", fontStyle: "italic", alignSelf: "center" }}>Reading file…</span>}
+                  </div>)}
+                <div className="max-w-2xl mx-auto flex items-end gap-2" onDragOver={(e) => e.preventDefault()} onDrop={onChatDrop}>
+                  <input ref={chatFileRef} type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md" style={{ display: "none" }} onChange={(e) => { const fs = e.target.files; e.target.value = ""; addChatFiles(fs); }} />
+                  <button onClick={() => chatFileRef.current && chatFileRef.current.click()} title="Attach a PDF, Excel or Word file"
+                    className="flex items-center justify-center rounded-lg" style={{ width: 38, height: 38, fontSize: 16, color: "#667085", background: "#F9FAFB", border: "1px solid #D0D5DD", cursor: "pointer", flexShrink: 0 }}>📎</button>
                   <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                     onPaste={canWrite ? onChatPaste : undefined}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                    placeholder="Ask the SDVsolution Assistant…  (paste a screenshot to attach · Enter to send)"
+                    placeholder="Ask the Assistant… or drop a PDF / Excel / Word file to read &amp; apply · Enter to send"
                     rows={1} style={{ flex: 1, resize: "none", fontSize: 13, color: "#101828", padding: "9px 12px", borderRadius: 10, border: "1px solid #D0D5DD", outline: "none", fontFamily: "inherit", maxHeight: 120 }} />
-                  <button onClick={sendChat} disabled={chatBusy || (!chatInput.trim() && chatImages.length === 0)}
+                  <button onClick={sendChat} disabled={chatBusy || chatFileBusy || (!chatInput.trim() && chatImages.length === 0 && chatFiles.length === 0)}
                     className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg"
-                    style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: (chatBusy || (!chatInput.trim() && chatImages.length === 0)) ? "#98A2B3" : "#175CD3", cursor: (chatBusy || (!chatInput.trim() && chatImages.length === 0)) ? "not-allowed" : "pointer" }}>
+                    style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: (chatBusy || chatFileBusy || (!chatInput.trim() && chatImages.length === 0 && chatFiles.length === 0)) ? "#98A2B3" : "#175CD3", cursor: (chatBusy || chatFileBusy || (!chatInput.trim() && chatImages.length === 0 && chatFiles.length === 0)) ? "not-allowed" : "pointer" }}>
                     <Send size={14} /> Send
                   </button>
                 </div>
