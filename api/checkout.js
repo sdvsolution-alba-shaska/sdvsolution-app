@@ -1,0 +1,45 @@
+// POST /api/checkout — start a Stripe Checkout session for the signed-in company.
+// Body: { plan: "basic" | "pro", seats: number }. Auth: Bearer <supabase access token>.
+import { stripe, admin, PRICE, readJson, getCallerOrg, originOf, ok, err } from "./_billing.js";
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") return err(res, 405, "Method not allowed");
+  if (!process.env.STRIPE_SECRET_KEY) return err(res, 500, "STRIPE_SECRET_KEY not set");
+  try {
+    const ctx = await getCallerOrg(req);
+    if (ctx.error) return err(res, ctx.status, ctx.error);
+    const { membership, org } = ctx;
+    if (membership.role !== "owner" && membership.role !== "admin") return err(res, 403, "Only an owner or admin can manage billing.");
+
+    const body = await readJson(req);
+    const plan = String(body.plan || "").toLowerCase();
+    const seats = Math.max(1, parseInt(body.seats, 10) || 1);
+    const price = PRICE[plan];
+    if (!price) return err(res, 400, "Unknown or unpriced plan: " + plan);
+
+    // Reuse or create the Stripe customer for this org.
+    let customer = org.stripe_customer_id;
+    if (!customer) {
+      const c = await stripe.customers.create({ email: membership.email, name: org.name || org.domain, metadata: { org_id: org.id, domain: org.domain } });
+      customer = c.id;
+      await admin.from("organizations").update({ stripe_customer_id: customer }).eq("id", org.id);
+    }
+
+    const origin = originOf(req);
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer,
+      line_items: [{ price, quantity: seats }],
+      subscription_data: { trial_period_days: 14, metadata: { org_id: org.id, plan } },
+      client_reference_id: org.id,
+      metadata: { org_id: org.id, plan },
+      allow_promotion_codes: true,
+      billing_address_collection: "auto",
+      success_url: origin + "/?billing=success",
+      cancel_url: origin + "/?billing=cancel",
+    });
+    return ok(res, { url: session.url });
+  } catch (e) {
+    return err(res, 500, e && e.message ? e.message : String(e));
+  }
+}

@@ -121,7 +121,14 @@ export default function AuthGate({ children }) {
   // app so it can show a "Sign out" button in its own top bar next to App Feedback.
   if (session) {
     if (typeof window !== "undefined") {
-      window.__sdvAuth = { signOut: () => supabase.auth.signOut(), email: session.user?.email || "" };
+      window.__sdvAuth = {
+        signOut: () => supabase.auth.signOut(),
+        email: session.user?.email || "",
+        // Supabase access token — sent as Bearer to the billing serverless functions.
+        getToken: async () => { const { data } = await supabase.auth.getSession(); return data.session ? data.session.access_token : null; },
+        // The caller's organization row (RLS returns only their own) — plan, seats, status.
+        getOrg: async () => { const { data } = await supabase.from("organizations").select("*").maybeSingle(); return data || null; },
+      };
     }
     return <>{children}</>;
   }

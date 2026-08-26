@@ -6784,6 +6784,47 @@ export default function App() {
   const [seats, setSeats] = useState(3);
   const [acctMsg, setAcctMsg] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
+  /* ===== Stripe billing (Phase 3) — real checkout / portal via serverless funcs.
+     Uses window.__sdvAuth (set by AuthGate) for the access token + current org. */
+  const [billingBusy, setBillingBusy] = useState(false);
+  const billingApi = (typeof window !== "undefined" && window.__sdvAuth) || null;
+  const loadOrgPlan = useCallback(async () => {
+    if (!billingApi || !billingApi.getOrg) return;
+    try { const org = await billingApi.getOrg(); if (org) { const k = ({ trial: "Trial", basic: "Basic", pro: "Pro", enterprise: "Enterprise" })[String(org.plan || "trial").toLowerCase()] || "Trial"; setPlan(k); if (org.seats) setSeats(Math.max(1, org.seats)); } } catch (e) {}
+  }, [billingApi]);
+  const startCheckout = useCallback(async (planKey, nSeats) => {
+    if (!billingApi || !billingApi.getToken) { setAcctMsg("Billing isn't configured on the server yet (Stripe keys). See BILLING_SETUP.md."); return; }
+    setBillingBusy(true); setAcctMsg("Opening secure checkout…");
+    try {
+      const token = await billingApi.getToken();
+      const r = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: JSON.stringify({ plan: String(planKey).toLowerCase(), seats: nSeats || seats }) });
+      const d = await r.json();
+      if (d && d.url) { window.location.href = d.url; return; }
+      setAcctMsg(d && d.error ? d.error : "Could not start checkout."); setBillingBusy(false);
+    } catch (e) { setAcctMsg("Checkout error: " + (e && e.message ? e.message : e)); setBillingBusy(false); }
+  }, [billingApi, seats]);
+  const openPortal = useCallback(async () => {
+    if (!billingApi || !billingApi.getToken) { setAcctMsg("Billing isn't configured on the server yet. See BILLING_SETUP.md."); return; }
+    setBillingBusy(true); setAcctMsg("Opening billing portal…");
+    try {
+      const token = await billingApi.getToken();
+      const r = await fetch("/api/portal", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: "{}" });
+      const d = await r.json();
+      if (d && d.url) { window.location.href = d.url; return; }
+      setAcctMsg(d && d.error ? d.error : "Could not open the billing portal."); setBillingBusy(false);
+    } catch (e) { setAcctMsg("Portal error: " + (e && e.message ? e.message : e)); setBillingBusy(false); }
+  }, [billingApi]);
+  useEffect(() => { if (acctOpen) loadOrgPlan(); }, [acctOpen, loadOrgPlan]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    const wantPlan = (p.get("plan") || "").toLowerCase();
+    const billing = p.get("billing");
+    if (wantPlan === "basic" || wantPlan === "pro") { setAcctOpen(true); setAcctTab("plan"); }
+    if (billing === "success") { setAcctOpen(true); setAcctTab("billing"); setAcctMsg("Subscription updated — thank you! It can take a few seconds to reflect."); }
+    else if (billing === "cancel") { setAcctMsg("Checkout canceled — no charge was made."); }
+    if (wantPlan || billing) { try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {} }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [, setEcuReqV] = useState(0); // bump to re-render after ECUREQ_STORE edits
   const [hwEdit, setHwEdit] = useState(null); // { idx, field } — a DCM hardware requirement being edited inline
   const [, setHwV] = useState(0); // bump to re-render after HWREQ_STORE edits
@@ -8716,6 +8757,12 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             title="Report a bug or suggest an improvement">
             <MessageSquarePlus size={14} color="#9CFF3A" /> App Feedback
           </button>
+          <button onClick={() => { setAcctOpen(true); setAcctTab("plan"); }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
+            style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+            title="Plans, billing & subscription">
+            Billing
+          </button>
           {typeof window !== "undefined" && window.__sdvAuth && (
             <button onClick={() => window.__sdvAuth.signOut()}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
@@ -8729,14 +8776,17 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
       {acctOpen && (() => {
         const PLANS = [
           { k: "Trial", name: "Free trial", price: "$0", per: "14 days", accent: "#B54708", feats: ["Full features to evaluate", "Up to 100 requirements · 1 project", "1 editor · viewers free", "No card required"] },
-          { k: "Basic", name: "Basic", price: "$149", per: "per editor / month", accent: "#175CD3", feats: ["For teams starting their first program", "500 requirements · 1 project", "All exports & integrations (Word · Excel · ARXML · DBC · LDF · API)", "ISO 29148 quality gate", "Viewer licenses included"] },
-          { k: "Pro", name: "Pro", price: "$299", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Priority support · viewer licenses"] },
+          { k: "Basic", name: "Basic", price: "$249", per: "per editor / month", accent: "#175CD3", feats: ["For teams starting their first program", "500 requirements · 1 project", "All exports & integrations (Word · Excel · ARXML · DBC · LDF · API)", "ISO 29148 quality gate", "Viewer licenses included"] },
+          { k: "Pro", name: "Pro", price: "$399", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Priority support · viewer licenses"] },
           { k: "Enterprise", name: "Enterprise", price: "Custom", per: "per editor / month", accent: "#0E7090", feats: ["For certified programs & regulated industries", "Unlimited requirements & projects", "On-prem / private cloud (e.g. GovCloud)", "Connectors: DOORS · Polarion · codebeamer", "Advanced access control (SSO) · audit · SLA"] },
         ];
-        const priceNum = { Trial: 0, Basic: 149, Pro: 299, Enterprise: 0 }[plan] || 0;
+        const priceNum = { Trial: 0, Basic: 249, Pro: 399, Enterprise: 0 }[plan] || 0;
         const monthly = priceNum * seats;
-        const nextDate = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
-        const choose = (k) => { if (k === "Enterprise") { setAcctMsg("Thanks — sales will reach out (mock)."); } else { setPlan(k); setAcctMsg("Switched to " + k + " — checkout is a mock; no payment processed."); setAcctTab("billing"); } };
+        const choose = (k) => {
+          if (k === "Enterprise") { window.location.href = "mailto:contact@sdvsolution.com?subject=SDVsolution%20Enterprise%20enquiry"; return; }
+          if (k === "Trial") { setAcctMsg("You're on the free trial — pick Basic or Pro to subscribe."); return; }
+          startCheckout(k, seats);
+        };
         const tab = (k, label) => <button onClick={() => setAcctTab(k)} style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 12px", borderRadius: 7, border: "1px solid " + (acctTab === k ? "#175CD3" : "#E4E7EC"), background: acctTab === k ? "#EFF4FF" : "#fff", color: acctTab === k ? "#175CD3" : "#667085", cursor: "pointer" }}>{label}</button>;
         return (
           <div onClick={() => setAcctOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(16,24,40,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -8746,19 +8796,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <UserRound size={16} color="#175CD3" />
                   <span style={{ fontWeight: 700, color: "#101828", fontSize: 14 }}>Account &amp; Subscription</span>
                 </div>
-                <div className="flex items-center gap-2">{tab("plan", "Plan & Pricing")}{tab("billing", "Account & Billing")}{tab("signup", "Sign up")}
+                <div className="flex items-center gap-2">{tab("plan", "Plan & Pricing")}{tab("billing", "Account & Billing")}
                   <button onClick={() => setAcctOpen(false)} style={{ fontSize: 12, fontWeight: 600, color: "#344054", border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 11px", cursor: "pointer" }}>Close</button>
                 </div>
               </div>
               <div style={{ overflow: "auto", padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 11px", borderRadius: 8, marginBottom: 14, background: "#FEF6EE", border: "1px solid #FEDF89" }}>
-                  <span style={{ fontSize: 9.5, fontWeight: 800, color: "#B54708", background: "#FDE8CE", borderRadius: 4, padding: "2px 6px" }}>PREVIEW</span>
-                  <span style={{ fontSize: 11.5, color: "#475467" }}>This is a front-end mockup of the offering. Sign-up and checkout are simulated — no account is created and no payment is processed.</span>
-                </div>
                 {acctMsg && <div style={{ fontSize: 12, color: "#175CD3", fontWeight: 600, marginBottom: 10 }}>{acctMsg}</div>}
                 {acctTab === "plan" && (
                   <div>
-                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, per seat. Start free, upgrade any time. Prices are illustrative.</div>
+                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per editor. Viewers are always free. Paid plans include a 14‑day free trial; you can cancel any time.</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                       {PLANS.map((pl) => { const cur = pl.k === plan; return (
                         <div key={pl.k} style={{ border: "1px solid " + (cur ? pl.accent : "#E4E7EC"), borderRadius: 10, padding: "12px 12px", background: cur ? pl.accent + "0D" : "#fff", display: "flex", flexDirection: "column" }}>
@@ -8782,37 +8828,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <button onClick={() => setSeats((s) => s + 1)} style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #D0D5DD", fontWeight: 700, cursor: "pointer" }}>+</button>
                         <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#101828" }}>{priceNum ? "$" + monthly.toLocaleString() + " / mo" : (plan === "Enterprise" ? "Custom" : "$0")}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>{priceNum ? "Next charge " + nextDate + " · " + seats + " editor" + (seats === 1 ? "" : "s") + " × $" + priceNum + "/editor/mo" : "No charge on the current plan."}</div>
+                      <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>{priceNum ? seats + " editor" + (seats === 1 ? "" : "s") + " × $" + priceNum + "/editor/mo — seat and plan changes are confirmed at checkout or in the billing portal." : "No charge on the current plan."}</div>
                     </div>
-                    <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#101828", marginBottom: 6 }}>Payment method</div>
-                      <div style={{ fontSize: 12, color: "#475467" }}>Visa •••• 4242 · exp 04/29 <span style={{ color: "#98A2B3" }}>(mock)</span></div>
-                      <div className="flex gap-2" style={{ marginTop: 10 }}>
-                        <button onClick={() => setAcctMsg("Stripe billing portal would open here (mock).")} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer" }}>Manage billing</button>
-                        <button onClick={() => { setPlan("Trial"); setAcctMsg("Subscription cancelled — reverted to Free trial (mock)."); }} style={{ fontSize: 12, fontWeight: 700, color: "#B42318", background: "#fff", border: "1px solid #FDA29B", borderRadius: 7, padding: "6px 12px", cursor: "pointer" }}>Cancel subscription</button>
-                      </div>
+                    <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#101828", marginBottom: 4 }}>Payment, invoices &amp; cancellation</div>
+                      <div style={{ fontSize: 11.5, color: "#667085", marginBottom: 10 }}>Card details, receipts &amp; invoices, seat changes and cancellation are all handled in Stripe's secure billing portal.</div>
+                      {plan !== "Trial" && plan !== "Enterprise"
+                        ? <button disabled={billingBusy} onClick={openPortal} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "7px 14px", cursor: billingBusy ? "default" : "pointer", opacity: billingBusy ? 0.6 : 1 }}>Manage billing ↗</button>
+                        : <button onClick={() => setAcctTab("plan")} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "7px 14px", cursor: "pointer" }}>Choose a plan</button>}
                     </div>
-                    <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, overflow: "hidden" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#101828", padding: "8px 12px", background: "#F9FAFB", borderBottom: "1px solid #EAECF0" }}>Invoices (mock)</div>
-                      {[["2026-08-01", plan], ["2026-07-01", plan], ["2026-06-01", plan]].map(([d0, pn], i) => (
-                        <div key={i} className="flex items-center justify-between" style={{ padding: "7px 12px", borderTop: i ? "1px solid #F2F4F7" : "none", fontSize: 12 }}>
-                          <span style={{ color: "#344054" }}>{d0} · {pn === "Trial" ? "Free trial" : pn}</span>
-                          <span style={{ color: "#475467" }}>{priceNum ? "$" + monthly.toLocaleString() : "$0"} <button onClick={() => setAcctMsg("Invoice PDF would download (mock).")} style={{ color: "#175CD3", fontWeight: 600, marginLeft: 8 }}>PDF</button></span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {acctTab === "signup" && (
-                  <div style={{ maxWidth: 460 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#101828", marginBottom: 2 }}>Create your SDVsolution account</div>
-                    <div style={{ fontSize: 12, color: "#667085", marginBottom: 12 }}>Start a 14-day free trial. No card required.</div>
-                    <label style={{ fontSize: 10, fontWeight: 700, color: "#98A2B3", display: "block", marginBottom: 3 }}>Work email</label>
-                    <input value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} placeholder="you@company.com" style={{ width: "100%", boxSizing: "border-box", border: "1px solid #E4E7EC", borderRadius: 7, padding: "8px 11px", fontSize: 13, marginBottom: 10 }} />
-                    <button onClick={() => setAcctMsg(signupEmail.trim() ? "Verification email sent to " + signupEmail + " (mock). Then: verify → create workspace → pick a plan." : "Enter a work email first.")} style={{ width: "100%", fontSize: 13, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "9px 0", cursor: "pointer" }}>Start free trial</button>
-                    <div className="flex items-center gap-2" style={{ margin: "10px 0", color: "#98A2B3", fontSize: 11 }}><span style={{ flex: 1, height: 1, background: "#E4E7EC" }} />or<span style={{ flex: 1, height: 1, background: "#E4E7EC" }} /></div>
-                    <button onClick={() => setAcctMsg("SSO sign-up would start here (mock).")} style={{ width: "100%", fontSize: 12.5, fontWeight: 600, color: "#344054", background: "#fff", border: "1px solid #D0D5DD", borderRadius: 7, padding: "8px 0", cursor: "pointer" }}>Continue with Google / Microsoft SSO</button>
-                    <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 10, lineHeight: 1.5 }}>Next steps after sign-up: verify email → create your workspace → import or start a project → choose a monthly plan → invite your team.</div>
                   </div>
                 )}
               </div>
