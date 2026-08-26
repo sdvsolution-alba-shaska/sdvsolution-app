@@ -6814,6 +6814,7 @@ export default function App() {
       setAcctMsg(d && d.error ? d.error : "Could not open the billing portal."); setBillingBusy(false);
     } catch (e) { setAcctMsg("Portal error: " + (e && e.message ? e.message : e)); setBillingBusy(false); }
   }, [billingApi]);
+  useEffect(() => { loadOrgPlan(); }, [loadOrgPlan]); // load plan on start so demo-gating reflects the real plan
   useEffect(() => { if (acctOpen) loadOrgPlan(); }, [acctOpen, loadOrgPlan]);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -7532,6 +7533,19 @@ export default function App() {
   const refocus = applyFocus;
   /* Resolve the L0 system a node belongs to (itself if it is an L0), for the graph Reset button. */
   const l0Of = (id) => { if (!id) return ""; if (/^L0-/.test(String(id))) return id; const n = getN(id), o = getN(originL1(id) || ""); return (n && n.props && n.props.parentL0) || (o && o.props && o.props.parentL0) || ""; };
+  /* ===== Free-trial demo scope =====================================================
+     On the Free trial (plan "Trial") the app is a limited demo: only the Occupant
+     Visibility feature family (L0-BODY-008) and the four Door Control Modules are
+     openable. The whole tree still renders and expands; other rows are greyed and
+     non-clickable. Paid plans (Basic/Pro/Enterprise) get everything. */
+  const DEMO_L0 = "L0-BODY-008";
+  const DEMO_ECUS = new Set(["ECU-DCM-FL", "ECU-DCM-FR", "ECU-DCM-RL", "ECU-DCM-RR"]);
+  // Platform staff (SDVsolution) always get full access, regardless of plan.
+  const authEmail = ((typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "").toLowerCase();
+  const isStaff = /@sdvsolution\.com$/.test(authEmail) || authEmail === "gshaska@gmail.com";
+  const demoLocked = plan === "Trial" && !isStaff && typeof window !== "undefined" && !!window.__sdvAuth;
+  const featureAllowed = (id) => !demoLocked || id === DEMO_L0 || l0Of(id) === DEMO_L0;
+  const ecuAllowed = (ecuId) => !demoLocked || DEMO_ECUS.has(ecuId);
   /* Home target: the node's L0 system if it has one; otherwise its parent ECU (for hardware/harness nodes). */
   const homeTarget = (cur) => {
     const l0 = l0Of(cur);
@@ -8412,10 +8426,14 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             style={{ visibility: kids.length ? "visible" : "hidden", color: "#98A2B3" }}>
             {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           </button>
-          <button className="text-left truncate flex-1" onClick={() => { refocus(id); if (n?.type === "Requirement") { pendingReaderScrollRef.current = id; setView("reader"); } }}
-            style={{ fontSize: 12, color: ((selected && activeSystem === id) || selected === id) ? "#101828" : stub ? "#98A2B3" : "#344054", fontWeight: ((selected && activeSystem === id) || selected === id) ? 600 : 400 }}>
+          {(() => { const locked = !featureAllowed(id); return (
+          <button className="text-left truncate flex-1" disabled={locked}
+            title={locked ? "Demo — available on a paid plan" : undefined}
+            onClick={locked ? undefined : () => { refocus(id); if (n?.type === "Requirement") { pendingReaderScrollRef.current = id; setView("reader"); } }}
+            style={{ fontSize: 12, cursor: locked ? "not-allowed" : "pointer", color: locked ? "#C4CBD4" : ((selected && activeSystem === id) || selected === id) ? "#101828" : stub ? "#98A2B3" : "#344054", fontWeight: ((selected && activeSystem === id) || selected === id) ? 600 : 400 }}>
             {titleCase(n ? n.label : "")}
           </button>
+          ); })()}
           {gap && <AlertTriangle size={11} color="#B42318" />}
         </div>
         {isOpen && kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />)}
@@ -9010,7 +9028,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           </div>
           <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid #F2F4F7" }}>
             <div className="flex items-center gap-1 p-0.5 rounded-md" style={{ background: "#F2F4F7" }}>
-              {[["system", "SYSTEM"], ["ecu", "ECUs"]].map(([m, lbl]) => (
+              {[["system", "Features"], ["ecu", "ECUs"]].map(([m, lbl]) => (
                 <button key={m} onClick={() => setTreeMode(m)} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, padding: "2px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: treeMode === m ? "#fff" : "transparent", color: treeMode === m ? "#175CD3" : "#98A2B3", boxShadow: treeMode === m ? "0 1px 2px rgba(16,24,40,0.08)" : "none" }}>{lbl}</button>
               ))}
             </div>
@@ -9046,13 +9064,14 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                       <span style={{ fontSize: 9.5, color: "#B6C0CC", fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{list.length}</span>
                     </div>
                     {gOpen && list.map((e) => {
-                      const on = selectedEcu === e.id;
+                      const on = selectedEcu === e.id; const locked = !ecuAllowed(e.id);
                       return (
-                        <button key={e.id} onClick={() => { setSelectedEcu(e.id); setView("ecureq"); }} className="w-full text-left flex items-center gap-2 py-1 pr-2 rounded"
-                          style={{ paddingLeft: 25, background: on ? "#EAF2FF" : "transparent" }}>
-                          <span style={{ width: 7, height: 7, borderRadius: 2, background: dot[e.kind], flexShrink: 0 }} />
-                          <span className="truncate" style={{ fontSize: 12, color: on ? "#101828" : "#344054", fontWeight: on ? 600 : 400 }}>{e.name}</span>
-                          {e.tag && <span style={{ fontSize: 9, color: "#98A2B3", fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{e.dev ? "→" + e.tag : e.tag}</span>}
+                        <button key={e.id} disabled={locked} title={locked ? "Demo — available on a paid plan" : undefined}
+                          onClick={locked ? undefined : () => { setSelectedEcu(e.id); setView("ecureq"); }} className="w-full text-left flex items-center gap-2 py-1 pr-2 rounded"
+                          style={{ paddingLeft: 25, cursor: locked ? "not-allowed" : "pointer", background: on ? "#EAF2FF" : "transparent" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: 2, background: locked ? "#E4E7EC" : dot[e.kind], flexShrink: 0 }} />
+                          <span className="truncate" style={{ fontSize: 12, color: locked ? "#C4CBD4" : on ? "#101828" : "#344054", fontWeight: on ? 600 : 400 }}>{e.name}</span>
+                          {e.tag && <span style={{ fontSize: 9, color: locked ? "#D5DAE1" : "#98A2B3", fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{e.dev ? "→" + e.tag : e.tag}</span>}
                         </button>
                       );
                     })}
