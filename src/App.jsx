@@ -8802,7 +8802,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           { k: "Trial", name: "Free trial", price: "$0", per: "14 days", accent: "#B54708", feats: ["Full features to evaluate", "Up to 100 requirements · 1 project", "1 editor · viewers free", "No card required"] },
           { k: "Basic", name: "Basic", price: "$249", per: "per editor / month", accent: "#175CD3", feats: ["For teams starting their first program", "500 requirements · 1 project", "All exports & integrations (Word · Excel · ARXML · DBC · LDF · API)", "ISO 29148 quality gate", "Viewer licenses included"] },
           { k: "Pro", name: "Pro", price: "$399", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Priority support · viewer licenses"] },
-          { k: "Enterprise", name: "Enterprise", price: "Custom", per: "per editor / month", accent: "#0E7090", feats: ["For certified programs & regulated industries", "Unlimited requirements & projects", "On-prem / private cloud (e.g. GovCloud)", "Connectors: DOORS · Polarion · codebeamer", "Advanced access control (SSO) · audit · SLA"] },
+          { k: "Enterprise", name: "Enterprise", price: "Custom", per: "per editor / month", accent: "#0E7090", feats: ["For certified programs & regulated industries", "Unlimited requirements & projects", "Connectors: DOORS · Polarion · codebeamer", "Advanced access control (SSO) · audit · SLA"] },
         ];
         const priceNum = { Trial: 0, Basic: 249, Pro: 399, Enterprise: 0 }[plan] || 0;
         const monthly = priceNum * seats;
