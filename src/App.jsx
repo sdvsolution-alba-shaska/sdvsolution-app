@@ -9239,7 +9239,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                     style={{ top: 40, width: 288, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC",
                       boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
                     <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>
-                      EXPORT
+                      DOWNLOAD
                     </div>
                     <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
                       {(() => {
@@ -9261,7 +9261,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         return (
                           <>
                             <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO EXPORT</div>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO DOWNLOAD</div>
                               <select value={exportDataset} onChange={(e) => selDataset(e.target.value)} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
                                 {Object.entries(EXPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                               </select>
@@ -9284,7 +9284,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                               <span className="truncate" style={{ fontSize: 10.5, color: "#667085", fontFamily: "Consolas,monospace" }}>{fmt.file}</span>
                               <button onClick={() => { setIoMenu(false); fmt.run(); notify("\u201c" + fmt.file + "\u201d saved to your browser's Downloads folder"); }}
                                 className="ml-auto flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "#175CD3" }}>
-                                <Download size={13} color="#fff" /> Export
+                                <Download size={13} color="#fff" /> Download
                               </button>
                             </div>
                           </>
@@ -9292,7 +9292,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                       })()}
                     </div>
                     <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #F2F4F7" }}>
-                      IMPORT
+                      UPLOAD
                     </div>
                     <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
                       {(() => {
@@ -9300,7 +9300,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         return (
                           <>
                             <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO IMPORT</div>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO UPLOAD</div>
                               <select value={importType} onChange={(e) => { setImportType(e.target.value); setImportFile(null); }} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
                                 {Object.entries(IMPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                               </select>
@@ -9321,7 +9321,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                               <button disabled={iset.file && !importFile}
                                 onClick={() => { setIoMenu(false); notify((iset.file && importFile ? "Importing \u201c" + importFile.name + "\u201d" : iset.label) + "\u2026"); setImportFile(null); }}
                                 className="flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: (iset.file && !importFile) ? "#98A2B3" : "#175CD3", cursor: (iset.file && !importFile) ? "not-allowed" : "pointer" }}>
-                                <Upload size={13} color="#fff" /> Import
+                                <Upload size={13} color="#fff" /> Upload
                               </button>
                             </div>
                           </>
