@@ -7501,14 +7501,20 @@ export default function App() {
     return `${TOOL.base}/secure/CreateIssueDetails!init.jspa?${p.toString()}`;
   };
   const emailFeedback = null; // email option removed — tool feedback goes only to SDVsolution Jira
-  const submitFeedback = () => {
+  const submitFeedback = async () => {
     const fb = feedback;
-    if (!fb.summary.trim()) return;
+    if (!fb || !fb.summary.trim() || fb.sending) return;
+    const reporter = (typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "";
+    setFeedback((f) => (f ? { ...f, sending: true } : f));
+    try {
     /* Deep-link pattern: open SDVsolution Jira create-issue prefilled in the user's session.
        A backend rollout would replace this with fileViaApi(fb) → REST create. */
-    if (typeof window !== "undefined") window.open(jiraUrl(fb), "_blank", "noopener");
-    setFeedback(null);
-    notify(`Opening SDVsolution Jira to file your ${fb.type.toLowerCase()}\u2026`);
+      const r = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: fb.type, summary: fb.summary, description: fb.description, reporter, context: captureContext() }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.key) { setFeedback(null); notify("Thanks \u2014 filed to SDVsolution as " + d.key + "."); }
+      else { setFeedback((f) => (f ? { ...f, sending: false } : f)); notify(d && d.error ? "Couldn't file feedback: " + d.error : "Couldn't file feedback."); }
+    } catch (e) { setFeedback((f) => (f ? { ...f, sending: false } : f)); notify("Couldn't reach the feedback service: " + (e && e.message ? e.message : e)); }
   };
   const copyFeedback = () => {
     const fb = feedback;
@@ -8596,12 +8602,12 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   className="px-3.5 py-2 rounded-md" style={{ fontSize: 12.5, fontWeight: 600, color: "#475467", border: "1px solid #E4E7EC" }}>
                   Cancel
                 </button>
-                <button onClick={submitFeedback} disabled={!feedback.summary.trim()}
+                <button onClick={submitFeedback} disabled={!feedback.summary.trim() || feedback.sending}
                   className="px-3.5 py-2 rounded-md flex items-center gap-1.5"
                   style={{ fontSize: 12.5, fontWeight: 600, color: "#fff",
-                    background: feedback.summary.trim() ? "#175CD3" : "#98A2B3",
-                    cursor: feedback.summary.trim() ? "pointer" : "not-allowed" }}>
-                  <ExternalLink size={13} /> Create in SDVsolution Jira
+                    background: (feedback.summary.trim() && !feedback.sending) ? "#175CD3" : "#98A2B3",
+                    cursor: (feedback.summary.trim() && !feedback.sending) ? "pointer" : "not-allowed" }}>
+                  <ExternalLink size={13} /> {feedback.sending ? "Filing…" : "Create in SDVsolution Jira"}
                 </button>
               </div>
             </div>
