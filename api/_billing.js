@@ -14,11 +14,13 @@ export const admin = createClient(SUPA_URL, SERVICE_ROLE, {
 
 export const PRICE = {
   basic: process.env.STRIPE_PRICE_BASIC || "",
+  advance: process.env.STRIPE_PRICE_ADVANCE || "",
   pro: process.env.STRIPE_PRICE_PRO || "",
 };
 
 export function planFromPrice(priceId) {
   if (priceId && priceId === process.env.STRIPE_PRICE_BASIC) return "basic";
+  if (priceId && priceId === process.env.STRIPE_PRICE_ADVANCE) return "advance";
   if (priceId && priceId === process.env.STRIPE_PRICE_PRO) return "pro";
   return null;
 }

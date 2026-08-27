@@ -6790,7 +6790,7 @@ export default function App() {
   const billingApi = (typeof window !== "undefined" && window.__sdvAuth) || null;
   const loadOrgPlan = useCallback(async () => {
     if (!billingApi || !billingApi.getOrg) return;
-    try { const org = await billingApi.getOrg(); if (org) { const k = ({ trial: "Trial", basic: "Basic", pro: "Pro", enterprise: "Enterprise" })[String(org.plan || "trial").toLowerCase()] || "Trial"; setPlan(k); if (org.seats) setSeats(Math.max(1, org.seats)); } } catch (e) {}
+    try { const org = await billingApi.getOrg(); if (org) { const k = ({ trial: "Trial", basic: "Basic", advance: "Advance", pro: "Pro" })[String(org.plan || "trial").toLowerCase()] || "Trial"; setPlan(k); if (org.seats) setSeats(Math.max(1, org.seats)); } } catch (e) {}
   }, [billingApi]);
   const startCheckout = useCallback(async (planKey, nSeats) => {
     if (!billingApi || !billingApi.getToken) { setAcctMsg("Billing isn't configured on the server yet (Stripe keys). See BILLING_SETUP.md."); return; }
@@ -8799,16 +8799,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
       </div>
       {acctOpen && (() => {
         const PLANS = [
-          { k: "Trial", name: "Free trial", price: "$0", per: "14 days", accent: "#B54708", feats: ["Full features to evaluate", "Up to 100 requirements · 1 project", "1 editor · viewers free", "No card required"] },
+          { k: "Trial", name: "Free trial", price: "$0", per: "14 days", accent: "#B54708", feats: ["Explore the Occupant Visibility feature, end to end", "SYS → SWE → HWE for that feature family", "4 Door Control Modules (ECUs)", "1 editor · no card required"] },
           { k: "Basic", name: "Basic", price: "$249", per: "per editor / month", accent: "#175CD3", feats: ["For teams starting their first program", "500 requirements · 1 project", "All exports & integrations (Word · Excel · ARXML · DBC · LDF · API)", "ISO 29148 quality gate", "Viewer licenses included"] },
-          { k: "Pro", name: "Pro", price: "$399", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Priority support · viewer licenses"] },
-          { k: "Enterprise", name: "Enterprise", price: "Custom", per: "per editor / month", accent: "#0E7090", feats: ["For certified programs & regulated industries", "Unlimited requirements & projects", "Connectors: DOORS · Polarion · codebeamer", "Advanced access control (SSO) · audit · SLA"] },
+          { k: "Advance", name: "Advance", price: "$399", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Logicals & connector interfaces (ICD)", "Priority support"] },
+          { k: "Pro", name: "Pro", price: "$499", per: "per editor / month", accent: "#0E7090", feats: ["The full toolchain, self-serve", "Unlimited requirements & projects", "Everything in Advance, plus:", "Logicals, schematics & connector pin-outs", "K-Matrix comm matrix · ARXML/DBC/LDF", "Connectors: DOORS · Polarion · codebeamer", "SSO · audit · SLA · ASPICE-assessment support"] },
         ];
-        const priceNum = { Trial: 0, Basic: 249, Pro: 399, Enterprise: 0 }[plan] || 0;
+        const priceNum = { Trial: 0, Basic: 249, Advance: 399, Pro: 499 }[plan] || 0;
         const monthly = priceNum * seats;
         const choose = (k) => {
-          if (k === "Enterprise") { window.location.href = "mailto:contact@sdvsolution.com?subject=SDVsolution%20Enterprise%20enquiry"; return; }
-          if (k === "Trial") { setAcctMsg("You're on the free trial — pick Basic or Pro to subscribe."); return; }
+          if (k === "Trial") { setAcctMsg("You're on the free trial — pick Basic, Advance or Pro to subscribe."); return; }
           startCheckout(k, seats);
         };
         const tab = (k, label) => <button onClick={() => setAcctTab(k)} style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 12px", borderRadius: 7, border: "1px solid " + (acctTab === k ? "#175CD3" : "#E4E7EC"), background: acctTab === k ? "#EFF4FF" : "#fff", color: acctTab === k ? "#175CD3" : "#667085", cursor: "pointer" }}>{label}</button>;
@@ -8828,7 +8827,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 {acctMsg && <div style={{ fontSize: 12, color: "#175CD3", fontWeight: 600, marginBottom: 10 }}>{acctMsg}</div>}
                 {acctTab === "plan" && (
                   <div>
-                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per editor. Viewers are always free. Paid plans include a 14‑day free trial; you can cancel any time.</div>
+                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per editor. Paid plans include a 14‑day free trial; you can cancel any time.</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                       {PLANS.map((pl) => { const cur = pl.k === plan; return (
                         <div key={pl.k} style={{ border: "1px solid " + (cur ? pl.accent : "#E4E7EC"), borderRadius: 10, padding: "12px 12px", background: cur ? pl.accent + "0D" : "#fff", display: "flex", flexDirection: "column" }}>

@@ -19,10 +19,11 @@ Supabase. Test everything in Stripe **test mode** first, then flip to live.
 
 ## Part 2 — Stripe products & prices (test mode)
 1. Create a Stripe account → toggle **Test mode** (top right).
-2. **Products → Add product**:
-   - *SDVsolution Basic* → recurring price **$249 / month**, "Usage: per seat"
-     is optional; we pass quantity = editors. Copy the **Price ID** (`price_…`).
-   - *SDVsolution Pro* → recurring price **$399 / month**. Copy its **Price ID**.
+2. **Products → Add product** (three paid tiers):
+   - *SDVsolution Basic* → recurring **$249 / month**. Copy the **Price ID** (`price_…`).
+   - *SDVsolution Advance* → recurring **$399 / month**. Copy its **Price ID**.
+   - *SDVsolution Pro* → recurring **$499 / month**. Copy its **Price ID**.
+   (We pass quantity = number of editors.)
 3. **Developers → API keys** → copy the **Secret key** (`sk_test_…`).
 
 ## Part 3 — Stripe webhook
@@ -40,8 +41,9 @@ Vercel → project → Settings → Environment Variables (Production). Add:
 |-----|-------|
 | `STRIPE_SECRET_KEY` | `sk_test_…` (Secret) |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` (Secret) |
-| `STRIPE_PRICE_BASIC` | `price_…` for Basic |
-| `STRIPE_PRICE_PRO` | `price_…` for Pro |
+| `STRIPE_PRICE_BASIC` | `price_…` for Basic ($249) |
+| `STRIPE_PRICE_ADVANCE` | `price_…` for Advance ($399) |
+| `STRIPE_PRICE_PRO` | `price_…` for Pro ($499) |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key (Secret) |
 | `SUPABASE_URL` | your `https://<ref>.supabase.co` (or it reuses `VITE_SUPABASE_URL`) |
 
