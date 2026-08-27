@@ -3596,7 +3596,7 @@ const DCM_PARTNO = { "ECU-DCM-FL": "4ME 959 793", "ECU-DCM-FR": "4ME 959 792", "
 const DCM_VARIANCE_NOTE = "The four door modules currently ship as four distinct part numbers (FL 4ME 959 793 · FR 4ME 959 792 · RL 4ME 959 795 · RR 4ME 959 794) — one SKU per door — even though the connector pin-outs are near-identical within each pair. The differences are wiring-driven only: the front doors carry the exterior mirror (plus fuel-door release on FL); the rear doors carry seat adjustment, sun-blind and seat heating; all four share window lifter, central locking, keyless entry, memory and lighting. Consolidation options for the hardware-strategy review: (1) one ambidextrous DCM — superset connector, function enabled by per-door coding — lowest part-number and software variance; (2) two variants (front / rear); (3) keep four SKUs (status quo, highest variance).";
 
 /* ICD tool — editable connector pin-out for one ECU. Seeds from the derived (HW-requirement) pin-out,
-   writes edits/imports to ICD_STORE for that ECU, and offers Import / Export. Mirrors the K-Matrix tool. */
+   writes edits/imports to ICD_STORE for that ECU, and offers Upload / Download. Mirrors the K-Matrix tool. */
 function IcdTool({ ecuId, tag = "", derivedGroups = [], canWrite = false, onChange }) {
   const [open, setOpen] = useState(false);
   const [, setV] = useState(0);
@@ -3834,7 +3834,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
   return (
     <>
       <div className="flex items-center flex-wrap" style={{ gap: 8, marginTop: 6 }}>
-        <button onClick={() => setKmOpen(true)} title="Open the aggregate K-Matrix — editable; Import/Export inside; changes apply to the ARXML everywhere" style={btnS}>K-Matrix — open / edit</button>
+        <button onClick={() => setKmOpen(true)} title="Open the aggregate K-Matrix — editable; Upload/Download inside; changes apply to the ARXML everywhere" style={btnS}>K-Matrix — open / edit</button>
         <button onClick={() => dl("complete.arxml", buildDcmFlArxml(), "application/xml")} title="Complete ARXML generated from the K-Matrix — CAN cluster, frames/PDUs with exact IDs, signals + encodings, ECU instance and SW-C" style={btnS}>Complete ARXML</button>
         <button onClick={mfmGenAutosar} title="Generate AUTOSAR SWC/RTE — C skeleton + ARXML SWC description" style={btnS}>Generate code · AUTOSAR SWC/RTE</button>
         <button onClick={mfmGenSimulink} title="Generate Simulink / Embedded Coder model builder" style={btnS}>Generate code · Simulink/Embedded Coder</button>
@@ -9229,7 +9229,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
                 style={{ fontSize: 12.5, fontWeight: 500, color: "#344054", border: "1px solid #E4E7EC", background: "#fff" }}>
                 <ArrowLeftRight size={14} color="#475467" />
-                Import / Export
+                Upload / Download
                 <ChevronDown size={13} color="#98A2B3" />
               </button>
               {ioMenu && (
