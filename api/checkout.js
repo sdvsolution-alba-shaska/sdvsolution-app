@@ -19,10 +19,16 @@ export default async function handler(req, res) {
 
     // Reuse or create the Stripe customer for this org.
     let customer = org.stripe_customer_id;
+    // Self-heal: if the stored customer doesn't exist in THIS Stripe account
+    // (e.g. after switching test↔live, or if it was deleted), forget it and make a new one.
+    if (customer) {
+      try { const c = await stripe.customers.retrieve(customer); if (!c || c.deleted) customer = null; }
+      catch (e) { customer = null; }
+    }
     if (!customer) {
       const c = await stripe.customers.create({ email: membership.email, name: org.name || org.domain, metadata: { org_id: org.id, domain: org.domain } });
       customer = c.id;
-      await admin.from("organizations").update({ stripe_customer_id: customer }).eq("id", org.id);
+      await admin.from("organizations").update({ stripe_customer_id: customer, stripe_subscription_id: null }).eq("id", org.id);
     }
 
     const origin = originOf(req);
