@@ -2845,6 +2845,78 @@ function mergeBusIntoKM(newMsgs, srcTag) {
   });
   return { added, updated, signals };
 }
+/* ----------------------------------------------------------------------------
+   ReqIF (OMG Requirements Interchange Format) — the standards-based bridge to
+   DOORS, Polarion and Codebeamer (all import/export .reqif). Export builds a
+   valid ReqIF 1.x document from the requirement rows; import parses SPEC-OBJECTs
+   back into requirement records. Reserved attributes (ReqIF.ForeignID / .Name /
+   .Text) are used so the tools map the columns automatically.
+---------------------------------------------------------------------------- */
+function xmlEscReqif(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function reqAoaToReqIF(aoa, title) {
+  const rows = (aoa || []).slice(1); // drop header row
+  const now = new Date().toISOString();
+  const t = xmlEscReqif(title || "SDVsolution Requirements");
+  // attribute definitions: reserved (ReqIF.*) + custom, mapped to aoa columns
+  // aoa cols: 0 Level, 1 No., 2 ID, 3 Title/Aspect, 4 Statement, 5 ECU, 6 Safety, 7 Regulations, 8 System
+  const attrs = [
+    { id: "AD-ID", long: "ReqIF.ForeignID", col: 2 },
+    { id: "AD-NAME", long: "ReqIF.Name", col: 3 },
+    { id: "AD-TEXT", long: "ReqIF.Text", col: 4 },
+    { id: "AD-LEVEL", long: "Level", col: 0 },
+    { id: "AD-NO", long: "Number", col: 1 },
+    { id: "AD-ECU", long: "ECU", col: 5 },
+    { id: "AD-SAFETY", long: "Safety", col: 6 },
+    { id: "AD-REG", long: "Regulations", col: 7 },
+    { id: "AD-SYS", long: "System", col: 8 },
+  ];
+  const rank = (lvl) => { const m = String(lvl).match(/L(\d)/i); return m ? parseInt(m[1], 10) : 1; };
+  // Build a nested tree from the flat, level-ordered rows.
+  const roots = [], stack = [];
+  rows.forEach((r, i) => { const node = { i, rank: rank(r[0]), children: [] }; while (stack.length && stack[stack.length - 1].rank >= node.rank) stack.pop(); if (stack.length) stack[stack.length - 1].children.push(node); else roots.push(node); stack.push(node); });
+  const ser = (n) => { let s = '<SPEC-HIERARCHY IDENTIFIER="SH-' + n.i + '" LAST-CHANGE="' + now + '"><OBJECT><SPEC-OBJECT-REF>SO-' + n.i + '</SPEC-OBJECT-REF></OBJECT>'; if (n.children.length) s += '<CHILDREN>' + n.children.map(ser).join('') + '</CHILDREN>'; return s + '</SPEC-HIERARCHY>'; };
+  let out = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  out += '<REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n';
+  out += '  <THE-HEADER>\n    <REQ-IF-HEADER IDENTIFIER="_hdr">\n';
+  out += '      <CREATION-TIME>' + now + '</CREATION-TIME>\n      <REQ-IF-TOOL-ID>SDVsolution</REQ-IF-TOOL-ID>\n      <REQ-IF-VERSION>1.0</REQ-IF-VERSION>\n      <SOURCE-TOOL-ID>SDVsolution</SOURCE-TOOL-ID>\n      <TITLE>' + t + '</TITLE>\n';
+  out += '    </REQ-IF-HEADER>\n  </THE-HEADER>\n  <CORE-CONTENT>\n    <REQ-IF-CONTENT>\n';
+  out += '      <DATATYPES>\n        <DATATYPE-DEFINITION-STRING IDENTIFIER="DT-STRING" LONG-NAME="String" MAX-LENGTH="32000" LAST-CHANGE="' + now + '"/>\n      </DATATYPES>\n';
+  out += '      <SPEC-TYPES>\n        <SPEC-OBJECT-TYPE IDENTIFIER="ST-REQ" LONG-NAME="Requirement" LAST-CHANGE="' + now + '">\n          <SPEC-ATTRIBUTES>\n';
+  attrs.forEach((a) => { out += '            <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="' + a.id + '" LONG-NAME="' + xmlEscReqif(a.long) + '" LAST-CHANGE="' + now + '"><TYPE><DATATYPE-DEFINITION-STRING-REF>DT-STRING</DATATYPE-DEFINITION-STRING-REF></TYPE></ATTRIBUTE-DEFINITION-STRING>\n'; });
+  out += '          </SPEC-ATTRIBUTES>\n        </SPEC-OBJECT-TYPE>\n        <SPECIFICATION-TYPE IDENTIFIER="SPT-REQ" LONG-NAME="Requirements Specification" LAST-CHANGE="' + now + '"/>\n      </SPEC-TYPES>\n';
+  out += '      <SPEC-OBJECTS>\n';
+  rows.forEach((r, i) => { out += '        <SPEC-OBJECT IDENTIFIER="SO-' + i + '" LAST-CHANGE="' + now + '">\n          <VALUES>\n'; attrs.forEach((a) => { out += '            <ATTRIBUTE-VALUE-STRING THE-VALUE="' + xmlEscReqif(r[a.col]) + '"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>' + a.id + '</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>\n'; }); out += '          </VALUES>\n          <TYPE><SPEC-OBJECT-TYPE-REF>ST-REQ</SPEC-OBJECT-TYPE-REF></TYPE>\n        </SPEC-OBJECT>\n'; });
+  out += '      </SPEC-OBJECTS>\n';
+  out += '      <SPECIFICATIONS>\n        <SPECIFICATION IDENTIFIER="SPEC-1" LONG-NAME="' + t + '" LAST-CHANGE="' + now + '">\n          <TYPE><SPECIFICATION-TYPE-REF>SPT-REQ</SPECIFICATION-TYPE-REF></TYPE>\n          <CHILDREN>' + roots.map(ser).join('') + '</CHILDREN>\n        </SPECIFICATION>\n      </SPECIFICATIONS>\n';
+  out += '    </REQ-IF-CONTENT>\n  </CORE-CONTENT>\n</REQ-IF>\n';
+  return out;
+}
+function parseReqIFText(text) {
+  let doc; try { doc = new DOMParser().parseFromString(text, "application/xml"); } catch (e) { return []; }
+  if (!doc || doc.getElementsByTagName("parsererror").length) return [];
+  const local = (el) => el.localName || String(el.nodeName).replace(/^.*:/, "");
+  const all = (name) => Array.from(doc.getElementsByTagName("*")).filter((e) => local(e) === name);
+  const childText = (el, name) => { for (const c of Array.from(el.children || [])) { if (local(c) === name) return (c.textContent || "").trim(); } return ""; };
+  // Map ATTRIBUTE-DEFINITION-STRING id -> long-name, to know which value is Name/Text/ForeignID.
+  const defName = {};
+  all("ATTRIBUTE-DEFINITION-STRING").forEach((d) => { const id = d.getAttribute("IDENTIFIER"); const ln = d.getAttribute("LONG-NAME") || ""; if (id) defName[id] = ln; });
+  const out = [];
+  all("SPEC-OBJECT").forEach((so) => {
+    const rec = {};
+    Array.from(so.getElementsByTagName("*")).filter((e) => local(e) === "ATTRIBUTE-VALUE-STRING").forEach((v) => {
+      let refId = ""; Array.from(v.getElementsByTagName("*")).forEach((e) => { if (local(e) === "ATTRIBUTE-DEFINITION-STRING-REF") refId = (e.textContent || "").trim(); });
+      const ln = defName[refId] || refId;
+      const val = v.getAttribute("THE-VALUE") || "";
+      if (/ForeignID$|(^|\.)ID$/i.test(ln)) rec.id = val;
+      else if (/Name$/i.test(ln)) rec.name = val;
+      else if (/Text$/i.test(ln)) rec.text = val;
+      else if (/^Level$/i.test(ln)) rec.level = val;
+      else rec[ln] = val;
+    });
+    if (rec.name || rec.text || rec.id) out.push(rec);
+  });
+  return out;
+}
 function buildDcmFlArxml() {
   const K = KM_STORE.data, M = K.msgs;
   const e = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -7822,6 +7894,7 @@ export default function App() {
   };
   const buildReqCsv = () => download("requirements.csv", aoaToCsv(reqAoa()), "text/csv;charset=utf-8");
   const buildReqXlsx = () => aoaToXlsx(reqAoa(), "Requirements", "requirements.xlsx", REQ_COLS);
+  const buildReqIF = () => download("requirements.reqif", reqAoaToReqIF(reqAoa(), (proj && proj.name) || "SDVsolution Requirements"), "application/xml;charset=utf-8");
   const buildNodesCsv = () => download("nodes.csv", aoaToCsv(nodesAoa()), "text/csv;charset=utf-8");
   const buildNodesXlsx = () => aoaToXlsx(nodesAoa(), "Nodes", "nodes.xlsx", NODE_COLS);
   /* Executive readiness HTML string (used by the PDF fallback: open + Print \u2192 Save as PDF). */
@@ -7929,6 +8002,7 @@ export default function App() {
       { k: "doc", label: "Word Document (*.docx)", file: "requirements.docx", run: buildReqDocx },
       { k: "xlsx", label: "Excel Workbook (*.xlsx)", file: "requirements.xlsx", run: buildReqXlsx },
       { k: "csv", label: "CSV (comma delimited) (*.csv)", file: "requirements.csv", run: buildReqCsv },
+      { k: "reqif", label: "ReqIF — DOORS · Polarion · Codebeamer (*.reqif)", file: "requirements.reqif", run: buildReqIF },
       { k: "pdf", label: "PDF Document (*.pdf)", file: "requirements.pdf", run: async () => toPdf(reqAoa(), "Requirements Specification", "requirements.pdf", await mirrorFbmToPng(2), [["Message", "ID", "Cycle [ms]", "Transmitter (ECU · SWC)", "Receiver (ECU · SWC)"]].concat(swArchRows().map((x) => [x.name, x.id, x.cyc, x.tx, x.rx]))) },
     ] },
     harness: { label: "Harness connectivity", scope: [], fmts: [
@@ -7951,6 +8025,28 @@ export default function App() {
     masters: { label: "Source masters (re-ingest)", note: "Reruns the ingestion pipeline and rebuilds the graph from the connected source masters.", file: false },
     reqif: { label: "Requirements (ReqIF / CSV / Excel)", note: "Map columns to node & edge types, then merge into the graph.", file: true, accept: ".reqif,.csv,.xlsx,.xls" },
     kbl: { label: "Harness connectivity (KBL / VEC)", note: "Reconcile logical nets from the supplier package against the model.", file: true, accept: ".kbl,.vec,.xml" },
+  };
+  /* Run the selected upload. ReqIF is fully parsed and merged; other sources keep the pipeline stub. */
+  const runImport = async () => {
+    const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
+    setIoMenu(false);
+    if (importType === "reqif" && importFile && /\.reqif$/i.test(importFile.name || "")) {
+      try {
+        const recs = parseReqIFText(await importFile.text());
+        if (!recs.length) { notify("No requirements found in " + importFile.name + "."); setImportFile(null); return; }
+        // Add under the selected function (L1). If an L2/L3 is selected, use its owning L1.
+        let targetL1 = null;
+        if (selected) { const sn = getN(selected); if (isL1(sn)) targetL1 = selected; else { const o = originL1(selected); if (o) targetL1 = o; } }
+        if (!targetL1) { notify("Select a function (L1) in the tree first — imported requirements are added under it."); setImportFile(null); return; }
+        if (!SYSREQ_STORE.data[targetL1]) SYSREQ_STORE.data[targetL1] = [];
+        const arr = SYSREQ_STORE.data[targetL1]; let cnt = 0;
+        recs.forEach((r) => { const stmt = r.text || r.name || ""; if (!stmt) return; arr.push({ id: "SYS-REQIF-" + targetL1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: r.name || r.id || "Imported requirement", ears: "Imported", statement: stmt, method: "Test", criterion: "", rationale: r.id ? "ReqIF ForeignID: " + r.id : "", asil: r.Safety || "QM" }); cnt++; });
+        setSysReqV((v) => v + 1);
+        notify("Imported " + cnt + " requirement(s) from ReqIF under " + ((getN(targetL1) && getN(targetL1).label) || targetL1) + ".");
+        setImportFile(null); return;
+      } catch (e) { notify("ReqIF import failed: " + (e && e.message ? e.message : e)); setImportFile(null); return; }
+    }
+    notify((iset.file && importFile ? "Importing “" + importFile.name + "”" : iset.label) + "…"); setImportFile(null);
   };
   /* Record every node the user lands on (selection OR focus) into nav history —
      unless the change came from the back/forward buttons themselves. */
@@ -9324,7 +9420,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                             <div className="flex items-center gap-2" style={{ marginTop: 2 }}>
                               <span style={{ fontSize: 9, color: "#98A2B3", lineHeight: 1.3, flex: 1 }}>Runs through the binding layer &amp; consistency checks before republishing.</span>
                               <button disabled={iset.file && !importFile}
-                                onClick={() => { setIoMenu(false); notify((iset.file && importFile ? "Importing \u201c" + importFile.name + "\u201d" : iset.label) + "\u2026"); setImportFile(null); }}
+                                onClick={runImport}
                                 className="flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: (iset.file && !importFile) ? "#98A2B3" : "#175CD3", cursor: (iset.file && !importFile) ? "not-allowed" : "pointer" }}>
                                 <Upload size={13} color="#fff" /> Upload
                               </button>
