@@ -5957,6 +5957,16 @@ function buildVEC() {
      feedback/creating/...    modals and inline editors
    Then: derived helpers, handlers, and the five view renderers + detail panel.
    ========================================================================== */
+/* KL30 (permanent +) vs KL15 (ignition-switched +) behaviour across vehicle
+   states — the same table shown in every ECU's Power Supply Requirements. KL30
+   keeps the ECU "alive"; KL15 "wakes it up" to do work. KL31 is chassis ground. */
+const KL_STATE_ROWS = [
+  { state: "Key Out (Ignition OFF)", kl30: "ON", kl15: "OFF", ecu: "Standby / low-power — RAM keep-alive, RTC running, waits for a wake event" },
+  { state: "Ignition ON (engine not started)", kl30: "ON", kl15: "ON", ecu: "Normal operation — reads sensors, communicates on the bus, runs diagnostics" },
+  { state: "START (cranking)", kl30: "ON", kl15: "ON", ecu: "Continues operation through cranking — controls actuators, communicates with other ECUs" },
+  { state: "Key Out again", kl30: "ON", kl15: "OFF", ecu: "Saves state, disables high-current drivers, returns to low-power standby" },
+];
+
 /* ECU requirements specification template — 12 standard chapters, content derived from the ECU record
    where known and template "shall" requirements otherwise. Used by the ECU Requirements page. */
 function ecuReqChapters(ecu) {
@@ -5992,10 +6002,13 @@ function ecuReqChapters(ecu) {
       `The ${tag} shall conform to the defined housing envelope, mass, mounting-interface and fixing points.`,
       `The ${tag} connectors shall be keyed, sealed and rated per the mating and retention requirements for the installation zone.`,
       `The ${tag} shall meet the thermal-dissipation and heat-sinking requirements for its packaging.` ] },
-    { n: "Power Supply Requirements", intro: `Supply architecture and consumption for ${tag}.`, reqs: [
-      `The ${tag} shall operate from its specified supply rails (e.g. KL30 / KL15 / switched) across the defined voltage range including cranking and start-stop transients.`,
-      `The ${tag} shall meet its quiescent (sleep) and active current-consumption budgets and support the low-power / wake strategy for its buses.`,
-      `The ${tag} shall protect against over-voltage, under-voltage, reverse polarity and load-dump on all supply inputs.` ] },
+    { n: "Power Supply Requirements", intro: `Supply architecture (KL30 permanent, KL15 ignition-switched, KL31 ground) and consumption for ${tag}.`, reqs: [
+      `The ${tag} shall be supplied by KL30 (permanent battery positive, 12V/24V), protected by the vehicle main fuse, and shall remain powered when the ignition is OFF.`,
+      `On KL30, the ${tag} shall retain keep-alive functions — RAM/state retention, real-time clock (RTC) and wake-up logic — in low-power standby, and shall meet its quiescent (sleep) current budget.`,
+      `The ${tag} shall wake on the defined KL15 (ignition-switched positive) transition and/or the specified bus/local wake events, complete self-test, and enter normal operation.`,
+      `With KL15 active, the ${tag} shall perform its main functions — sensor acquisition, bus communication, diagnostics and actuator control — and shall return to low-power standby when KL15 is removed (ignition OFF).`,
+      `The ${tag} shall reference vehicle ground through KL31 (chassis ground) and shall meet the specified ground-offset and return-current requirements.`,
+      `The ${tag} shall operate across the defined KL30 / KL15 voltage range including cranking, start-stop and load-dump transients, and shall protect all supply inputs against over-voltage, under-voltage and reverse polarity (ISO 16750 / ISO 7637).` ] },
     { n: "Failure and Degradation Concepts", intro: `Fault handling, safe states and degraded modes for ${tag}.`, reqs: [
       `The ${tag} shall detect, react to and log faults (self-test, plausibility, supply, communication, actuator) and enter the defined safe state on unrecoverable faults.`,
       `The ${tag} shall provide the specified degraded/limp-home behaviour and driver notification when partial functionality is lost.`,
@@ -10153,11 +10166,20 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                to the captured ECU I/O-list pin-out for ECUs (e.g. the zonal modules) that already have one. */
             const hwIcdRows = hwRows.filter((r) => r.level.startsWith("L3") && Array.isArray(r.icd) && r.icd.length);
             const icdIfs = Object.values(nodes).filter((n) => n.type === "ECUSmartNode" && /I\/O list$/.test(n.props?.source || "") && resolveEcuId(n.props?.controller) === ecu.id);
-            const derivedMode = hwIcdRows.length ? "req" : (icdIfs.length ? "io" : "none");
+            let derivedMode = hwIcdRows.length ? "req" : (icdIfs.length ? "io" : "none");
             const derivedIcd = []; // store shape: [{ conn, rows:[{signal,pins,cls,dir,wired,from}] }]
             const addD = (conn, r) => { let g = derivedIcd.find((x) => x.conn === conn); if (!g) { g = { conn, rows: [] }; derivedIcd.push(g); } g.rows.push(r); };
             if (derivedMode === "req") hwIcdRows.forEach((r) => r.icd.forEach((e) => addD(e.conn || "—", { signal: e.signal, pins: e.pins || 1, cls: e.cls || "—", dir: e.dir || "—", wired: e.endpoint || "—", from: r.id })));
             else if (derivedMode === "io") icdIfs.forEach((n) => addD(n.props?.connector || "—", { signal: n.label, pins: n.props?.pins || 1, cls: n.props?.interfaceClass || "—", dir: n.props?.protocol || "—", wired: n.props?.endpoint || "—", from: /yes/i.test(n.props?.diagnostics || "") ? "UDS" : "—" }));
+            /* Every ECU is fed KL30 (permanent +), KL15 (ignition-switched +) and grounded via KL31.
+               Add a canonical Power & Ground group unless the derived pin-out already spells these out. */
+            const klSeen = (t) => derivedIcd.some((g) => g.rows.some((r) => new RegExp(t, "i").test(String(r.signal) + " " + String(r.wired))));
+            const klRows = [];
+            if (!klSeen("KL30")) klRows.push({ signal: "KL30 — Permanent battery + (12V)", pins: 1, cls: "PWR", dir: "In", wired: "Vehicle KL30 (fused, permanent)", from: "Power" });
+            if (!klSeen("KL15")) klRows.push({ signal: "KL15 — Ignition-switched + (12V)", pins: 1, cls: "PWR", dir: "In", wired: "Vehicle KL15 (ignition, fused)", from: "Power" });
+            if (!klSeen("KL31")) klRows.push({ signal: "KL31 — Ground / return", pins: 1, cls: "GND", dir: "Ref", wired: "Chassis ground (KL31)", from: "Power" });
+            klRows.forEach((r) => addD("Power & Ground", r));
+            if (derivedMode === "none" && derivedIcd.length) derivedMode = "req"; // supply pins now make a pin-out
             derivedIcd.sort((a, b) => String(a.conn).localeCompare(String(b.conn)));
             derivedIcd.forEach((g) => g.rows.sort((a, b) => String(a.signal).localeCompare(String(b.signal))));
             const icdOverride = ICD_STORE.data[ecu.id];
@@ -10312,6 +10334,27 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           </div>
                           ); })()}
                           <KMatrixTool canWrite={canWrite} ecuId={ecu.id} openReq={kmOpenReq} onOpenHandled={() => setKmOpenReq(null)} onL1={(name) => { const id = l1ByName[name]; if (id) { materialize(id); setSelected(id); setView("reader"); } }} />
+                        </div>
+                      )}
+                      {c.n === "Power Supply Requirements" && (
+                        <div style={{ marginTop: 12, borderTop: "1px dashed #E4E7EC", paddingTop: 10 }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: accent, letterSpacing: 0.3, marginBottom: 2 }}>KL30 vs KL15 — SUPPLY &amp; WAKE-UP STATES</div>
+                          <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 8 }}>KL30 (permanent +) keeps {ecuTag(ecu.id)} alive for keep-alive / RTC / standby; KL15 (ignition-switched +) wakes it to perform its functions; KL31 is chassis ground.</div>
+                          <div style={{ marginBottom: 10, border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden" }}>
+                            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11 }}>
+                              <thead><tr>{["Vehicle state", "KL30", "KL15", "ECU behaviour"].map((h) => <th key={h} style={{ textAlign: "left", padding: "3px 8px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                              <tbody>
+                                {KL_STATE_ROWS.map((r, ri) => (
+                                  <tr key={ri} style={{ borderBottom: "1px solid #F2F4F7" }}>
+                                    <td style={{ padding: "3px 8px", color: "#344054", fontWeight: 600, whiteSpace: "nowrap" }}>{r.state}</td>
+                                    <td style={{ padding: "3px 8px", textAlign: "center", fontWeight: 700, color: r.kl30 === "ON" ? "#067647" : "#B42318" }}>{r.kl30}</td>
+                                    <td style={{ padding: "3px 8px", textAlign: "center", fontWeight: 700, color: r.kl15 === "ON" ? "#067647" : "#B42318" }}>{r.kl15}</td>
+                                    <td style={{ padding: "3px 8px", color: "#667085" }}>{r.ecu}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       )}
                       {(c.n === "Software Requirements" || c.n === "Hardware Requirements") && (() => {
