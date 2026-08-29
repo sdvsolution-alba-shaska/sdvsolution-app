@@ -116,6 +116,28 @@ clear "backend not configured" message and the rest of the app is unaffected.
   with SSO" button currently points customers to contact sales. Supabase
   supports SAML SSO on its Pro plan when you're ready.
 
+## Team invites & roles (Phase 4)
+
+Run **`supabase/phase4_team.sql`** once in the SQL Editor. It adds:
+
+- Four roles — **owner · admin · editor · viewer**. Owner = billing + team +
+  edit, Admin = team + edit, Editor = edit, Viewer = **read-only** (viewers don't
+  count as billed editors). Legacy `member` rows are treated as `editor`.
+- An **`invitations`** table + RLS so an owner/admin can pre-authorize a
+  teammate's email (any domain — contractors on gmail etc. work once invited).
+- The sign-up trigger now honors a pending invite **before** email-domain
+  auto-join, so an invited user lands in the inviting company with the invited
+  role.
+- `email_is_invited()` (anon-callable) so AuthGate lets an invited personal-email
+  address through the "use your work email" rule.
+- A guard that blocks removing/demoting the **last owner** of a company.
+
+**How inviting works (no email service needed):** in the app, top bar →
+**Billing → Team** tab. Enter the teammate's email, pick a role, **Add to team**.
+Share the app link; they sign up at `app.sdvsolution.com` with that email and are
+dropped straight into your company with the assigned role. Owners/admins can
+change roles or remove members from the same tab.
+
 ## What's NOT done yet (Phase 2)
 
 Right now the **access** is gated and isolated, but the tool's requirements data

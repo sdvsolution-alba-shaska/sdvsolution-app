@@ -6865,10 +6865,56 @@ export default function App() {
   const [stdV, setStdV] = useState(0);                // bump to re-render standards & compliance register
   /* ===== Account & subscription (front-end mock — no real payment) ===== */
   const [acctOpen, setAcctOpen] = useState(false);
-  const [acctTab, setAcctTab] = useState("plan");     // "plan" | "billing" | "signup"
+  const [acctTab, setAcctTab] = useState("plan");     // "plan" | "billing" | "team"
   const [plan, setPlan] = useState("Trial");          // current subscription tier
   const [seats, setSeats] = useState(3);
   const [acctMsg, setAcctMsg] = useState("");
+  /* Team & roles — populated from Supabase (window.__sdvAuth.team) when the
+     Team tab opens. Owner/admin can invite, change roles and remove members. */
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [teamInvites, setTeamInvites] = useState([]);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMsg, setTeamMsg] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("editor");
+  const teamApi = (typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.team) || null;
+  const loadTeam = async () => {
+    if (!teamApi) return;
+    setTeamBusy(true); setTeamMsg("");
+    try {
+      const [m, inv] = await Promise.all([teamApi.listMembers(), teamApi.isAdmin ? teamApi.listInvites() : Promise.resolve([])]);
+      setTeamMembers(m || []); setTeamInvites(inv || []);
+    } catch (e) { setTeamMsg("Couldn't load the team: " + (e && e.message ? e.message : e)); }
+    setTeamBusy(false);
+  };
+  const doInvite = async () => {
+    if (!teamApi) return;
+    setTeamBusy(true); setTeamMsg("");
+    try { await teamApi.invite(inviteEmail, inviteRole); setInviteEmail(""); setTeamMsg("Invite ready — share the app link and ask them to sign up with that email."); await loadTeam(); }
+    catch (e) { setTeamMsg(e && e.message ? e.message : String(e)); }
+    setTeamBusy(false);
+  };
+  const doSetRole = async (userId, r) => {
+    if (!teamApi) return; setTeamBusy(true); setTeamMsg("");
+    try { await teamApi.setRole(userId, r); await loadTeam(); }
+    catch (e) { setTeamMsg(e && e.message ? e.message : String(e)); }
+    setTeamBusy(false);
+  };
+  const doRemoveMember = async (userId, email) => {
+    if (!teamApi) return;
+    if (typeof window !== "undefined" && !window.confirm("Remove " + email + " from the company? They lose all access immediately.")) return;
+    setTeamBusy(true); setTeamMsg("");
+    try { await teamApi.removeMember(userId); await loadTeam(); }
+    catch (e) { setTeamMsg(e && e.message ? e.message : String(e)); }
+    setTeamBusy(false);
+  };
+  const doRevokeInvite = async (id) => {
+    if (!teamApi) return; setTeamBusy(true); setTeamMsg("");
+    try { await teamApi.revokeInvite(id); await loadTeam(); }
+    catch (e) { setTeamMsg(e && e.message ? e.message : String(e)); }
+    setTeamBusy(false);
+  };
+  useEffect(() => { if (acctOpen && acctTab === "team") loadTeam(); /* eslint-disable-next-line */ }, [acctOpen, acctTab]);
   const [signupEmail, setSignupEmail] = useState("");
   /* ===== Stripe billing (Phase 3) — real checkout / portal via serverless funcs.
      Uses window.__sdvAuth (set by AuthGate) for the access token + current org. */
@@ -6942,8 +6988,17 @@ export default function App() {
   const blocksWrapRef = useRef(null);
   const blockRefs = useRef({});
   const [treeSel, setTreeSel] = useState(() => new Set()); // SYSTEMS tree multi-select
-  const [role, setRole] = useState("owner"); // access role: "owner" (write) | "viewer" (read-only)
-  const canWrite = true; // single owner role — Viewer removed
+  // Access role comes from the signed-in user's company membership
+  // (owner | admin | editor | viewer). canWrite / isAdmin are derived further
+  // below (after isStaff). null until it loads. Viewers get read-only.
+  const [orgRole, setOrgRole] = useState(null);
+  useEffect(() => {
+    const a = (typeof window !== "undefined" && window.__sdvAuth) || null;
+    if (!a || !a.getRole) return;
+    let alive = true;
+    a.getRole().then((r) => { if (alive) setOrgRole(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   /* Resizable + collapsible side panels — give the center more room. */
   const [leftW, setLeftW] = useState(272), [rightW, setRightW] = useState(316);
   const [leftHidden, setLeftHidden] = useState(false), [rightHidden, setRightHidden] = useState(false);
@@ -7635,6 +7690,11 @@ export default function App() {
   // Platform staff (SDVsolution) always get full access, regardless of plan.
   const authEmail = ((typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "").toLowerCase();
   const isStaff = /@sdvsolution\.com$/.test(authEmail) || authEmail === "gshaska@gmail.com";
+  // Write access + admin (team/billing) derived from the company role. When auth
+  // isn't configured (artifact / preview) the app stays fully writable.
+  const authPresent = typeof window !== "undefined" && !!window.__sdvAuth;
+  const isAdmin = isStaff || orgRole === "owner" || orgRole === "admin";
+  const canWrite = !authPresent || isStaff || orgRole !== "viewer"; // viewers = read-only
   const demoLocked = plan === "Trial" && !isStaff && typeof window !== "undefined" && !!window.__sdvAuth;
   const featureAllowed = (id) => !demoLocked || id === DEMO_L0 || l0Of(id) === DEMO_L0;
   const ecuAllowed = (ecuId) => !demoLocked || DEMO_ECUS.has(ecuId);
@@ -8272,7 +8332,7 @@ When the user asks to show / open / go to / focus / take me to something, append
 - Open a node in the graph: <action>{"type":"focus","id":"L1-EMS-00653"}</action>
 - Filter the table by ECU tier: <action>{"type":"filter","field":"type","value":"primary-ecu"}</action> (or "secondary-ecu")
 
-== EXPORT ACTION (download a file) ${canWrite ? "" : "— requires Owner; if Viewer, tell them to switch role instead of emitting this"} ==
+== EXPORT ACTION (download a file) ${canWrite ? "" : "— read-only Viewer; ask an Owner/Admin to change their role instead of emitting this"} ==
 When the user asks to export / download / "give me a file / spreadsheet" of the ECU I/O list (optionally for one ECU), or of requirements / readiness, append ONE action at the end after a brief sentence.
 - ECU I/O list (all 12 ECUs) to Excel: <action>{"type":"export","what":"ecu-io","format":"xlsx"}</action>
 - One ECU's I/O: <action>{"type":"export","what":"ecu-io","ecu":"ECU-CZM","format":"xlsx"}</action> (format = xlsx | csv)
@@ -8287,7 +8347,7 @@ Use these only when the user explicitly asks to add/change/remove model data. Co
 - Add system requirements under a function (L1): <action>{"type":"addSysReq","l1":"L1-BODY-00187","items":[{"title":"Fold on lock","statement":"When the vehicle is locked, the system shall fold both exterior mirrors within 3 s.","ears":"Event-driven","method":"Test","asil":"QM"},{"title":"...","statement":"..."}]}</action> \u2014 l1 may be a function id (L1-...) or its exact name; each item needs at least a statement (write it in EARS form). Use a single item with top-level fields, or many via "items".
 - Add software requirements under a function (L1): <action>{"type":"addSwReq","l1":"Auto-Dim Interior Mirror","items":[{"title":"...","statement":"The software shall ...","ears":"Ubiquitous","method":"Test"}]}</action>
 When turning a dropped Word/Excel spec into requirements: map each spec item to the right function (L1), rewrite it as one testable EARS statement (fields: title, statement, ears, method, criterion, rationale, asil), then emit addSysReq / addSwReq. Briefly list what you're adding first; if the target function is unclear, ask instead of guessing.
-If role = Viewer, do NOT emit write actions \u2014 tell the user to switch to Owner (top-right role toggle).
+If the user is a Viewer (read-only), do NOT emit write actions \u2014 tell them to ask an Owner or Admin (Billing \u2192 Team) to change their role or make the edit.
 
 The user may attach files (PDF, Excel, Word, CSV, text). Their extracted text is included in the message under "[Attached files]". Read them and, when the user asks you to apply/import/update something from a file, use the write actions above to make the change (e.g., turn a spreadsheet of interfaces into addInterfaces rows, correct a property from a spec with editNode). Always state, in one sentence, what you are changing before the action tag, and if a file is ambiguous, summarize what you found and ask before writing.
 Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Module." <action>{"type":"select","id":"ECU-CZM"}</action>`;
@@ -8948,7 +9008,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <UserRound size={16} color="#175CD3" />
                   <span style={{ fontWeight: 700, color: "#101828", fontSize: 14 }}>Account &amp; Subscription</span>
                 </div>
-                <div className="flex items-center gap-2">{tab("plan", "Plan & Pricing")}{tab("billing", "Account & Billing")}
+                <div className="flex items-center gap-2">{tab("plan", "Plan & Pricing")}{tab("billing", "Account & Billing")}{teamApi && tab("team", "Team")}
                   <button onClick={() => setAcctOpen(false)} style={{ fontSize: 12, fontWeight: 600, color: "#344054", border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 11px", cursor: "pointer" }}>Close</button>
                 </div>
               </div>
@@ -8991,6 +9051,78 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                     </div>
                   </div>
                 )}
+                {acctTab === "team" && (() => {
+                  const RC = { owner: "#0E7090", admin: "#7A5AF8", editor: "#175CD3", viewer: "#667085" };
+                  const RL = { owner: "Owner", admin: "Admin", editor: "Editor", viewer: "Viewer" };
+                  const myEmail = ((typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "").toLowerCase();
+                  const editors = teamMembers.filter((m) => m.role !== "viewer").length;
+                  const chip = (r) => <span style={{ fontSize: 10, fontWeight: 800, color: RC[r] || "#667085", background: (RC[r] || "#667085") + "16", borderRadius: 5, padding: "2px 7px" }}>{RL[r] || r}</span>;
+                  return (
+                    <div style={{ maxWidth: 720 }}>
+                      <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 4 }}>Invite teammates and set what each can do. Access is scoped to your company — nobody outside it can see your data.</div>
+                      <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 12 }}>Owner: billing + team + edit &nbsp;·&nbsp; Admin: team + edit &nbsp;·&nbsp; Editor: edit &nbsp;·&nbsp; Viewer: read-only. Only editors and above count toward billed seats.</div>
+
+                      {isAdmin && (
+                        <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#101828", marginBottom: 8 }}>Invite a teammate</div>
+                          <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                            <input type="email" placeholder="teammate@company.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                              style={{ flex: "1 1 240px", minWidth: 200, border: "1px solid #E4E7EC", borderRadius: 8, padding: "8px 10px", fontSize: 13, background: "#F9FAFB", color: "#101828" }} />
+                            <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ border: "1px solid #E4E7EC", borderRadius: 8, padding: "8px 10px", fontSize: 13, background: "#fff", color: "#101828", cursor: "pointer" }}>
+                              <option value="editor">Editor</option>
+                              <option value="viewer">Viewer</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                            <button onClick={doInvite} disabled={teamBusy} style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 8, padding: "8px 16px", cursor: teamBusy ? "default" : "pointer", opacity: teamBusy ? 0.6 : 1 }}>Add to team</button>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>They join by signing up at <b>app.sdvsolution.com</b> with the invited email — no email is sent from here. Contractors on personal addresses (gmail, etc.) are allowed once invited.</div>
+                        </div>
+                      )}
+
+                      <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, overflow: "hidden" }}>
+                        <div className="flex items-center justify-between" style={{ padding: "9px 14px", background: "#F9FAFB", borderBottom: "1px solid #EAECF0" }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#344054" }}>Members ({teamMembers.length}) · {editors} editor{editors === 1 ? "" : "s"}</span>
+                          <button onClick={loadTeam} disabled={teamBusy} style={{ fontSize: 11, fontWeight: 600, color: "#175CD3", background: "none", border: "none", cursor: "pointer" }}>{teamBusy ? "…" : "Refresh"}</button>
+                        </div>
+                        {teamMembers.length === 0 && <div style={{ padding: "12px 14px", fontSize: 12, color: "#98A2B3" }}>{teamBusy ? "Loading…" : "No members yet."}</div>}
+                        {teamMembers.map((m) => (
+                          <div key={m.user_id} className="flex items-center gap-3" style={{ padding: "9px 14px", borderTop: "1px solid #F2F4F7" }}>
+                            <span style={{ fontSize: 13, color: "#101828", fontWeight: 600 }}>{m.email}{m.email && m.email.toLowerCase() === myEmail && <span style={{ fontSize: 10, color: "#98A2B3", fontWeight: 500 }}> (you)</span>}</span>
+                            <span style={{ marginLeft: "auto" }}>
+                              {isAdmin
+                                ? <select value={m.role} onChange={(e) => doSetRole(m.user_id, e.target.value)} disabled={teamBusy} style={{ border: "1px solid #E4E7EC", borderRadius: 7, padding: "4px 8px", fontSize: 12, fontWeight: 700, color: RC[m.role] || "#667085", background: "#fff", cursor: "pointer" }}>
+                                    <option value="owner">Owner</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="editor">Editor</option>
+                                    <option value="viewer">Viewer</option>
+                                  </select>
+                                : chip(m.role)}
+                            </span>
+                            {isAdmin && m.email && m.email.toLowerCase() !== myEmail && (
+                              <button onClick={() => doRemoveMember(m.user_id, m.email)} disabled={teamBusy} title="Remove from company" style={{ fontSize: 12, fontWeight: 700, color: "#B42318", background: "none", border: "none", cursor: "pointer" }}>Remove</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {isAdmin && teamInvites.length > 0 && (
+                        <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, overflow: "hidden", marginTop: 14 }}>
+                          <div style={{ padding: "9px 14px", background: "#F9FAFB", borderBottom: "1px solid #EAECF0", fontSize: 12, fontWeight: 700, color: "#344054" }}>Pending invites ({teamInvites.length})</div>
+                          {teamInvites.map((iv) => (
+                            <div key={iv.id} className="flex items-center gap-3" style={{ padding: "9px 14px", borderTop: "1px solid #F2F4F7" }}>
+                              <span style={{ fontSize: 13, color: "#101828" }}>{iv.email}</span>
+                              <span style={{ marginLeft: "auto" }}>{chip(iv.role)}</span>
+                              <button onClick={() => doRevokeInvite(iv.id)} disabled={teamBusy} style={{ fontSize: 12, fontWeight: 700, color: "#B42318", background: "none", border: "none", cursor: "pointer" }}>Revoke</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {!isAdmin && <div style={{ fontSize: 11.5, color: "#98A2B3", marginTop: 12 }}>Only an owner or admin can invite teammates or change roles. Ask yours if you need access changed.</div>}
+                      {teamMsg && <div style={{ fontSize: 12, color: teamMsg.indexOf("ready") >= 0 ? "#067647" : "#B42318", fontWeight: 600, marginTop: 12 }}>{teamMsg}</div>}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

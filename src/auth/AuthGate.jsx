@@ -93,6 +93,7 @@ function ConfigMissing() {
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(null);
   const [checking, setChecking] = useState(true);
+  const [membership, setMembership] = useState(null); // { org_id, role, email }
 
   // ui state
   const [mode, setMode] = useState("signin"); // signin | signup | forgot
@@ -112,6 +113,16 @@ export default function AuthGate({ children }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Load the caller's membership (role + org) once signed in. RLS returns only
+  // their own row, so this is safe. Role drives write access + the Team panel.
+  useEffect(() => {
+    let alive = true;
+    if (!session) { setMembership(null); return; }
+    supabase.from("memberships").select("org_id, role, email").maybeSingle()
+      .then(({ data }) => { if (alive) setMembership(data || null); });
+    return () => { alive = false; };
+  }, [session]);
+
   if (!supabaseConfigured) return <ConfigMissing />;
   if (checking) {
     return <div style={{ ...wrap, color: "#667085" }}>Loading…</div>;
@@ -121,13 +132,42 @@ export default function AuthGate({ children }) {
   // app so it can show a "Sign out" button in its own top bar next to App Feedback.
   if (session) {
     if (typeof window !== "undefined") {
+      // Legacy rows used role 'member'; the app treats that as 'editor'.
+      const rawRole = membership ? membership.role : null;
+      const role = rawRole === "member" ? "editor" : rawRole;
+      const orgId = membership ? membership.org_id : null;
+      const myId = session.user?.id || null;
+      const isAdmin = role === "owner" || role === "admin";
       window.__sdvAuth = {
         signOut: () => supabase.auth.signOut(),
         email: session.user?.email || "",
+        userId: myId,
+        // The caller's role in their company: owner | admin | editor | viewer
+        // (null until the membership row loads). Drives write access + Team UI.
+        role,
         // Supabase access token — sent as Bearer to the billing serverless functions.
         getToken: async () => { const { data } = await supabase.auth.getSession(); return data.session ? data.session.access_token : null; },
         // The caller's organization row (RLS returns only their own) — plan, seats, status.
         getOrg: async () => { const { data } = await supabase.from("organizations").select("*").maybeSingle(); return data || null; },
+        getRole: async () => { const { data } = await supabase.from("memberships").select("role").maybeSingle(); const r = data ? data.role : null; return r === "member" ? "editor" : r; },
+        // Team management (owner/admin only — enforced by RLS on the server).
+        team: {
+          myRole: role,
+          isAdmin,
+          listMembers: async () => { const { data, error } = await supabase.from("memberships").select("user_id, email, role, created_at").order("created_at", { ascending: true }); if (error) throw error; return (data || []).map((m) => ({ ...m, role: m.role === "member" ? "editor" : m.role })); },
+          listInvites: async () => { const { data, error } = await supabase.from("invitations").select("id, email, role, status, created_at").eq("status", "pending").order("created_at", { ascending: true }); if (error) throw error; return data || []; },
+          invite: async (email, inviteRole) => {
+            const clean = String(email || "").trim().toLowerCase();
+            if (!clean || clean.indexOf("@") < 1) throw new Error("Enter a valid email address.");
+            if (!orgId) throw new Error("Your company workspace isn't ready yet — try again in a moment.");
+            const { error } = await supabase.from("invitations")
+              .upsert({ org_id: orgId, email: clean, role: inviteRole || "editor", invited_by: myId, status: "pending" }, { onConflict: "org_id,email" });
+            if (error) throw error; return true;
+          },
+          revokeInvite: async (id) => { const { error } = await supabase.from("invitations").update({ status: "revoked" }).eq("id", id); if (error) throw error; return true; },
+          setRole: async (userId, newRole) => { const { error } = await supabase.from("memberships").update({ role: newRole }).eq("user_id", userId); if (error) throw error; return true; },
+          removeMember: async (userId) => { const { error } = await supabase.from("memberships").delete().eq("user_id", userId); if (error) throw error; return true; },
+        },
       };
     }
     return <>{children}</>;
@@ -148,8 +188,14 @@ export default function AuthGate({ children }) {
     const dom = domainOf(clean);
     if (!dom) { setErr("Enter a valid email address."); return; }
     if (!OWNER_EMAILS.has(clean) && !OWNER_DOMAINS.has(dom) && PUBLIC_DOMAINS.has(dom)) {
-      setErr("Please use your work email. Personal addresses (gmail, outlook, etc.) can't create a company workspace.");
-      return;
+      // A personal-domain address is allowed ONLY if a company already invited it
+      // (contractors). The trigger will place them in the inviting org.
+      let invited = false;
+      try { const { data } = await supabase.rpc("email_is_invited", { addr: clean }); invited = !!data; } catch (e) {}
+      if (!invited) {
+        setErr("Please use your work email, or ask your company admin to invite this address. Personal addresses (gmail, outlook, etc.) can't create a company workspace on their own.");
+        return;
+      }
     }
     if (password.length < 8) { setErr("Password must be at least 8 characters."); return; }
     setBusy(true);
