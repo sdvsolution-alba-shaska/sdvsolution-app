@@ -7134,10 +7134,10 @@ export default function App() {
   /* Requirements (Reader) in-document find — highlight + navigate matches, Word-style. */
   const [readerQ, setReaderQ] = useState(""), [readerIdx, setReaderIdx] = useState(0), [readerCount, setReaderCount] = useState(0);
   useEffect(() => {
-    if (view !== "reader") { if (readerCount) setReaderCount(0); return; }
+    if (view !== "reader" && view !== "ecureq") { if (readerCount) setReaderCount(0); return; }
     const t = setTimeout(() => { const els = document.querySelectorAll("[data-rmatch]"); setReaderCount(els.length); setReaderIdx(0); els.forEach((el) => (el.style.outline = "none")); }, 40);
     return () => clearTimeout(t);
-  }, [readerQ, view, selected, focus]);
+  }, [readerQ, view, selected, focus, selectedEcu]);
   const [logiSel, setLogiSel] = useState(() => new Set()); // Logicals class filter (multi-select; empty = all)
   const [logiCollapsed, setLogiCollapsed] = useState(() => new Set()); // collapsed ECU sections in Logicals
   const [logiDir, setLogiDir] = useState("all"); // Logicals direction filter (all | Bidir | In | Out)
@@ -10217,8 +10217,22 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>" + esc(ecu.name) + " — Supplier Package</title><style>body{font-family:Calibri,Arial,sans-serif;color:#101828;font-size:11pt} h1{font-size:22pt;margin:2pt 0} h2{font-size:14pt;color:#175CD3;margin:16pt 0 3pt} p{margin:3pt 0;line-height:1.45} .meta{color:#667085;font-size:10pt} .status{color:#B54708;font-weight:700;font-size:10.5pt} .req{margin-left:6pt} .alloc{font-weight:700;color:#475467;margin-top:8pt} .l3{margin:6pt 0 0} .l4{margin:4pt 0 0 22pt} .id{color:#98A2B3;font-size:8.5pt;font-family:Consolas,monospace} .lvl{color:#B6C0CC;font-size:8pt} .proc{color:#175CD3;font-weight:700;font-size:8.5pt} .trace{color:#98A2B3;font-size:9pt}</style></head><body>" + b + "</body></html>";
               download(ecu.id.replace(/[^A-Za-z0-9]+/g, "_") + "_supplier_package.doc", html, "application/msword");
             };
+            /* In-document find — same behaviour as the Features requirements reader. */
+            const escRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const hl = (text) => { const q = readerQ.trim(); if (!q || text == null) return text; return String(text).split(new RegExp("(" + escRe(q) + ")", "ig")).map((p, i) => p.toLowerCase() === q.toLowerCase() ? <mark key={i} data-rmatch style={{ background: "#FEF08A", borderRadius: 2 }}>{p}</mark> : p); };
+            const gotoMatch = (dir) => { const els = document.querySelectorAll("[data-rmatch]"); if (!els.length) return; const idx = (((readerIdx + dir) % els.length) + els.length) % els.length; setReaderIdx(idx); els.forEach((el, i) => (el.style.outline = i === idx ? "2px solid #F59E0B" : "none")); els[idx].scrollIntoView({ block: "center", behavior: "smooth" }); };
             return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+                <div className="sticky top-0 z-10 px-10 py-2 flex items-center gap-2" style={{ background: "rgba(255,255,255,0.97)", borderBottom: "1px solid #EAECF0" }}>
+                  <Search size={14} color="#98A2B3" />
+                  <input value={readerQ} onChange={(e) => setReaderQ(e.target.value)} placeholder="Find in document…"
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); } if (e.key === "Escape") setReaderQ(""); }}
+                    style={{ flex: "0 1 340px", fontSize: 12.5, padding: "5px 10px", borderRadius: 8, border: "1px solid #D0D5DD", outline: "none" }} />
+                  <span style={{ fontSize: 11.5, color: "#667085", minWidth: 66 }}>{readerQ.trim() ? (readerCount ? `${Math.min(readerIdx + 1, readerCount)} / ${readerCount}` : "0 matches") : ""}</span>
+                  <button onClick={() => gotoMatch(-1)} disabled={!readerCount} title="Previous (Shift+Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronUp size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
+                  <button onClick={() => gotoMatch(1)} disabled={!readerCount} title="Next (Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronDown size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
+                  {readerQ && <button onClick={() => setReaderQ("")} title="Clear"><X size={13} color="#98A2B3" /></button>}
+                </div>
                 <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 40px 80px" }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, color: accent, letterSpacing: 0.5 }}>{smartLike ? "SMART DEVICE REQUIREMENTS SPECIFICATION" : "ECU REQUIREMENTS SPECIFICATION"}</div>
                   <h1 style={{ fontSize: 24, fontWeight: 700, color: "#101828", margin: "4px 0 2px" }}>{ecu.name}</h1>
@@ -10253,11 +10267,11 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   </ol>
                   {chapters.map((c, i) => (
                     <div key={i} id={"ecuch-" + i} style={{ marginBottom: 22, scrollMarginTop: 16 }}>
-                      <h2 style={{ fontSize: 16, fontWeight: 700, color: "#101828", margin: "0 0 4px" }}>{i + 1}. {c.n}</h2>
+                      <h2 style={{ fontSize: 16, fontWeight: 700, color: "#101828", margin: "0 0 4px" }}>{i + 1}. {hl(c.n)}</h2>
                       {ecuReqEdit && ecuReqEdit.ci === i && ecuReqEdit.ri === "intro" ? (
                         <textarea autoFocus defaultValue={c.intro} onBlur={(e) => saveReq(i, "intro", e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setEcuReqEdit(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveReq(i, "intro", e.target.value); }} className="w-full rounded-md outline-none p-2" rows={2} style={{ fontSize: 12.5, color: "#101828", border: "1px solid #175CD3", lineHeight: 1.55, margin: "0 0 8px" }} />
                       ) : (
-                        <p onClick={canWrite ? () => setEcuReqEdit({ ci: i, ri: "intro" }) : undefined} title={canWrite ? "Click to edit" : undefined} style={{ fontSize: 12.5, color: "#475467", lineHeight: 1.55, margin: "0 0 8px", cursor: canWrite ? "text" : "default", borderRadius: 4 }}>{c.intro}</p>
+                        <p onClick={canWrite ? () => setEcuReqEdit({ ci: i, ri: "intro" }) : undefined} title={canWrite ? "Click to edit" : undefined} style={{ fontSize: 12.5, color: "#475467", lineHeight: 1.55, margin: "0 0 8px", cursor: canWrite ? "text" : "default", borderRadius: 4 }}>{hl(c.intro)}</p>
                       )}
                       {c.reqs.map((r, j) => (
                         <div key={j} className="flex gap-2 group" style={{ marginBottom: 5 }}>
@@ -10265,7 +10279,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           {ecuReqEdit && ecuReqEdit.ci === i && ecuReqEdit.ri === j ? (
                             <textarea autoFocus defaultValue={r} onBlur={(e) => saveReq(i, j, e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setEcuReqEdit(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveReq(i, j, e.target.value); }} className="flex-1 rounded-md outline-none p-1.5" rows={2} style={{ fontSize: 12.5, color: "#101828", border: "1px solid #175CD3", lineHeight: 1.5 }} />
                           ) : (
-                            <span onClick={canWrite ? () => setEcuReqEdit({ ci: i, ri: j }) : undefined} title={canWrite ? "Click to edit this ECU requirement" : undefined} style={{ fontSize: 12.5, color: "#344054", lineHeight: 1.5, cursor: canWrite ? "text" : "default", flex: 1 }}>{r}</span>
+                            <span onClick={canWrite ? () => setEcuReqEdit({ ci: i, ri: j }) : undefined} title={canWrite ? "Click to edit this ECU requirement" : undefined} style={{ fontSize: 12.5, color: "#344054", lineHeight: 1.5, cursor: canWrite ? "text" : "default", flex: 1 }}>{hl(r)}</span>
                           )}
                           {canWrite && <button onClick={() => delReq(i, j)} title="Delete this requirement" style={{ fontSize: 11, color: "#B42318", opacity: 0.55, flexShrink: 0 }}>✕</button>}
                         </div>
