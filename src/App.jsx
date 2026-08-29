@@ -3097,6 +3097,109 @@ async function parseAttachmentFile(file) {
     return { name, kind: ext || "file", text: "", error: (e && e.message) || String(e) };
   }
 }
+/* ---- Requirement upload parsers ------------------------------------------
+   Turn an Excel/CSV/Word/PDF file into a flat list of requirement records
+   [{ id, name, text, Safety, parentId }] that reconcileReqRecords() can merge
+   into the L0/L1/L2 model — the same shape parseReqIFText() produces, so every
+   upload format goes through ONE reconcile path. Excel/CSV/ReqIF round-trip
+   cleanly; Word/PDF are best-effort (layout formats, not data). */
+function csvToAoa(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c === "\r") { /* skip */ }
+    else cur += c;
+  }
+  if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+// Map a 2D array (spreadsheet rows) to requirement records. Understands our own
+// export header (Level · No. · ID · Title/Aspect · Statement · … · Safety) and
+// common variants; falls back to the export's fixed column positions.
+function aoaToReqRecords(aoa) {
+  if (!aoa || !aoa.length) return [];
+  const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(aoa.length, 6); i++) {
+    const cells = (aoa[i] || []).map(norm);
+    if (cells.indexOf("id") >= 0 && cells.some((c) => c.indexOf("statement") === 0 || c.indexOf("title") >= 0 || c.indexOf("requirement") >= 0 || c.indexOf("text") >= 0)) { headerRow = i; break; }
+  }
+  let idx = { level: 0, id: 2, name: 3, text: 4, safety: 6 }; // positional fallback = our export layout
+  let start = 1;
+  if (headerRow >= 0) {
+    const cells = (aoa[headerRow] || []).map(norm);
+    const find = (names) => {
+      for (const n of names) { const j = cells.indexOf(n); if (j >= 0) return j; }
+      for (const n of names) { const j = cells.findIndex((c) => c.indexOf(n) >= 0); if (j >= 0) return j; }
+      return -1;
+    };
+    idx = {
+      level: find(["level"]),
+      id: find(["id", "foreignid", "req id", "identifier", "key"]),
+      name: find(["title / aspect", "title", "name", "aspect", "summary"]),
+      text: find(["statement", "requirement text", "requirement", "text", "description"]),
+      safety: find(["safety", "asil"]),
+    };
+    start = headerRow + 1;
+  }
+  const recs = []; let lastL1 = null;
+  for (let i = start; i < aoa.length; i++) {
+    const row = aoa[i]; if (!row) continue;
+    const g = (j) => (j >= 0 && j < row.length ? String(row[j] == null ? "" : row[j]).trim() : "");
+    const id = g(idx.id), text = g(idx.text), name = g(idx.name);
+    const level = g(idx.level).toUpperCase();
+    if (!id && !text && !name) continue; // blank line
+    const isL1row = level.indexOf("L1") === 0 || /^L1-/.test(id);
+    const rec = { id: id || null, name: name || "", text: text || "", Safety: g(idx.safety) || "", parentId: null };
+    if (isL1row) lastL1 = id || lastL1;
+    else if (lastL1) rec.parentId = lastL1;
+    recs.push(rec);
+  }
+  return recs;
+}
+// Word (.docx) → rows: pull the largest table out of the converted HTML. Returns
+// null when there's no usable table (caller then reports best-effort failure).
+async function docxToAoa(file) {
+  const mammoth = await ensureMammoth();
+  const res = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+  const html = (res && res.value) || "";
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const tables = doc.getElementsByTagName("table");
+  let best = null, bestRows = 0;
+  for (let t = 0; t < tables.length; t++) { const rc = tables[t].getElementsByTagName("tr").length; if (rc > bestRows) { bestRows = rc; best = tables[t]; } }
+  if (!best) return null;
+  const aoa = []; const trs = best.getElementsByTagName("tr");
+  for (let r = 0; r < trs.length; r++) {
+    const cellEls = trs[r].querySelectorAll("th,td"); const cells = [];
+    cellEls.forEach((c) => cells.push((c.textContent || "").trim()));
+    if (cells.length) aoa.push(cells);
+  }
+  return aoa.length > 1 ? aoa : null;
+}
+// PDF → records (best-effort): scan text for lines carrying an L0–L4 id and take
+// the rest of the line as the statement. Good enough to update existing nodes by
+// id when re-importing our own PDF export.
+async function pdfToReqRecords(file) {
+  const pdfjs = await ensurePdfJs();
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  let text = "";
+  for (let p = 1; p <= doc.numPages; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); text += tc.items.map((i) => i.str).join(" ") + "\n"; }
+  const recs = []; let lastL1 = null;
+  text.split(/\n+/).forEach((ln) => {
+    const m = ln.match(/\b(L[0-4]-[A-Z0-9][A-Z0-9-]{1,})\b/);
+    if (!m) return;
+    const id = m[1];
+    const after = ln.slice(ln.indexOf(id) + id.length).replace(/^[\s:.–-]+/, "").trim();
+    const isL1 = /^L1-/.test(id);
+    recs.push({ id, name: "", text: after, Safety: "", parentId: isL1 ? null : lastL1 });
+    if (isL1) lastL1 = id;
+  });
+  return recs;
+}
 function kmatrixData() {
   const K = KM_STORE.data, M = K.msgs;
   const LINm = Object.fromEntries(K.lin.map(([n, f, o, u]) => [n, [f, o, u]]));
@@ -8101,7 +8204,7 @@ export default function App() {
   /* Import Save-As model: pick a source type, then (if it needs one) choose a file. */
   const IMPORT_SETS = {
     masters: { label: "Source masters (re-ingest)", note: "Reruns the ingestion pipeline and rebuilds the graph from the connected source masters.", file: false },
-    reqif: { label: "Requirements (ReqIF / CSV / Excel)", note: "Map columns to node & edge types, then merge into the graph.", file: true, accept: ".reqif,.csv,.xlsx,.xls" },
+    reqif: { label: "Requirements (ReqIF · Excel · CSV · Word · PDF)", note: "Matches rows by ID to update requirements in place and adds new ones under their function. Excel/CSV/ReqIF round-trip cleanly; Word & PDF are best-effort (a requirements table is read where present).", file: true, accept: ".reqif,.csv,.xlsx,.xls,.docx,.pdf,.xml" },
     kbl: { label: "Harness connectivity (KBL / VEC)", note: "Reconcile logical nets from the supplier package against the model.", file: true, accept: ".kbl,.vec,.xml" },
   };
   /* Run the selected upload. ReqIF is parsed and RECONCILED against the L0/L1/L2 model:
@@ -8109,39 +8212,52 @@ export default function App() {
        (true round-trip: export → edit in DOORS/Polarion/Codebeamer → import back);
      • a genuinely-new record is placed under the L1 found by walking its ReqIF parent chain
        (falling back to the selected function). Reports updated / added / skipped. */
+  /* Merge a flat list of requirement records (from ANY upload format — ReqIF,
+     Excel, CSV, Word, PDF) into the L0/L1/L2 model:
+       • a record whose ID matches an existing node/requirement UPDATES it in place;
+       • a genuinely-new record is placed under the L1 found by walking its parent
+         chain (falling back to the selected function). Reports updated/added/skipped. */
+  const reconcileReqRecords = (recs, sourceLabel) => {
+    if (!recs || !recs.length) { notify("No requirements found in " + sourceLabel + "."); return; }
+    const addedIndex = {};
+    [SYSREQ_STORE, SWREQ_STORE].forEach((store) => { Object.keys(store.data).forEach((l1) => (store.data[l1] || []).forEach((rq, i) => { addedIndex[rq.id] = { store, l1, i }; })); });
+    const isExistingL1 = (fid) => fid && getN(fid) && isL1(getN(fid));
+    const resolveTargetL1 = (r) => { let cur = r, guard = 0; while (cur && guard++ < 40) { if (isExistingL1(cur.id)) return cur.id; if (!cur.parentId) break; cur = recs.find((x) => x.id === cur.parentId) || null; } return null; };
+    let selL1 = null;
+    if (selected) { const sn = getN(selected); selL1 = isL1(sn) ? selected : (originL1(selected) || null); }
+    let updated = 0, added = 0, skipped = 0; const nodeEdits = {};
+    recs.forEach((r) => {
+      const fid = r.id, stmt = r.text || r.name || "";
+      if (!stmt && !r.name) { skipped++; return; }
+      if (fid && getN(fid)) { if (r.text) nodeEdits[fid] = r.text; updated++; return; }        // existing graph node → update statement
+      if (fid && addedIndex[fid]) { const a = addedIndex[fid]; const rec = a.store.data[a.l1] && a.store.data[a.l1][a.i]; if (rec) { if (r.text) rec.statement = r.text; if (r.name) rec.title = r.name; } updated++; return; } // existing added req → update
+      const l1 = resolveTargetL1(r) || selL1;                                                    // new → place under resolved / selected L1
+      if (!l1) { skipped++; return; }
+      if (!SYSREQ_STORE.data[l1]) SYSREQ_STORE.data[l1] = [];
+      const arr = SYSREQ_STORE.data[l1];
+      arr.push({ id: "SYS-IMP-" + l1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: r.name || r.id || "Imported requirement", ears: "Imported", statement: stmt, method: "Test", criterion: "", rationale: r.id ? "Imported ID: " + r.id : "", asil: r.Safety || "QM" });
+      added++;
+    });
+    if (Object.keys(nodeEdits).length) setNodes((prev) => { const nx = { ...prev }; Object.entries(nodeEdits).forEach(([id, statement]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement }, edited: true }; }); return nx; });
+    setSysReqV((v) => v + 1);
+    notify(sourceLabel + ": " + updated + " updated · " + added + " added · " + skipped + " skipped" + (skipped ? " (no matching function — select one and re-import to place them)" : "") + ".");
+  };
   const runImport = async () => {
     const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
     setIoMenu(false);
-    if (importType === "reqif" && importFile && /\.reqif$/i.test(importFile.name || "")) {
+    if (importType === "reqif" && importFile) {
+      const name = importFile.name || ""; const ext = (name.split(".").pop() || "").toLowerCase();
       try {
-        const recs = parseReqIFText(await importFile.text());
-        if (!recs.length) { notify("No requirements found in " + importFile.name + "."); setImportFile(null); return; }
-        // Index existing user-added requirements by id so we can update them in place.
-        const addedIndex = {};
-        [SYSREQ_STORE, SWREQ_STORE].forEach((store) => { Object.keys(store.data).forEach((l1) => (store.data[l1] || []).forEach((rq, i) => { addedIndex[rq.id] = { store, l1, i }; })); });
-        const isExistingL1 = (fid) => fid && getN(fid) && isL1(getN(fid));
-        // Resolve the target L1 for a new record by walking up its imported parent chain.
-        const resolveTargetL1 = (r) => { let cur = r, guard = 0; while (cur && guard++ < 40) { if (isExistingL1(cur.id)) return cur.id; if (!cur.parentId) break; cur = recs.find((x) => x.id === cur.parentId) || null; } return null; };
-        let selL1 = null;
-        if (selected) { const sn = getN(selected); selL1 = isL1(sn) ? selected : (originL1(selected) || null); }
-        let updated = 0, added = 0, skipped = 0; const nodeEdits = {};
-        recs.forEach((r) => {
-          const fid = r.id, stmt = r.text || r.name || "";
-          if (!stmt && !r.name) { skipped++; return; }
-          if (fid && getN(fid)) { if (r.text) nodeEdits[fid] = r.text; updated++; return; }        // existing graph node → update statement
-          if (fid && addedIndex[fid]) { const a = addedIndex[fid]; const rec = a.store.data[a.l1] && a.store.data[a.l1][a.i]; if (rec) { if (r.text) rec.statement = r.text; if (r.name) rec.title = r.name; } updated++; return; } // existing added req → update
-          const l1 = resolveTargetL1(r) || selL1;                                                    // new → place under resolved / selected L1
-          if (!l1) { skipped++; return; }
-          if (!SYSREQ_STORE.data[l1]) SYSREQ_STORE.data[l1] = [];
-          const arr = SYSREQ_STORE.data[l1];
-          arr.push({ id: "SYS-REQIF-" + l1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: r.name || r.id || "Imported requirement", ears: "Imported", statement: stmt, method: "Test", criterion: "", rationale: r.id ? "ReqIF ForeignID: " + r.id : "", asil: r.Safety || "QM" });
-          added++;
-        });
-        if (Object.keys(nodeEdits).length) setNodes((prev) => { const nx = { ...prev }; Object.entries(nodeEdits).forEach(([id, statement]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement }, edited: true }; }); return nx; });
-        setSysReqV((v) => v + 1);
-        notify("ReqIF: " + updated + " updated · " + added + " added · " + skipped + " skipped" + (skipped ? " (no matching function — select one and re-import to place them)" : "") + ".");
+        let recs = null;
+        if (ext === "reqif" || ext === "xml") recs = parseReqIFText(await importFile.text());
+        else if (ext === "csv") recs = aoaToReqRecords(csvToAoa(await importFile.text()));
+        else if (ext === "xlsx" || ext === "xls") { const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await importFile.arrayBuffer(), { type: "array" }); const sh = wb.Sheets[wb.SheetNames[0]]; recs = aoaToReqRecords(XLSX.utils.sheet_to_json(sh, { header: 1, blankrows: false, defval: "" })); }
+        else if (ext === "docx") { const rows = await docxToAoa(importFile); recs = rows ? aoaToReqRecords(rows) : []; if (!recs.length) { notify("Couldn't find a requirements table in “" + name + "”. Word re-import is best-effort — export to Excel, CSV or ReqIF for a clean round-trip."); setImportFile(null); return; } }
+        else if (ext === "pdf") { recs = await pdfToReqRecords(importFile); if (!recs.length) { notify("Couldn't extract requirements from “" + name + "”. PDF re-import is best-effort — use Excel, CSV or ReqIF for a clean round-trip."); setImportFile(null); return; } }
+        else { notify("Unsupported file type: " + name + ". Use ReqIF, Excel, CSV, Word or PDF."); setImportFile(null); return; }
+        reconcileReqRecords(recs || [], name);
         setImportFile(null); return;
-      } catch (e) { notify("ReqIF import failed: " + (e && e.message ? e.message : e)); setImportFile(null); return; }
+      } catch (e) { notify("Import failed: " + (e && e.message ? e.message : e)); setImportFile(null); return; }
     }
     notify((iset.file && importFile ? "Importing “" + importFile.name + "”" : iset.label) + "…"); setImportFile(null);
   };
