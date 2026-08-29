@@ -7694,7 +7694,7 @@ export default function App() {
   // isn't configured (artifact / preview) the app stays fully writable.
   const authPresent = typeof window !== "undefined" && !!window.__sdvAuth;
   const isAdmin = isStaff || orgRole === "owner" || orgRole === "admin";
-  const canWrite = !authPresent || isStaff || orgRole !== "viewer"; // viewers = read-only
+  const canWrite = true; // all members (owner/admin/editor) can edit — no read-only role
   const demoLocked = plan === "Trial" && !isStaff && typeof window !== "undefined" && !!window.__sdvAuth;
   const featureAllowed = (id) => !demoLocked || id === DEMO_L0 || l0Of(id) === DEMO_L0;
   const ecuAllowed = (ecuId) => !demoLocked || DEMO_ECUS.has(ecuId);
@@ -8347,7 +8347,7 @@ Use these only when the user explicitly asks to add/change/remove model data. Co
 - Add system requirements under a function (L1): <action>{"type":"addSysReq","l1":"L1-BODY-00187","items":[{"title":"Fold on lock","statement":"When the vehicle is locked, the system shall fold both exterior mirrors within 3 s.","ears":"Event-driven","method":"Test","asil":"QM"},{"title":"...","statement":"..."}]}</action> \u2014 l1 may be a function id (L1-...) or its exact name; each item needs at least a statement (write it in EARS form). Use a single item with top-level fields, or many via "items".
 - Add software requirements under a function (L1): <action>{"type":"addSwReq","l1":"Auto-Dim Interior Mirror","items":[{"title":"...","statement":"The software shall ...","ears":"Ubiquitous","method":"Test"}]}</action>
 When turning a dropped Word/Excel spec into requirements: map each spec item to the right function (L1), rewrite it as one testable EARS statement (fields: title, statement, ears, method, criterion, rationale, asil), then emit addSysReq / addSwReq. Briefly list what you're adding first; if the target function is unclear, ask instead of guessing.
-If the user is a Viewer (read-only), do NOT emit write actions \u2014 tell them to ask an Owner or Admin (Billing \u2192 Team) to change their role or make the edit.
+All signed-in members can edit. Write actions are allowed for the current user.
 
 The user may attach files (PDF, Excel, Word, CSV, text). Their extracted text is included in the message under "[Attached files]". Read them and, when the user asks you to apply/import/update something from a file, use the write actions above to make the change (e.g., turn a spreadsheet of interfaces into addInterfaces rows, correct a property from a spec with editNode). Always state, in one sentence, what you are changing before the action tag, and if a file is ambiguous, summarize what you found and ask before writing.
 Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Module." <action>{"type":"select","id":"ECU-CZM"}</action>`;
@@ -9060,7 +9060,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   return (
                     <div style={{ maxWidth: 720 }}>
                       <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 4 }}>Invite teammates and set what each can do. Access is scoped to your company — nobody outside it can see your data.</div>
-                      <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 12 }}>Owner: billing + team + edit &nbsp;·&nbsp; Admin: team + edit &nbsp;·&nbsp; Editor: edit &nbsp;·&nbsp; Viewer: read-only. Only editors and above count toward billed seats.</div>
+                      <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 12 }}>Owner: billing + team + edit &nbsp;·&nbsp; Admin: team + edit &nbsp;·&nbsp; Editor: edit. Each member counts toward a billed seat.</div>
 
                       {isAdmin && (
                         <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
@@ -9070,7 +9070,6 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                               style={{ flex: "1 1 240px", minWidth: 200, border: "1px solid #E4E7EC", borderRadius: 8, padding: "8px 10px", fontSize: 13, background: "#F9FAFB", color: "#101828" }} />
                             <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ border: "1px solid #E4E7EC", borderRadius: 8, padding: "8px 10px", fontSize: 13, background: "#fff", color: "#101828", cursor: "pointer" }}>
                               <option value="editor">Editor</option>
-                              <option value="viewer">Viewer</option>
                               <option value="admin">Admin</option>
                             </select>
                             <button onClick={doInvite} disabled={teamBusy} style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 8, padding: "8px 16px", cursor: teamBusy ? "default" : "pointer", opacity: teamBusy ? 0.6 : 1 }}>Add to team</button>
@@ -9094,7 +9093,6 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                                     <option value="owner">Owner</option>
                                     <option value="admin">Admin</option>
                                     <option value="editor">Editor</option>
-                                    <option value="viewer">Viewer</option>
                                   </select>
                                 : chip(m.role)}
                             </span>

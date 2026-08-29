@@ -120,9 +120,9 @@ clear "backend not configured" message and the rest of the app is unaffected.
 
 Run **`supabase/phase4_team.sql`** once in the SQL Editor. It adds:
 
-- Four roles — **owner · admin · editor · viewer**. Owner = billing + team +
-  edit, Admin = team + edit, Editor = edit, Viewer = **read-only** (viewers don't
-  count as billed editors). Legacy `member` rows are treated as `editor`.
+- Three roles — **owner · admin · editor**. Owner = billing + team + edit,
+  Admin = team + edit, Editor = edit. Every member can edit and counts toward a
+  billed seat. Legacy `member` rows are treated as `editor`.
 - An **`invitations`** table + RLS so an owner/admin can pre-authorize a
   teammate's email (any domain — contractors on gmail etc. work once invited).
 - The sign-up trigger now honors a pending invite **before** email-domain
