@@ -150,6 +150,17 @@ export default function AuthGate({ children }) {
         // The caller's organization row (RLS returns only their own) — plan, seats, status.
         getOrg: async () => { const { data } = await supabase.from("organizations").select("*").maybeSingle(); return data || null; },
         getRole: async () => { const { data } = await supabase.from("memberships").select("role").maybeSingle(); const r = data ? data.role : null; return r === "member" ? "editor" : r; },
+        // Make the Stripe subscription quantity match the company's team size, so
+        // the monthly bill tracks members. Safe to call from any member's app.
+        syncSeats: async () => {
+          try {
+            const { data } = await supabase.auth.getSession();
+            const tok = data.session ? data.session.access_token : null;
+            if (!tok) return null;
+            const r = await fetch("/api/sync-seats", { method: "POST", headers: { Authorization: "Bearer " + tok } });
+            return await r.json().catch(() => null);
+          } catch (e) { return null; }
+        },
         // Team management (owner/admin only — enforced by RLS on the server).
         team: {
           myRole: role,

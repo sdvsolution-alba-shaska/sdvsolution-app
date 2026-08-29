@@ -48,6 +48,16 @@ export async function getCallerOrg(req) {
   return { user: u.user, membership: mem, org };
 }
 
+// Count an org's billable members. Every membership is a billed seat (there is
+// no free/viewer role), so this is simply the member count (minimum 1).
+export async function countMembers(orgId) {
+  const { count } = await admin
+    .from("memberships")
+    .select("user_id", { count: "exact", head: true })
+    .eq("org_id", orgId);
+  return Math.max(1, count || 1);
+}
+
 export function originOf(req) {
   return req.headers.origin || ("https://" + (req.headers.host || "app.sdvsolution.com"));
 }

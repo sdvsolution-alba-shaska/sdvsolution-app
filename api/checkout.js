@@ -1,6 +1,6 @@
 // POST /api/checkout — start a Stripe Checkout session for the signed-in company.
 // Body: { plan: "basic" | "pro", seats: number }. Auth: Bearer <supabase access token>.
-import { stripe, admin, PRICE, readJson, getCallerOrg, originOf, ok, err } from "./_billing.js";
+import { stripe, admin, PRICE, readJson, getCallerOrg, countMembers, originOf, ok, err } from "./_billing.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return err(res, 405, "Method not allowed");
@@ -13,9 +13,12 @@ export default async function handler(req, res) {
 
     const body = await readJson(req);
     const plan = String(body.plan || "").toLowerCase();
-    const seats = Math.max(1, parseInt(body.seats, 10) || 1);
     const price = PRICE[plan];
     if (!price) return err(res, 400, "Unknown or unpriced plan: " + plan);
+
+    // Seats are the company's actual team size — not a manual number — so the
+    // bill matches who's in the workspace. (At least 1.)
+    const seats = await countMembers(org.id);
 
     // Reuse or create the Stripe customer for this org.
     let customer = org.stripe_customer_id;
@@ -41,6 +44,15 @@ export default async function handler(req, res) {
       metadata: { org_id: org.id, plan },
       allow_promotion_codes: true,
       billing_address_collection: "auto",
+      // Offer whatever payment methods are enabled on the Stripe account —
+      // card AND bank direct debit (ACH for US banks, SEPA for EU). Stripe only
+      // shows the ones valid for the price's currency, so we don't hard-code a
+      // list (SEPA is EUR-only, ACH USD-only). Enable ACH/SEPA in the Stripe
+      // Dashboard → Settings → Payment methods (see BILLING_SETUP.md).
+      // 'always' forces the chosen method (incl. a bank account) to be collected
+      // even though the first 14 days are free — otherwise there'd be nothing to
+      // debit when the trial ends.
+      payment_method_collection: "always",
       success_url: origin + "/?billing=success",
       cancel_url: origin + "/?billing=cancel",
     });

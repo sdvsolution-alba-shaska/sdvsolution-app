@@ -6904,7 +6904,7 @@ export default function App() {
     if (!teamApi) return;
     if (typeof window !== "undefined" && !window.confirm("Remove " + email + " from the company? They lose all access immediately.")) return;
     setTeamBusy(true); setTeamMsg("");
-    try { await teamApi.removeMember(userId); await loadTeam(); }
+    try { await teamApi.removeMember(userId); await loadTeam(); if (window.__sdvAuth && window.__sdvAuth.syncSeats) window.__sdvAuth.syncSeats().catch(() => {}); }
     catch (e) { setTeamMsg(e && e.message ? e.message : String(e)); }
     setTeamBusy(false);
   };
@@ -6997,6 +6997,10 @@ export default function App() {
     if (!a || !a.getRole) return;
     let alive = true;
     a.getRole().then((r) => { if (alive) setOrgRole(r); }).catch(() => {});
+    // Self-heal billing: on load, make the subscription seat count match the
+    // team. This is what charges the company when an invited teammate joins —
+    // their first app load bumps the seat quantity (prorated by Stripe).
+    if (a.syncSeats) { a.syncSeats().catch(() => {}); }
     return () => { alive = false; };
   }, []);
   /* Resizable + collapsible side panels — give the center more room. */
@@ -9016,7 +9020,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 {acctMsg && <div style={{ fontSize: 12, color: "#175CD3", fontWeight: 600, marginBottom: 10 }}>{acctMsg}</div>}
                 {acctTab === "plan" && (
                   <div>
-                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per editor. Paid plans include a 14‑day free trial; you can cancel any time.</div>
+                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per team member. Pay by credit card or bank account (ACH / SEPA direct debit) at checkout. Paid plans include a 14‑day free trial; you can cancel any time.</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                       {PLANS.map((pl) => { const cur = pl.k === plan; return (
                         <div key={pl.k} style={{ border: "1px solid " + (cur ? pl.accent : "#E4E7EC"), borderRadius: 10, padding: "12px 12px", background: cur ? pl.accent + "0D" : "#fff", display: "flex", flexDirection: "column" }}>
@@ -9034,17 +9038,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                     <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
                       <div className="flex items-center justify-between"><span style={{ fontSize: 12.5, fontWeight: 700, color: "#101828" }}>Current plan</span><span style={{ fontSize: 12.5, fontWeight: 800, color: "#175CD3" }}>{plan === "Trial" ? "Free trial" : plan}</span></div>
                       <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
-                        <span style={{ fontSize: 12, color: "#475467" }}>Editors</span>
-                        <button onClick={() => setSeats((s) => Math.max(1, s - 1))} style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #D0D5DD", fontWeight: 700, cursor: "pointer" }}>−</button>
-                        <span style={{ fontSize: 13, fontWeight: 700, width: 24, textAlign: "center" }}>{seats}</span>
-                        <button onClick={() => setSeats((s) => s + 1)} style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid #D0D5DD", fontWeight: 700, cursor: "pointer" }}>+</button>
-                        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#101828" }}>{priceNum ? "$" + monthly.toLocaleString() + " / mo" : (plan === "Enterprise" ? "Custom" : "$0")}</span>
+                        <span style={{ fontSize: 12, color: "#475467" }}>Seats (team members)</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: "#101828" }}>{seats}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#101828" }}>{priceNum ? "$" + monthly.toLocaleString() + " / mo" : "$0"}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>{priceNum ? seats + " editor" + (seats === 1 ? "" : "s") + " × $" + priceNum + "/editor/mo — seat and plan changes are confirmed at checkout or in the billing portal." : "No charge on the current plan."}</div>
+                      <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>{priceNum ? seats + " member" + (seats === 1 ? "" : "s") + " × $" + priceNum + "/mo. Seats follow your team automatically — invite or remove people in the Team tab and Stripe prorates the change on your next invoice." : "No charge on the free trial. When you subscribe you'll be billed for your current team size; it then updates automatically as the team changes."}</div>
                     </div>
                     <div style={{ border: "1px solid #E4E7EC", borderRadius: 10, padding: "12px 14px" }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: "#101828", marginBottom: 4 }}>Payment, invoices &amp; cancellation</div>
-                      <div style={{ fontSize: 11.5, color: "#667085", marginBottom: 10 }}>Card details, receipts &amp; invoices, seat changes and cancellation are all handled in Stripe's secure billing portal.</div>
+                      <div style={{ fontSize: 11.5, color: "#667085", marginBottom: 10 }}>Payment method (card or bank account), receipts &amp; invoices, and cancellation are all handled in Stripe's secure billing portal.</div>
                       {plan !== "Trial" && plan !== "Enterprise"
                         ? <button disabled={billingBusy} onClick={openPortal} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "7px 14px", cursor: billingBusy ? "default" : "pointer", opacity: billingBusy ? 0.6 : 1 }}>Manage billing ↗</button>
                         : <button onClick={() => setAcctTab("plan")} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 7, padding: "7px 14px", cursor: "pointer" }}>Choose a plan</button>}

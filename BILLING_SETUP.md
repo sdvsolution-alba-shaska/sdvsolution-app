@@ -66,9 +66,46 @@ Then **redeploy** (env vars are baked in at deploy time).
 3. Connect your **bank account** in Stripe → Settings → Payouts (your
    SDVsolution business account) so funds settle to you.
 
+## Seats follow the team automatically (Phase 4)
+The monthly bill tracks company size — there's no manual seat number to keep in
+sync. `api/sync-seats.js` sets the Stripe subscription quantity to the org's
+member count and Stripe prorates the change:
+- **A teammate accepts an invite** → their first app load calls `sync-seats`,
+  which bumps the quantity (the company is charged for the new seat, prorated).
+- **A member is removed** (Team tab) → `sync-seats` lowers the quantity.
+- **Checkout** uses the current member count as the initial quantity.
+- **Trial companies** can invite freely; there's no charge until they subscribe,
+  at which point they're billed for their current team size.
+
+No extra env vars or Stripe config are needed — it reuses the existing keys.
+
+## Pay by bank account (ACH / SEPA direct debit)
+Companies can pay from a **bank account**, not just a card — lower fees, better
+for larger teams. Checkout already offers whatever methods your Stripe account
+has enabled and forces the method to be collected during the trial
+(`payment_method_collection: "always"`), so the only setup is a Dashboard toggle:
+
+1. Stripe Dashboard → **Settings → Payment methods**.
+2. Turn on **ACH Direct Debit** (US bank accounts). Turn on **SEPA Direct Debit**
+   too if you sell to EU companies. (Leave card on for smaller teams.)
+3. Do this in **both** Test and Live mode (top-left toggle) — they're separate.
+
+That's it — no code or env changes. At checkout the company will now see
+"US bank account / SEPA" next to card and can link their bank (instantly via
+Stripe Financial Connections, or by micro-deposits). Stripe then auto-debits the
+monthly bill from that account, and the seat-sync keeps the amount matching the
+team size.
+
+Notes: ACH is USD-only and SEPA is EUR-only, so Stripe shows each only when the
+plan's currency matches. Bank verification via micro-deposits can take 1–2 days
+the first time; instant verification is offered in Checkout when the bank
+supports it. ACH payments can take a few business days to clear and can fail/return
+later, which Stripe reports via the same subscription webhooks you already handle.
+
 ## Notes / not done yet
-- **Only owners/admins** can start checkout or open the portal (enforced in the
-  functions).
+- **Only owners/admins** can start checkout, open the portal, or manage the team
+  (enforced in the functions + RLS). Any member may trigger a seat re-sync, but
+  it can only set the quantity to the real member count.
 - **Entitlement enforcement** (blocking a company that exceeds its plan's
   requirement/project/seat limits) isn't wired yet — the plan is stored and shown,
   but caps aren't hard‑enforced in the UI. That's the natural next step.
