@@ -2896,26 +2896,40 @@ function parseReqIFText(text) {
   if (!doc || doc.getElementsByTagName("parsererror").length) return [];
   const local = (el) => el.localName || String(el.nodeName).replace(/^.*:/, "");
   const all = (name) => Array.from(doc.getElementsByTagName("*")).filter((e) => local(e) === name);
-  const childText = (el, name) => { for (const c of Array.from(el.children || [])) { if (local(c) === name) return (c.textContent || "").trim(); } return ""; };
-  // Map ATTRIBUTE-DEFINITION-STRING id -> long-name, to know which value is Name/Text/ForeignID.
+  const kids = (el, name) => Array.from((el && el.children) || []).filter((c) => local(c) === name);
+  // ATTRIBUTE-DEFINITION-STRING id -> long-name (tells us which value is Name/Text/ForeignID)
   const defName = {};
-  all("ATTRIBUTE-DEFINITION-STRING").forEach((d) => { const id = d.getAttribute("IDENTIFIER"); const ln = d.getAttribute("LONG-NAME") || ""; if (id) defName[id] = ln; });
-  const out = [];
+  all("ATTRIBUTE-DEFINITION-STRING").forEach((d) => { const id = d.getAttribute("IDENTIFIER"); if (id) defName[id] = d.getAttribute("LONG-NAME") || ""; });
+  // one record per SPEC-OBJECT, keyed by its IDENTIFIER
+  const bySoId = {};
   all("SPEC-OBJECT").forEach((so) => {
-    const rec = {};
+    const soId = so.getAttribute("IDENTIFIER"); const rec = { _so: soId };
     Array.from(so.getElementsByTagName("*")).filter((e) => local(e) === "ATTRIBUTE-VALUE-STRING").forEach((v) => {
       let refId = ""; Array.from(v.getElementsByTagName("*")).forEach((e) => { if (local(e) === "ATTRIBUTE-DEFINITION-STRING-REF") refId = (e.textContent || "").trim(); });
-      const ln = defName[refId] || refId;
-      const val = v.getAttribute("THE-VALUE") || "";
+      const ln = defName[refId] || refId; const val = v.getAttribute("THE-VALUE") || "";
       if (/ForeignID$|(^|\.)ID$/i.test(ln)) rec.id = val;
       else if (/Name$/i.test(ln)) rec.name = val;
       else if (/Text$/i.test(ln)) rec.text = val;
       else if (/^Level$/i.test(ln)) rec.level = val;
       else rec[ln] = val;
     });
-    if (rec.name || rec.text || rec.id) out.push(rec);
+    if (soId) bySoId[soId] = rec;
   });
-  return out;
+  // Walk SPEC-HIERARCHY to recover parent/child + document order.
+  const ordered = [];
+  const walk = (hier, parentSo, depth) => {
+    let soRef = ""; const objEl = kids(hier, "OBJECT")[0];
+    if (objEl) { const rEl = Array.from(objEl.getElementsByTagName("*")).find((e) => local(e) === "SPEC-OBJECT-REF"); if (rEl) soRef = (rEl.textContent || "").trim(); }
+    const rec = bySoId[soRef];
+    if (rec) { rec._parentSo = parentSo || null; rec._depth = depth; ordered.push(rec); }
+    const ch = kids(hier, "CHILDREN")[0];
+    if (ch) kids(ch, "SPEC-HIERARCHY").forEach((h) => walk(h, soRef, depth + 1));
+  };
+  all("SPECIFICATION").forEach((spec) => { const ch = kids(spec, "CHILDREN")[0]; if (ch) kids(ch, "SPEC-HIERARCHY").forEach((h) => walk(h, null, 0)); });
+  // resolve each record's parent ForeignID
+  ordered.forEach((r) => { r.parentId = r._parentSo && bySoId[r._parentSo] ? bySoId[r._parentSo].id : null; });
+  if (!ordered.length) return Object.values(bySoId).filter((r) => r.name || r.text || r.id); // flat fallback
+  return ordered;
 }
 function buildDcmFlArxml() {
   const K = KM_STORE.data, M = K.msgs;
@@ -8026,7 +8040,11 @@ export default function App() {
     reqif: { label: "Requirements (ReqIF / CSV / Excel)", note: "Map columns to node & edge types, then merge into the graph.", file: true, accept: ".reqif,.csv,.xlsx,.xls" },
     kbl: { label: "Harness connectivity (KBL / VEC)", note: "Reconcile logical nets from the supplier package against the model.", file: true, accept: ".kbl,.vec,.xml" },
   };
-  /* Run the selected upload. ReqIF is fully parsed and merged; other sources keep the pipeline stub. */
+  /* Run the selected upload. ReqIF is parsed and RECONCILED against the L0/L1/L2 model:
+     • a record whose ReqIF.ForeignID matches an existing node/requirement UPDATES it in place
+       (true round-trip: export → edit in DOORS/Polarion/Codebeamer → import back);
+     • a genuinely-new record is placed under the L1 found by walking its ReqIF parent chain
+       (falling back to the selected function). Reports updated / added / skipped. */
   const runImport = async () => {
     const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
     setIoMenu(false);
@@ -8034,15 +8052,30 @@ export default function App() {
       try {
         const recs = parseReqIFText(await importFile.text());
         if (!recs.length) { notify("No requirements found in " + importFile.name + "."); setImportFile(null); return; }
-        // Add under the selected function (L1). If an L2/L3 is selected, use its owning L1.
-        let targetL1 = null;
-        if (selected) { const sn = getN(selected); if (isL1(sn)) targetL1 = selected; else { const o = originL1(selected); if (o) targetL1 = o; } }
-        if (!targetL1) { notify("Select a function (L1) in the tree first — imported requirements are added under it."); setImportFile(null); return; }
-        if (!SYSREQ_STORE.data[targetL1]) SYSREQ_STORE.data[targetL1] = [];
-        const arr = SYSREQ_STORE.data[targetL1]; let cnt = 0;
-        recs.forEach((r) => { const stmt = r.text || r.name || ""; if (!stmt) return; arr.push({ id: "SYS-REQIF-" + targetL1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: r.name || r.id || "Imported requirement", ears: "Imported", statement: stmt, method: "Test", criterion: "", rationale: r.id ? "ReqIF ForeignID: " + r.id : "", asil: r.Safety || "QM" }); cnt++; });
+        // Index existing user-added requirements by id so we can update them in place.
+        const addedIndex = {};
+        [SYSREQ_STORE, SWREQ_STORE].forEach((store) => { Object.keys(store.data).forEach((l1) => (store.data[l1] || []).forEach((rq, i) => { addedIndex[rq.id] = { store, l1, i }; })); });
+        const isExistingL1 = (fid) => fid && getN(fid) && isL1(getN(fid));
+        // Resolve the target L1 for a new record by walking up its imported parent chain.
+        const resolveTargetL1 = (r) => { let cur = r, guard = 0; while (cur && guard++ < 40) { if (isExistingL1(cur.id)) return cur.id; if (!cur.parentId) break; cur = recs.find((x) => x.id === cur.parentId) || null; } return null; };
+        let selL1 = null;
+        if (selected) { const sn = getN(selected); selL1 = isL1(sn) ? selected : (originL1(selected) || null); }
+        let updated = 0, added = 0, skipped = 0; const nodeEdits = {};
+        recs.forEach((r) => {
+          const fid = r.id, stmt = r.text || r.name || "";
+          if (!stmt && !r.name) { skipped++; return; }
+          if (fid && getN(fid)) { if (r.text) nodeEdits[fid] = r.text; updated++; return; }        // existing graph node → update statement
+          if (fid && addedIndex[fid]) { const a = addedIndex[fid]; const rec = a.store.data[a.l1] && a.store.data[a.l1][a.i]; if (rec) { if (r.text) rec.statement = r.text; if (r.name) rec.title = r.name; } updated++; return; } // existing added req → update
+          const l1 = resolveTargetL1(r) || selL1;                                                    // new → place under resolved / selected L1
+          if (!l1) { skipped++; return; }
+          if (!SYSREQ_STORE.data[l1]) SYSREQ_STORE.data[l1] = [];
+          const arr = SYSREQ_STORE.data[l1];
+          arr.push({ id: "SYS-REQIF-" + l1.replace(/^L1-/, "") + "-" + (arr.length + 1), title: r.name || r.id || "Imported requirement", ears: "Imported", statement: stmt, method: "Test", criterion: "", rationale: r.id ? "ReqIF ForeignID: " + r.id : "", asil: r.Safety || "QM" });
+          added++;
+        });
+        if (Object.keys(nodeEdits).length) setNodes((prev) => { const nx = { ...prev }; Object.entries(nodeEdits).forEach(([id, statement]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement }, edited: true }; }); return nx; });
         setSysReqV((v) => v + 1);
-        notify("Imported " + cnt + " requirement(s) from ReqIF under " + ((getN(targetL1) && getN(targetL1).label) || targetL1) + ".");
+        notify("ReqIF: " + updated + " updated · " + added + " added · " + skipped + " skipped" + (skipped ? " (no matching function — select one and re-import to place them)" : "") + ".");
         setImportFile(null); return;
       } catch (e) { notify("ReqIF import failed: " + (e && e.message ? e.message : e)); setImportFile(null); return; }
     }
