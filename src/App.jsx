@@ -1547,7 +1547,15 @@ function computeReadiness(nodeMap) {
   });
   const nn = l1.length;
   const l2Count = l1.reduce((s, r) => s + genL2(r).nodes.length, 0);
-  const tara = cyber * 2, tests = nn * 2, fmea = nn * 2;
+  const tara = cyber * 2, fmea = nn * 2;
+  // Authored (curated) test cases, per ASPICE V-model stage — drives the TC card.
+  let tcTotal = 0; const tcStg = {};
+  Object.keys(CURATED_TC).forEach((id) => {
+    const lvl = id.slice(0, 2); let group = "SYS", isL3 = true;
+    if (lvl === "L3" || lvl === "L4") { group = /-SW-/.test(id) ? "SW" : /-AR-/.test(id) ? "AR" : /-HW-/.test(id) ? "HW" : "SYS"; isL3 = lvl === "L3"; }
+    aspiceTests(id, group, isL3, "").forEach((c) => { tcTotal++; tcStg[c.stage] = (tcStg[c.stage] || 0) + 1; });
+  });
+  const tcReqs = Object.keys(CURATED_TC).length, tcSys4 = tcStg["SYS.4"] || 0, tcSys5 = tcStg["SYS.5"] || 0, tcSwHw = tcTotal - tcSys4 - tcSys5;
   return {
     disciplines: [
       { key: "SYS", label: "System Engineering", master: "SYS.1-SYS.5", primary: nn, primaryLabel: "Use cases",
@@ -1580,6 +1588,9 @@ function computeReadiness(nodeMap) {
           { id: "HWE.3", name: "Verification against HW Design", count: hwTotalEcu, detail: `${hwTotalEcu} ECUs · 0 verified`, status: "Not executed" },
           { id: "HWE.4", name: "Verification against HW Requirements", count: hwMech, detail: `${hwMech.toLocaleString()} mechatronic devices`, status: "Not executed" },
         ] } },
+      { key: "TC", label: "Test Cases", master: "ASPICE verification", primary: tcTotal, primaryLabel: "test cases defined", view: "tctrace",
+        secondary: [["SYS.4", tcSys4], ["SYS.5", tcSys5], ["SW/HW", tcSwHw]], coverage: 0, coverageLabel: "executed",
+        status: "Not executed", flag: `${tcReqs.toLocaleString()} requirement${tcReqs === 1 ? "" : "s"} traced → ${tcTotal.toLocaleString()} test case${tcTotal === 1 ? "" : "s"} · SYS.4 + SYS.5 system verification · open the traceability table` },
       { key: "SAFE", label: "Functional Safety", master: "generated", primary: safety, primaryLabel: "L1 with safety goal",
         secondary: [["FSR", safety], ["TSR", safety], ["ASIL C/D", asilCD]], coverage: fmtPct(safety, nn), coverageLabel: "of L1 have FSR + TSR",
         status: "HARA required", flag: `${(nn - safety).toLocaleString()} L1 not safety-relevant — no FSR/TSR` },
@@ -1589,9 +1600,6 @@ function computeReadiness(nodeMap) {
       { key: "FMEA", label: "FMEA", master: "generated", primary: fmea, primaryLabel: "failure modes",
         secondary: [["High AP", dfH], ["Medium", dfM], ["Low", dfL]], coverage: 100, coverageLabel: "of L1 analysed",
         status: "Action open", flag: `${dfH.toLocaleString()} High action-priority items` },
-      { key: "VNV", label: "Verification", master: "generated", primary: tests, primaryLabel: "test cases",
-        secondary: [["executed", 0], ["evidence", tests]], coverage: 0, coverageLabel: "executed",
-        status: "Not executed", flag: `0 of ${tests.toLocaleString()} tests run` },
     ],
     safetyPct: fmtPct(safety, nn), cyberPct: fmtPct(cyber, nn), N: nn, l0: l0.length,
   };
@@ -7495,18 +7503,7 @@ export default function App() {
       secondary: [["Approved", s.reviewApproved], ["Baselined", s.reviewBaselined], ["Baselines", baselines.length]], coverage: s.approvedPct, coverageLabel: "reviewed & approved",
       status: s.errors === 0 ? "Gate PASS" : "Gate FAIL",
       flag: "Consistency gate: " + (s.errors === 0 ? "PASS" : s.errors + " error" + (s.errors === 1 ? "" : "s")) + " · baseline: " + (bl ? bl.name : "none") };
-    // Test-case traceability — authored (curated) verification cases mapped to requirements.
-    const tcKeys = Object.keys(CURATED_TC); let tcTotal = 0; const tcStages = {};
-    tcKeys.forEach((id) => {
-      const lvl = id.slice(0, 2); let group = "SYS", isL3 = true;
-      if (lvl === "L3" || lvl === "L4") { group = /-SW-/.test(id) ? "SW" : /-AR-/.test(id) ? "AR" : /-HW-/.test(id) ? "HW" : "SYS"; isL3 = lvl === "L3"; }
-      const cs = aspiceTests(id, group, isL3, ""); tcTotal += cs.length; if (cs[0]) tcStages[cs[0].stage] = (tcStages[cs[0].stage] || 0) + cs.length;
-    });
-    const tc = { key: "TC", label: "Test Cases", master: "ASPICE verification", primary: tcTotal, primaryLabel: "test cases defined", view: "tctrace",
-      secondary: Object.entries(tcStages).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 3), coverage: 0, coverageLabel: "executed",
-      status: tcTotal ? "Not executed" : "None",
-      flag: tcKeys.length + " requirement" + (tcKeys.length === 1 ? "" : "s") + " traced → " + tcTotal + " test case" + (tcTotal === 1 ? "" : "s") + " · open the traceability table" };
-    return [rq, proc, tc];
+    return [rq, proc];
   }, [qualityRep, baselines, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
