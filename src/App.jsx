@@ -8992,7 +8992,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 style={{ fontSize: 12.5, fontWeight: 600, color: "#fff",
                   background: nodeIssue.summary.trim() ? "#175CD3" : "#98A2B3",
                   cursor: nodeIssue.summary.trim() ? "pointer" : "not-allowed" }}>
-                <ExternalLink size={13} /> Create in Jira
+                <ExternalLink size={13} /> Create in your company Jira
               </button>
             </div>
           </div>
