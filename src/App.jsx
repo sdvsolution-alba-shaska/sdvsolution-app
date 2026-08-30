@@ -2199,7 +2199,7 @@ const statusColor = (s) =>
   : /not exec|open|hara|required|not started/i.test(s) ? "#B54708"
   : /draft/i.test(s) ? "#B54708" : /approv|base|done|pass/i.test(s) ? "#027A48" : "#475467";
 const covColor = (v) => (v >= 90 ? "#12B76A" : v >= 50 ? "#F79009" : "#F04438");
-const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090" };
+const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A" };
 
 function ProcRow({ p, accent }) {
   const st = statusColor(p.status);
@@ -7495,7 +7495,18 @@ export default function App() {
       secondary: [["Approved", s.reviewApproved], ["Baselined", s.reviewBaselined], ["Baselines", baselines.length]], coverage: s.approvedPct, coverageLabel: "reviewed & approved",
       status: s.errors === 0 ? "Gate PASS" : "Gate FAIL",
       flag: "Consistency gate: " + (s.errors === 0 ? "PASS" : s.errors + " error" + (s.errors === 1 ? "" : "s")) + " · baseline: " + (bl ? bl.name : "none") };
-    return [rq, proc];
+    // Test-case traceability — authored (curated) verification cases mapped to requirements.
+    const tcKeys = Object.keys(CURATED_TC); let tcTotal = 0; const tcStages = {};
+    tcKeys.forEach((id) => {
+      const lvl = id.slice(0, 2); let group = "SYS", isL3 = true;
+      if (lvl === "L3" || lvl === "L4") { group = /-SW-/.test(id) ? "SW" : /-AR-/.test(id) ? "AR" : /-HW-/.test(id) ? "HW" : "SYS"; isL3 = lvl === "L3"; }
+      const cs = aspiceTests(id, group, isL3, ""); tcTotal += cs.length; if (cs[0]) tcStages[cs[0].stage] = (tcStages[cs[0].stage] || 0) + cs.length;
+    });
+    const tc = { key: "TC", label: "Test Cases", master: "ASPICE verification", primary: tcTotal, primaryLabel: "test cases defined", view: "tctrace",
+      secondary: Object.entries(tcStages).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 3), coverage: 0, coverageLabel: "executed",
+      status: tcTotal ? "Not executed" : "None",
+      flag: tcKeys.length + " requirement" + (tcKeys.length === 1 ? "" : "s") + " traced → " + tcTotal + " test case" + (tcTotal === 1 ? "" : "s") + " · open the traceability table" };
+    return [rq, proc, tc];
   }, [qualityRep, baselines, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
@@ -9762,6 +9773,52 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             {canWrite && view !== "blocks" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && view !== "reader" && view !== "ecureq" && ioMenuControl()}
           </div>
 
+
+          {/* ===== SECTION: Test Cases traceability view (from the Dashboard TC card) ===== */}
+          {view === "tctrace" && (() => {
+            const ASP = { FUN: "Functional", IF: "Interfaces", PERF: "Performance & timing", MODE: "Modes & states", DIAG: "Diagnostics", SEC: "Security", BND: "Boundary", ARCH: "Architecture" };
+            const rows = [];
+            Object.keys(CURATED_TC).forEach((reqId) => {
+              const lvl = reqId.slice(0, 2); const m = reqId.match(/^L[234]-([A-Z0-9]+)-(\d+)/); const l1Id = m ? ("L1-" + m[1] + "-" + m[2]) : null;
+              const feat = (l1Id && getN(l1Id) && getN(l1Id).label) || l1Id || reqId;
+              const suffix = reqId.split("-").slice(3).join("-");
+              let group = "SYS", isL3 = true;
+              if (lvl === "L3" || lvl === "L4") { group = /-SW-/.test(reqId) ? "SW" : /-AR-/.test(reqId) ? "AR" : /-HW-/.test(reqId) ? "HW" : "SYS"; isL3 = lvl === "L3"; }
+              const aspect = ASP[suffix] || suffix;
+              aspiceTests(reqId, group, isL3, aspect).forEach((tc) => rows.push({ reqId, l1Id, feat, lvl, aspect, stage: tc.stage, method: tc.method, tcId: tc.id, title: tc.title, exp: tc.exp }));
+            });
+            rows.sort((a, b) => (a.feat + a.reqId).localeCompare(b.feat + b.reqId));
+            const reqCount = new Set(rows.map((r) => r.reqId)).size;
+            const openReq = (l1Id) => { if (l1Id && getN(l1Id)) { materialize(l1Id); setSelected(l1Id); setView("reader"); } };
+            return (
+              <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+                <div className="mx-auto px-8 py-6" style={{ maxWidth: 1180 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>ASPICE V-MODEL · VERIFICATION</div>
+                  <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", marginTop: 2 }}>Test Cases traceability</h1>
+                  <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>Every requirement with authored test cases, mapped to its verification cases and V-model stage — <b>{reqCount}</b> requirements → <b>{rows.length}</b> test cases. Click a requirement to open it. Download the full set (including generated fallbacks for every other requirement) from <b>Upload / Download → Test Cases</b>.</p>
+                  <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
+                      <thead><tr>{["Requirement", "Feature", "Level", "Stage", "Test Case", "Title", "Expected result"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {rows.map((r, i) => (
+                          <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+                            <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}><button onClick={() => openReq(r.l1Id)} title={"Open " + (r.feat || r.reqId)} style={{ fontFamily: "ui-monospace,monospace", fontSize: 10.5, color: "#175CD3", textDecoration: "underline" }}>{r.reqId}</button></td>
+                            <td style={{ padding: "5px 10px", color: "#344054", whiteSpace: "nowrap", maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis" }}>{r.feat}</td>
+                            <td style={{ padding: "5px 10px", color: "#667085" }}>{r.lvl}</td>
+                            <td style={{ padding: "5px 10px", color: "#7A5AF8", fontWeight: 700, whiteSpace: "nowrap" }}>{r.stage}</td>
+                            <td style={{ padding: "5px 10px", color: "#98A2B3", fontFamily: "ui-monospace,monospace", fontSize: 10, whiteSpace: "nowrap" }}>{r.tcId}</td>
+                            <td style={{ padding: "5px 10px", color: "#344054" }}>{r.title}</td>
+                            <td style={{ padding: "5px 10px", color: "#667085" }}>{r.exp}</td>
+                          </tr>
+                        ))}
+                        {rows.length === 0 && <tr><td colSpan={7} style={{ padding: "10px", color: "#98A2B3" }}>No authored test cases yet.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ===== SECTION: Assistant view (data-grounded chat) ===== */}
           {view === "assistant" && (
