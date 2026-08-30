@@ -8045,6 +8045,23 @@ export default function App() {
     });
     return aoa;
   };
+  /* Test-case export — every requirement's verification cases (curated where defined,
+     structured fallback otherwise), at the ASPICE V-model stage for its level. Mirrors
+     reqAoa()'s traversal so it honours the same System/ECU download filters. */
+  const testcasesAoa = () => {
+    const aoa = [["Level", "Requirement ID", "Requirement", "Test Case ID", "Test Title", "Stage", "Method", "Precondition", "Stimulus", "Expected Result", "ECU", "System"]];
+    const emit = (reqId, reqTitle, level, group, isL3, ecu, sys) => {
+      aspiceTests(reqId, group, isL3, reqTitle).forEach((tc) => aoa.push([level, reqId, reqTitle, tc.id, tc.title, tc.stage, tc.method, tc.pre, tc.stim, tc.exp, ecu, sys]));
+    };
+    scopedL0s().forEach((l0) => {
+      l1sOf(l0.id).forEach((l1) => {
+        const sys = l0.label || "", ecu = allocatedEcuName(l1) || "";
+        genL2(l1).nodes.map((x) => nodes[x.id] || x).forEach((x) => emit(x.id, x.props?.aspect || "", "L2", "SYS", true, ecu, sys));
+        mirrorL3Flat(l1).forEach((r) => { const kind = r.level.split(" ")[1]; const isL3 = r.level.indexOf("L3") === 0; emit(r.id, r.title, r.level, kind, isL3, r.alloc || ecu, sys); });
+      });
+    });
+    return aoa;
+  };
   const nodesAoa = () => {
     const aoa = [["ID", "Type", "Label", "ECU", "System"]];
     Object.values(nodes).filter(inExportScope).forEach((n) => aoa.push([n.id, dispType(n), n.label || "", ecuTagCode(ecuOf(n)) || "", (getN(l0Of(n.id)) && getN(l0Of(n.id)).label) || ""]));
@@ -8198,6 +8215,12 @@ export default function App() {
       { k: "csv", label: "CSV (comma delimited) (*.csv)", file: "requirements.csv", run: buildReqCsv },
       { k: "reqif", label: "ReqIF — DOORS · Polarion · Codebeamer (*.reqif)", file: "requirements.reqif", run: buildReqIF },
       { k: "pdf", label: "PDF Document (*.pdf)", file: "requirements.pdf", run: async () => toPdf(reqAoa(), "Requirements Specification", "requirements.pdf", await mirrorFbmToPng(2), [["Message", "ID", "Cycle [ms]", "Transmitter (ECU · SWC)", "Receiver (ECU · SWC)"]].concat(swArchRows().map((x) => [x.name, x.id, x.cyc, x.tx, x.rx]))) },
+    ] },
+    testcases: { label: "Test Cases", scope: ["sys", "ecu"], fmts: [
+      { k: "xlsx", label: "Excel Workbook (*.xlsx)", file: "test_cases.xlsx", run: () => aoaToXlsx(testcasesAoa(), "Test Cases", "test_cases.xlsx") },
+      { k: "csv", label: "CSV (comma delimited) (*.csv)", file: "test_cases.csv", run: () => download("test_cases.csv", aoaToCsv(testcasesAoa()), "text/csv;charset=utf-8") },
+      { k: "doc", label: "Word Document (*.doc)", file: "test_cases.doc", run: () => toDoc(testcasesAoa(), "Test Cases", "test_cases.doc") },
+      { k: "pdf", label: "PDF Document (*.pdf)", file: "test_cases.pdf", run: () => toPdf(testcasesAoa(), "Test Cases", "test_cases.pdf") },
     ] },
     harness: { label: "Harness connectivity", scope: [], fmts: [
       { k: "doc", label: "Word Document (*.doc)", file: "harness.doc", run: () => toDoc(harnessAoa(), "Harness connectivity", "harness.doc") },
