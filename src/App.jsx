@@ -8669,6 +8669,9 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
   });
 
   const sel = getN(selected);
+  /* In the ECU spec view, the right detail panel follows the selected ECU (so picking an
+     ECU shows the ECU on the right, not the previously-selected feature requirement). */
+  useEffect(() => { if (view === "ecureq" && selectedEcu && getN(selectedEcu)) setSelected(selectedEcu); }, [view, selectedEcu]);
   /* The system (parent L0) of whatever is selected — drives the sidebar highlight + header,
      so picking an L1 from a filtered table moves the Systems selection to its system. */
   const systemOf = (n) => {
@@ -9101,7 +9104,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
             style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600 }}
             title="Report a bug or suggest an improvement">
-            <MessageSquarePlus size={14} color="#9CFF3A" /> App Feedback
+            <MessageSquarePlus size={14} color="#9CFF3A" /> App Bug &amp; Request
           </button>
           <button onClick={() => { setAcctOpen(true); setAcctTab("plan"); }}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
@@ -9494,18 +9497,18 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
 
         {/* ===== SECTION: Main content ===== */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center flex-wrap px-4 py-2 gap-3 shrink-0" style={{ background: "#fff", borderBottom: "1px solid #E4E7EC" }}>
+          <div className="flex items-center flex-nowrap px-4 py-2 gap-3 shrink-0" style={{ background: "#fff", borderBottom: "1px solid #E4E7EC" }}>
             {view === "ecureq" && selectedEcu ? (() => { const ecu = ecuRecordFor(selectedEcu); return (
-              <div className="flex items-center gap-1.5">
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: ecu.smart ? "#9E77ED" : (isPrimaryEcu(selectedEcu) ? "#175CD3" : "#B54708") }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#101828" }}>{ecu.name}</span>
-                <span style={{ fontSize: 11, color: "#98A2B3", fontFamily: "ui-monospace, monospace" }}>{ecu.smart ? ecu.id : ecuTag(selectedEcu)}</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: ecu.smart ? "#9E77ED" : (isPrimaryEcu(selectedEcu) ? "#175CD3" : "#B54708"), flexShrink: 0 }} />
+                <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: "#101828" }}>{ecu.name}</span>
+                <span className="truncate" style={{ fontSize: 11, color: "#98A2B3", fontFamily: "ui-monospace, monospace" }}>{ecu.smart ? ecu.id : ecuTag(selectedEcu)}</span>
               </div>
             ); })() : (
-              <div className="flex items-center gap-1.5">
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: meta(getN(activeSystem)?.type).c }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#101828" }}>{getN(activeSystem)?.label}</span>
-                <span style={{ fontSize: 11, color: "#98A2B3", fontFamily: "ui-monospace, monospace" }}>{activeSystem}</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: meta(getN(activeSystem)?.type).c, flexShrink: 0 }} />
+                <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: "#101828" }}>{getN(activeSystem)?.label}</span>
+                <span className="truncate" style={{ fontSize: 11, color: "#98A2B3", fontFamily: "ui-monospace, monospace" }}>{activeSystem}</span>
               </div>
             )}
             <div className="ml-auto flex items-center gap-1 p-1 rounded-lg" style={{ background: "#F2F4F7" }}>
@@ -9619,7 +9622,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               <Btn active={view === "table"} onClick={() => setView("table")} icon={Table}>Table</Btn>
               <Btn active={view === "tree"} onClick={() => setView("tree")} icon={Share2}>Graph</Btn>
             </div>
-            {canWrite && (<div className="relative">
+            {canWrite && view !== "blocks" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && (<div className="relative">
               <button onClick={() => setIoMenu((v) => !v)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
                 style={{ fontSize: 12.5, fontWeight: 500, color: "#344054", border: "1px solid #E4E7EC", background: "#fff" }}>
@@ -12029,7 +12032,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           })()}
         </div>
 
-        {/* detail */}
+        {/* detail — in the ECU spec view this follows the selected ECU (see the sync effect). */}
         {sel && rightHidden && (
           <div className="shrink-0 flex flex-col items-center pt-3" style={{ width: 26, background: "#fff", borderLeft: "1px solid #E4E7EC", cursor: "pointer" }} onClick={() => setRightHidden(false)} title="Show details panel">
             <ChevronLeft size={16} color="#98A2B3" />
