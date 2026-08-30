@@ -9103,7 +9103,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           <button onClick={openFeedback}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
             style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600 }}
-            title="Report a bug or suggest an improvement">
+            title="Report a bug or make a request">
             <MessageSquarePlus size={14} color="#9CFF3A" /> App Bug &amp; Request
           </button>
           <button onClick={() => { setAcctOpen(true); setAcctTab("plan"); }}
