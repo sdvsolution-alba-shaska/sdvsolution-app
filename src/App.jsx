@@ -9005,11 +9005,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             style={{ width: 480, background: "#fff", borderRadius: 12, boxShadow: "0 20px 48px rgba(16,24,40,0.3)" }}>
             <div className="flex items-center gap-2 px-5 pt-4 pb-1">
               <MessageSquarePlus size={16} color="#175CD3" />
-              <span style={{ fontSize: 15, fontWeight: 700, color: "#101828" }}>App feedback</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "#101828" }}>App Bug &amp; CR</span>
             </div>
             <div className="mx-5 mt-2 p-2.5 rounded-md" style={{ background: "#EFF8FF", border: "1px solid #B2DDFF" }}>
               <div style={{ fontSize: 10.5, color: "#175CD3", lineHeight: 1.5 }}>
-                Goes to <b>SDVsolution</b> (the tool vendor) — not your organization. Routed to the SDVsolution Jira ({TOOL.project}).
+                This is for issues with <b>the tool itself</b> — a bug or a change request (CR). It goes to <b>SDVsolution</b> (the tool vendor), routed to the SDVsolution Jira ({TOOL.project}).
+                <br /><br />
+                For a <b>requirement</b> ticket, don't use this. Select the requirement, then in the <b>right-hand panel</b> click <b>“Raise Jira issue for this box”</b> — one click creates it in <b>your company's</b> Jira.
               </div>
             </div>
             <div className="px-5 pt-3">
@@ -9239,7 +9241,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
             style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600 }}
             title="Report a bug or make a request">
-            <MessageSquarePlus size={14} color="#9CFF3A" /> App Bug &amp; Request
+            <MessageSquarePlus size={14} color="#9CFF3A" /> App Bug &amp; CR
           </button>
           <button onClick={() => { setAcctOpen(true); setAcctTab("plan"); }}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
