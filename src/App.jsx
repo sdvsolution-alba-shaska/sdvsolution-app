@@ -9011,7 +9011,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               <div style={{ fontSize: 10.5, color: "#175CD3", lineHeight: 1.5 }}>
                 This is for issues with <b>the tool itself</b> — a bug or a change request (CR). It goes to <b>SDVsolution</b> (the tool vendor), routed to the SDVsolution Jira ({TOOL.project}).
                 <br /><br />
-                For a <b>requirement</b> ticket, don't use this. Select the requirement, then in the <b>right-hand panel</b> click <b>“Raise Jira issue for this box”</b> — one click creates it in <b>your company's</b> Jira.
+                For a <b>requirement</b> ticket, don't use this. Select the requirement, then in the <b>right-hand panel</b> click <b>“Raise in your company Jira for this box”</b> — one click creates it in <b>your company's</b> Jira.
               </div>
             </div>
             <div className="px-5 pt-3">
@@ -12561,7 +12561,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <button onClick={() => raiseNodeIssue(sel.id)}
                     className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-md"
                     style={{ fontSize: 11.5, fontWeight: 600, color: "#175CD3", background: "#EAF2FF" }}>
-                    <MessageSquarePlus size={13} /> Raise Jira issue for this box
+                    <MessageSquarePlus size={13} /> Raise in your company Jira for this box
                   </button>
                 </>
               )}
