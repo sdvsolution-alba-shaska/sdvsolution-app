@@ -8276,6 +8276,118 @@ export default function App() {
   };
   /* Record every node the user lands on (selection OR focus) into nav history —
      unless the change came from the back/forward buttons themselves. */
+  /* Upload / Download control — shared so it can sit in the search row of the
+     reader & ECU views instead of crowding the top toolbar. */
+  const ioMenuControl = () => (
+            <div className="relative">
+              <button onClick={() => setIoMenu((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
+                style={{ fontSize: 12.5, fontWeight: 500, color: "#344054", border: "1px solid #E4E7EC", background: "#fff" }}>
+                <ArrowLeftRight size={14} color="#475467" />
+                Upload / Download
+                <ChevronDown size={13} color="#98A2B3" />
+              </button>
+              {ioMenu && (
+                <>
+                  <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setIoMenu(false)} />
+                  <div className="absolute right-0 rounded-lg overflow-hidden"
+                    style={{ top: 40, width: 288, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC",
+                      boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
+                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>
+                      DOWNLOAD
+                    </div>
+                    <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const set = EXPORT_SETS[exportDataset] || EXPORT_SETS.req;
+                        const fmt = set.fmts.find((f) => f.k === exportFmt) || set.fmts[0];
+                        const selDataset = (k) => { setExportDataset(k); const fs = EXPORT_SETS[k].fmts; setExportFmt(fs.some((f) => f.k === exportFmt) ? exportFmt : (fs[0] || {}).k); };
+                        /* Faceted (cascading) options: each facet is constrained by what's selected in the OTHER
+                           facets, so incompatible combinations (e.g. a System with no requirements on a given ECU)
+                           are never offered and can't produce an empty export. Computed over the requirement set. */
+                        let sysOpts = [], typeOpts = [], ecuOpts = [];
+                        if (set.scope.length > 0) {
+                          const l1s = Object.values(nodes).filter((n) => n.type === "Requirement" && /L1/.test(n.subtype || ""));
+                          const sysOf = (l1) => l0Of(l1.id), ecuOf2 = (l1) => ecuTagCode(ecuOf(l1));
+                          const sysPool = l1s.filter((l1) => exportEcu.size === 0 || exportEcu.has(ecuOf2(l1)));
+                          sysOpts = [...new Set(sysPool.map(sysOf).filter(Boolean))].map((id) => ({ value: id, label: (getN(id) && getN(id).label) || id })).sort((a, b) => a.label.localeCompare(b.label));
+                          const ecuPool = l1s.filter((l1) => exportSys.size === 0 || exportSys.has(sysOf(l1)));
+                          ecuOpts = [...new Set(ecuPool.map(ecuOf2).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }));
+                        }
+                        return (
+                          <>
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO DOWNLOAD</div>
+                              <select value={exportDataset} onChange={(e) => selDataset(e.target.value)} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
+                                {Object.entries(EXPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                              </select>
+                            </div>
+                            {set.scope.length > 0 && (
+                              <div className="flex flex-col gap-2">
+                                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4 }}>FILTER (blank = everything)</div>
+                                {set.scope.includes("sys") && scopeDropdown("SYSTEM", sysOpts, exportSys, setExportSys)}
+                                {set.scope.includes("type") && scopeDropdown("TYPE", typeOpts, exportType, setExportType)}
+                                {set.scope.includes("ecu") && scopeDropdown("ECU", ecuOpts, exportEcu, setExportEcu)}
+                              </div>
+                            )}
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>SAVE AS TYPE</div>
+                              <select value={fmt.k} onChange={(e) => setExportFmt(e.target.value)} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
+                                {set.fmts.map((f) => <option key={f.k} value={f.k}>{f.label}</option>)}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2" style={{ marginTop: 2 }}>
+                              <span className="truncate" style={{ fontSize: 10.5, color: "#667085", fontFamily: "Consolas,monospace" }}>{fmt.file}</span>
+                              <button onClick={() => { setIoMenu(false); fmt.run(); notify("\u201c" + fmt.file + "\u201d saved to your browser's Downloads folder"); }}
+                                className="ml-auto flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "#175CD3" }}>
+                                <Download size={13} color="#fff" /> Download
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #F2F4F7" }}>
+                      UPLOAD
+                    </div>
+                    <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
+                        return (
+                          <>
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO UPLOAD</div>
+                              <select value={importType} onChange={(e) => { setImportType(e.target.value); setImportFile(null); }} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
+                                {Object.entries(IMPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                              </select>
+                            </div>
+                            <div style={{ fontSize: 10, color: "#98A2B3", lineHeight: 1.4 }}>{iset.note}</div>
+                            {iset.file && (
+                              <div>
+                                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>FILE</div>
+                                <label className="w-full flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
+                                  <FileUp size={13} color="#475467" style={{ flexShrink: 0 }} />
+                                  <span className="truncate" style={{ color: importFile ? "#101828" : "#98A2B3" }}>{importFile ? importFile.name : "Choose file\u2026"}</span>
+                                  <input type="file" accept={iset.accept} style={{ display: "none" }} onChange={(e) => setImportFile(e.target.files && e.target.files[0])} />
+                                </label>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2" style={{ marginTop: 2 }}>
+                              <span style={{ fontSize: 9, color: "#98A2B3", lineHeight: 1.3, flex: 1 }}>Runs through the binding layer &amp; consistency checks before republishing.</span>
+                              <button disabled={iset.file && !importFile}
+                                onClick={runImport}
+                                className="flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: (iset.file && !importFile) ? "#98A2B3" : "#175CD3", cursor: (iset.file && !importFile) ? "not-allowed" : "pointer" }}>
+                                <Upload size={13} color="#fff" /> Upload
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
   const navSuppress = useRef(false);
   useEffect(() => {
     if (navSuppress.current) { navSuppress.current = false; return; }
@@ -9622,114 +9734,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               <Btn active={view === "table"} onClick={() => setView("table")} icon={Table}>Table</Btn>
               <Btn active={view === "tree"} onClick={() => setView("tree")} icon={Share2}>Graph</Btn>
             </div>
-            {canWrite && view !== "blocks" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && (<div className="relative">
-              <button onClick={() => setIoMenu((v) => !v)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
-                style={{ fontSize: 12.5, fontWeight: 500, color: "#344054", border: "1px solid #E4E7EC", background: "#fff" }}>
-                <ArrowLeftRight size={14} color="#475467" />
-                Upload / Download
-                <ChevronDown size={13} color="#98A2B3" />
-              </button>
-              {ioMenu && (
-                <>
-                  <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setIoMenu(false)} />
-                  <div className="absolute right-0 rounded-lg overflow-hidden"
-                    style={{ top: 40, width: 288, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC",
-                      boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
-                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>
-                      DOWNLOAD
-                    </div>
-                    <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
-                      {(() => {
-                        const set = EXPORT_SETS[exportDataset] || EXPORT_SETS.req;
-                        const fmt = set.fmts.find((f) => f.k === exportFmt) || set.fmts[0];
-                        const selDataset = (k) => { setExportDataset(k); const fs = EXPORT_SETS[k].fmts; setExportFmt(fs.some((f) => f.k === exportFmt) ? exportFmt : (fs[0] || {}).k); };
-                        /* Faceted (cascading) options: each facet is constrained by what's selected in the OTHER
-                           facets, so incompatible combinations (e.g. a System with no requirements on a given ECU)
-                           are never offered and can't produce an empty export. Computed over the requirement set. */
-                        let sysOpts = [], typeOpts = [], ecuOpts = [];
-                        if (set.scope.length > 0) {
-                          const l1s = Object.values(nodes).filter((n) => n.type === "Requirement" && /L1/.test(n.subtype || ""));
-                          const sysOf = (l1) => l0Of(l1.id), ecuOf2 = (l1) => ecuTagCode(ecuOf(l1));
-                          const sysPool = l1s.filter((l1) => exportEcu.size === 0 || exportEcu.has(ecuOf2(l1)));
-                          sysOpts = [...new Set(sysPool.map(sysOf).filter(Boolean))].map((id) => ({ value: id, label: (getN(id) && getN(id).label) || id })).sort((a, b) => a.label.localeCompare(b.label));
-                          const ecuPool = l1s.filter((l1) => exportSys.size === 0 || exportSys.has(sysOf(l1)));
-                          ecuOpts = [...new Set(ecuPool.map(ecuOf2).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }));
-                        }
-                        return (
-                          <>
-                            <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO DOWNLOAD</div>
-                              <select value={exportDataset} onChange={(e) => selDataset(e.target.value)} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
-                                {Object.entries(EXPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                              </select>
-                            </div>
-                            {set.scope.length > 0 && (
-                              <div className="flex flex-col gap-2">
-                                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4 }}>FILTER (blank = everything)</div>
-                                {set.scope.includes("sys") && scopeDropdown("SYSTEM", sysOpts, exportSys, setExportSys)}
-                                {set.scope.includes("type") && scopeDropdown("TYPE", typeOpts, exportType, setExportType)}
-                                {set.scope.includes("ecu") && scopeDropdown("ECU", ecuOpts, exportEcu, setExportEcu)}
-                              </div>
-                            )}
-                            <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>SAVE AS TYPE</div>
-                              <select value={fmt.k} onChange={(e) => setExportFmt(e.target.value)} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
-                                {set.fmts.map((f) => <option key={f.k} value={f.k}>{f.label}</option>)}
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-2" style={{ marginTop: 2 }}>
-                              <span className="truncate" style={{ fontSize: 10.5, color: "#667085", fontFamily: "Consolas,monospace" }}>{fmt.file}</span>
-                              <button onClick={() => { setIoMenu(false); fmt.run(); notify("\u201c" + fmt.file + "\u201d saved to your browser's Downloads folder"); }}
-                                className="ml-auto flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "#175CD3" }}>
-                                <Download size={13} color="#fff" /> Download
-                              </button>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #F2F4F7" }}>
-                      UPLOAD
-                    </div>
-                    <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
-                      {(() => {
-                        const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
-                        return (
-                          <>
-                            <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>DATA TO UPLOAD</div>
-                              <select value={importType} onChange={(e) => { setImportType(e.target.value); setImportFile(null); }} className="w-full outline-none rounded px-2 py-1.5" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
-                                {Object.entries(IMPORT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                              </select>
-                            </div>
-                            <div style={{ fontSize: 10, color: "#98A2B3", lineHeight: 1.4 }}>{iset.note}</div>
-                            {iset.file && (
-                              <div>
-                                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>FILE</div>
-                                <label className="w-full flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer" style={{ fontSize: 12, border: "1px solid #E4E7EC", background: "#fff" }}>
-                                  <FileUp size={13} color="#475467" style={{ flexShrink: 0 }} />
-                                  <span className="truncate" style={{ color: importFile ? "#101828" : "#98A2B3" }}>{importFile ? importFile.name : "Choose file\u2026"}</span>
-                                  <input type="file" accept={iset.accept} style={{ display: "none" }} onChange={(e) => setImportFile(e.target.files && e.target.files[0])} />
-                                </label>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2" style={{ marginTop: 2 }}>
-                              <span style={{ fontSize: 9, color: "#98A2B3", lineHeight: 1.3, flex: 1 }}>Runs through the binding layer &amp; consistency checks before republishing.</span>
-                              <button disabled={iset.file && !importFile}
-                                onClick={runImport}
-                                className="flex items-center gap-1.5 rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: (iset.file && !importFile) ? "#98A2B3" : "#175CD3", cursor: (iset.file && !importFile) ? "not-allowed" : "pointer" }}>
-                                <Upload size={13} color="#fff" /> Upload
-                              </button>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>)}
+            {canWrite && view !== "blocks" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && view !== "reader" && view !== "ecureq" && ioMenuControl()}
           </div>
 
 
@@ -10235,6 +10240,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <button onClick={() => gotoMatch(-1)} disabled={!readerCount} title="Previous (Shift+Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronUp size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
                   <button onClick={() => gotoMatch(1)} disabled={!readerCount} title="Next (Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronDown size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
                   {readerQ && <button onClick={() => setReaderQ("")} title="Clear"><X size={13} color="#98A2B3" /></button>}
+                {canWrite && <div style={{ marginLeft: "auto" }}>{ioMenuControl()}</div>}
                 </div>
                 <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 40px 80px" }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, color: accent, letterSpacing: 0.5 }}>{smartLike ? "SMART DEVICE REQUIREMENTS SPECIFICATION" : "ECU REQUIREMENTS SPECIFICATION"}</div>
@@ -10488,6 +10494,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 <button onClick={() => gotoMatch(-1)} disabled={!readerCount} title="Previous (Shift+Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronUp size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
                 <button onClick={() => gotoMatch(1)} disabled={!readerCount} title="Next (Enter)" style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid #E4E7EC", background: "#fff", cursor: readerCount ? "pointer" : "default" }}><ChevronDown size={14} color={readerCount ? "#344054" : "#D0D5DD"} /></button>
                 {readerQ && <button onClick={() => setReaderQ("")} title="Clear"><X size={13} color="#98A2B3" /></button>}
+                {canWrite && <div style={{ marginLeft: "auto" }}>{ioMenuControl()}</div>}
               </div>
               <div className="mx-auto px-10 py-8" style={{ maxWidth: 1180 }}>
                 <div style={{ fontSize: 11, color: "#667085", fontFamily: "ui-monospace, monospace" }}>{rDoc?.id}</div>
