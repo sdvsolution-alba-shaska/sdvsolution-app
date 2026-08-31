@@ -8772,12 +8772,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     try {
       const resp = await fetch("/api/assistant", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, system: buildAssistantContext(),
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, system: buildAssistantContext(),
           messages: history.map((m) => ({ role: m.role, content: m.apiContent || m.content })) }),
       });
       const data = await resp.json();
       if (data && data.error) { throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "assistant error")); }
-      const reply = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n") || "(no response)";
+      const reply = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n")
+        || (data.stop_reason === "max_tokens"
+          ? "The reply hit the length limit before finishing. Ask for fewer requirements at a time, or split the spec."
+          : "I couldn't produce a result from that. A photo of a spec is hard to read reliably — attach the requirements as a Word, Excel, CSV or PDF file (or paste them as text), tell me which feature (L1) to add them under, and I'll draft the system/software requirements for review.");
       const { clean, done } = runChatActions(reply);
       const body = (busSummary ? busSummary + "\n\n" : "") + clean + (done.length ? `\n\n\u2192 ${done.join("; ")}.` : "");
       setChatMsgs((prev) => [...prev, { role: "assistant", content: body || "(done)" }]);
