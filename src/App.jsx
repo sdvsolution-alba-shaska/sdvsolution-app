@@ -10053,7 +10053,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   </div>
                 )}
               </div>
-              <div className="px-6 py-3" style={{ borderTop: "1px solid #EAECF0" }}>
+              <div className="px-6 pt-3 pb-8" style={{ borderTop: "1px solid #EAECF0" }}>
                 {chatImages.length > 0 && (
                   <div className="max-w-2xl mx-auto flex gap-2 flex-wrap mb-2">
                     {chatImages.map((im, k) => (
