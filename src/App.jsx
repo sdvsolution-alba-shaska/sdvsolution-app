@@ -3092,6 +3092,7 @@ async function parseAttachmentFile(file) {
       const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
       let out = "";
       for (let p = 1; p <= doc.numPages && out.length < CAP; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); out += tc.items.map((i) => i.str).join(" ") + "\n"; }
+      if (!out.replace(/\s+/g, "").length) return { name, kind: "pdf", text: "", error: "No text layer — this looks like a scanned/image PDF, so there's nothing to read (no OCR). Use a text-based PDF or the source Word/Excel." };
       return { name, kind: "pdf", text: cap(out) };
     }
     if (ext === "dbc" || ext === "ldf" || ext === "arxml" || ext === "xml") {
@@ -3201,7 +3202,9 @@ async function pdfToReqRecords(file) {
   const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   let text = "";
   for (let p = 1; p <= doc.numPages; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); text += tc.items.map((i) => i.str).join(" ") + "\n"; }
+  if (!text.replace(/\s+/g, "").length) return { records: [], empty: true }; // no text layer (scanned image PDF)
   const recs = []; let lastL1 = null;
+  // 1) Round-trip: lines that carry an SDVsolution requirement ID (L0–L4).
   text.split(/\n+/).forEach((ln) => {
     const m = ln.match(/\b(L[0-4]-[A-Z0-9][A-Z0-9-]{1,})\b/);
     if (!m) return;
@@ -3211,7 +3214,14 @@ async function pdfToReqRecords(file) {
     recs.push({ id, name: "", text: after, Safety: "", parentId: isL1 ? null : lastL1 });
     if (isL1) lastL1 = id;
   });
-  return recs;
+  // 2) Free-form spec (no IDs): pull "shall" sentences as NEW requirements to place under the selected feature.
+  if (!recs.length) {
+    text.replace(/\s+/g, " ").split(/(?<=[.;])\s+/).forEach((s) => {
+      const t = s.trim();
+      if (/\bshall\b/i.test(t) && t.length > 20 && t.length < 400) recs.push({ id: null, name: "", text: t, Safety: "", parentId: null });
+    });
+  }
+  return { records: recs, empty: false };
 }
 function kmatrixData() {
   const K = KM_STORE.data, M = K.msgs;
@@ -8326,7 +8336,12 @@ export default function App() {
         else if (ext === "csv") recs = aoaToReqRecords(csvToAoa(await importFile.text()));
         else if (ext === "xlsx" || ext === "xls") { const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await importFile.arrayBuffer(), { type: "array" }); const sh = wb.Sheets[wb.SheetNames[0]]; recs = aoaToReqRecords(XLSX.utils.sheet_to_json(sh, { header: 1, blankrows: false, defval: "" })); }
         else if (ext === "docx") { const rows = await docxToAoa(importFile); recs = rows ? aoaToReqRecords(rows) : []; if (!recs.length) { notify("Couldn't find a requirements table in “" + name + "”. Word re-import is best-effort — export to Excel, CSV or ReqIF for a clean round-trip."); setImportFile(null); return; } }
-        else if (ext === "pdf") { recs = await pdfToReqRecords(importFile); if (!recs.length) { notify("Couldn't extract requirements from “" + name + "”. PDF re-import is best-effort — use Excel, CSV or ReqIF for a clean round-trip."); setImportFile(null); return; } }
+        else if (ext === "pdf") {
+          const out = await pdfToReqRecords(importFile); recs = out.records || [];
+          if (out.empty) { notify("“" + name + "” has no text layer — it looks like a scanned/image PDF and can't be read (no OCR). Use a text-based PDF, or the source Word/Excel."); setImportFile(null); return; }
+          if (!recs.length) { notify("No requirements found in “" + name + "”. PDF import reads lines with SDVsolution IDs or ‘shall’ statements — for a free-form spec, drop it into the Assistant instead."); setImportFile(null); return; }
+          if (recs.some((r) => !r.id) && !selected) { notify("Select the feature (L1) to file these under first, then re-import — the PDF has new requirements with no IDs to match."); setImportFile(null); return; }
+        }
         else { notify("Unsupported file type: " + name + ". Use ReqIF, Excel, CSV, Word or PDF."); setImportFile(null); return; }
         reconcileReqRecords(recs || [], name);
         setImportFile(null); return;
