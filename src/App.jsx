@@ -7453,7 +7453,7 @@ export default function App() {
       let doc; try { doc = collectRef.current(); } catch (e) { return; }
       const sig = JSON.stringify(doc); if (sig === wsSigRef.current) return;
       wsSigRef.current = sig; wsBadge("Saving…");
-      try { await WSAPI.save(wsOrgRef.current, doc); wsBadge("Saved " + new Date().toLocaleTimeString()); }
+      try { await WSAPI.save(wsOrgRef.current, doc); wsBadge(""); }
       catch (e) { wsBadge("Save failed — will retry"); wsSigRef.current = ""; }
     };
     const schedule = () => { if (!wsReadyRef.current) return; clearTimeout(wsTimerRef.current); wsTimerRef.current = setTimeout(maybeSave, 1800); };
