@@ -7158,6 +7158,36 @@ export default function App() {
     "GUIDED STEP 3 — Test cases. Draft verification test cases (nominal, boundary, fault) for those requirements, each mapped to its ASPICE V-model stage. Summarize them so I can then record results in the Test Cases traceability view.",
   ];
   const runGuided = (n) => { if (chatBusy) return; setView("assistant"); setGuidedStep(n); sendChat(GUIDED_PROMPTS[n - 1]); };
+  // ---- User-created features (editable requirement hierarchy) ----
+  const [addFeatOpen, setAddFeatOpen] = useState(false);
+  const [addFeatName, setAddFeatName] = useState("");
+  const [addFeatL0, setAddFeatL0] = useState("");
+  const createFeature = () => {
+    const name = addFeatName.trim();
+    const l0 = addFeatL0 || ((Object.values(nodes).find((n) => n && n.type === "Requirement" && /L0/.test(n.subtype || "")) || {}).id);
+    if (!name) { notify("Enter a feature name."); return; }
+    if (!l0) { notify("Pick a group to add the feature under."); return; }
+    const l0n = getN(l0);
+    const id = "L1-USR-" + Date.now().toString(36).toUpperCase();
+    const node = { id, type: "Requirement", label: name, subtype: "L1 system level", userCreated: true, edited: true,
+      props: { statement: "", domain: (l0n && l0n.props && l0n.props.domain) || "", subdomain: name, parentL0: l0, ecu: "TBD", safety: "TBD", cyber: "TBD" } };
+    setNodes((prev) => ({ ...prev, [id]: node }));
+    setOpen((p) => new Set([...p, l0]));
+    setSelected(id); pendingReaderScrollRef.current = id; setView("reader");
+    logAudit("Created feature", id, name);
+    setAddFeatOpen(false); setAddFeatName("");
+    notify("Feature “" + name + "” created — add requirements or import a spec under it.");
+  };
+  const deleteFeature = (id) => {
+    const n = getN(id); if (!n || !n.userCreated) return;
+    if (typeof window !== "undefined" && !window.confirm("Delete feature “" + (n.label || id) + "” and its added requirements?")) return;
+    setNodes((prev) => { const c = { ...prev }; delete c[id]; return c; });
+    [SYSREQ_STORE, SWREQ_STORE].forEach((s) => { if (s.data[id]) delete s.data[id]; });
+    setSysReqV((v) => v + 1);
+    if (selected === id) setSelected(null);
+    logAudit("Deleted feature", id, n.label || "");
+    notify("Feature deleted.");
+  };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
@@ -7417,6 +7447,7 @@ export default function App() {
     v: 2,
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
+    userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
     reqStatus, regEdits, baselines, tcExec, auditLog,
   }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog]);
   const applyAll = useCallback((d) => {
@@ -7427,7 +7458,11 @@ export default function App() {
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
-    if (d.nodeEdits) setNodes((prev) => { const nx = { ...prev }; Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } }); return nx; });
+    if (d.userNodes || d.nodeEdits) setNodes((prev) => {
+      const nx = { ...prev, ...(d.userNodes || {}) }; // restore user-created features first
+      if (d.nodeEdits) Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } });
+      return nx;
+    });
     kmForceRef.current++;
   }, []);
   const collectRef = useRef(collectAll); collectRef.current = collectAll;
@@ -8999,8 +9034,9 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const m = meta(n.type);
     /* SYSTEMS tree is the REQUIREMENT hierarchy only (L0 -> L1 -> L2). Do NOT drill into allocated ECUs
        or their device buses (those buses are named like L0 systems and made the tree look mis-nested). */
-    const kids = id === GRAPH.focus ? L1S
-      : neigh(id).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c));
+    const kids = (id === GRAPH.focus ? L1S
+      : neigh(id).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)))
+      .concat(Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === id).map((x) => x.id));
     const isOpen = open.has(id);
     const gap = UNALLOCATED.has(id);
     const stub = depth === 0 && id !== GRAPH.focus;
@@ -9026,6 +9062,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             {titleCase(n ? n.label : "")}
           </button>
           ); })()}
+          {n && n.userCreated && <span style={{ fontSize: 7.5, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 3, padding: "0 4px", flexShrink: 0 }}>NEW</span>}
+          {n && n.userCreated && canWrite && <button onClick={(e) => { e.stopPropagation(); deleteFeature(id); }} title="Delete this feature" style={{ flexShrink: 0, color: "#B42318", opacity: 0.6, display: "flex" }}><X size={11} /></button>}
           {gap && <AlertTriangle size={11} color="#B42318" />}
         </div>
         {isOpen && kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />)}
@@ -9694,9 +9732,24 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               ))}
             </div>
             <div className="flex items-center gap-2">
+              {treeMode === "system" && canWrite && <button onClick={() => { setAddFeatOpen((v) => !v); setAddFeatL0((prev) => prev || ((Object.values(nodes).find((n) => n && n.type === "Requirement" && /L0/.test(n.subtype || "")) || {}).id) || ""); }} title="Add a new feature" style={{ display: "flex", cursor: "pointer", color: "#175CD3" }}><Plus size={15} /></button>}
               <button onClick={() => setLeftHidden(true)} title="Hide panel" style={{ display: "flex", cursor: "pointer" }}><ChevronLeft size={14} color="#98A2B3" /></button>
             </div>
           </div>
+          {treeMode === "system" && addFeatOpen && (
+            <div className="px-3 py-2" style={{ borderBottom: "1px solid #F2F4F7", background: "#F9FAFB" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>NEW FEATURE</div>
+              <input autoFocus value={addFeatName} onChange={(e) => setAddFeatName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createFeature(); if (e.key === "Escape") setAddFeatOpen(false); }} placeholder="Feature name (e.g. Tray Table)" style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "5px 8px", borderRadius: 6, border: "1px solid #D0D5DD", marginBottom: 6, outline: "none" }} />
+              <select value={addFeatL0} onChange={(e) => setAddFeatL0(e.target.value)} style={{ width: "100%", boxSizing: "border-box", fontSize: 11.5, padding: "5px 8px", borderRadius: 6, border: "1px solid #D0D5DD", marginBottom: 6, background: "#fff" }}>
+                <option value="">— group —</option>
+                {Object.values(nodes).filter((n) => n && n.type === "Requirement" && /L0/.test(n.subtype || "")).sort((a, b) => (a.label || "").localeCompare(b.label || "")).map((l0) => <option key={l0.id} value={l0.id}>{l0.label}</option>)}
+              </select>
+              <div className="flex gap-2">
+                <button onClick={createFeature} style={{ flex: 1, fontSize: 11.5, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 6, padding: "5px 0", cursor: "pointer" }}>Create</button>
+                <button onClick={() => { setAddFeatOpen(false); setAddFeatName(""); }} style={{ fontSize: 11.5, fontWeight: 600, color: "#475467", border: "1px solid #E4E7EC", borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-auto px-1 py-1">
             {treeMode === "ecu" ? (() => {
               const dot = { primary: "#175CD3", secondary: "#B54708", smart: "#9E77ED" };
