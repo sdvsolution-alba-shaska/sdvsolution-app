@@ -3069,7 +3069,7 @@ function ensurePdfJs() {
     document.head.appendChild(s);
   });
 }
-const CHAT_FILE_RE = /\.(pdf|xlsx|xls|csv|docx|txt|md|dbc|ldf|arxml|xml)$/i;
+const CHAT_FILE_RE = /\.(pdf|xlsx|xls|csv|docx|doc|txt|md|dbc|ldf|arxml|xml)$/i;
 async function parseAttachmentFile(file) {
   const name = (file && file.name) || "file";
   const ext = (name.split(".").pop() || "").toLowerCase();
@@ -3082,10 +3082,15 @@ async function parseAttachmentFile(file) {
       const parts = wb.SheetNames.map((sn) => "## Sheet: " + sn + "\n" + XLSX.utils.sheet_to_csv(wb.Sheets[sn]));
       return { name, kind: "excel", text: cap(parts.join("\n\n")) };
     }
+    if (ext === "doc") {
+      return { name, kind: "word", text: "", error: "Legacy .doc (Word 97–2003) can't be read. Open it in Word and “Save As” .docx (or export to PDF), then attach that." };
+    }
     if (ext === "docx") {
       const mammoth = await ensureMammoth();
       const out = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-      return { name, kind: "word", text: cap(out && out.value) };
+      const txt = (out && out.value) || "";
+      if (!txt.replace(/\s+/g, "").length) return { name, kind: "word", text: "", error: "This Word file has no readable text (empty or image-only)." };
+      return { name, kind: "word", text: cap(txt) };
     }
     if (ext === "pdf") {
       const pdfjs = await ensurePdfJs();
@@ -3194,6 +3199,18 @@ async function docxToAoa(file) {
   }
   return aoa.length > 1 ? aoa : null;
 }
+// Word (free-form spec, no table): pull "shall/must" sentences as NEW requirements.
+async function docxShallRecords(file) {
+  try {
+    const mammoth = await ensureMammoth();
+    const out = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    const text = ((out && out.value) || "").replace(/\s+/g, " ").trim();
+    if (!text) return [];
+    const recs = [];
+    text.split(/(?<=[.;])\s+/).forEach((s) => { const t = s.trim(); if (/\b(shall|must)\b/i.test(t) && t.length > 20 && t.length < 400) recs.push({ id: null, name: "", text: t, Safety: "", parentId: null }); });
+    return recs;
+  } catch (e) { return []; }
+}
 // PDF → records (best-effort): scan text for lines carrying an L0–L4 id and take
 // the rest of the line as the statement. Good enough to update existing nodes by
 // id when re-importing our own PDF export.
@@ -3218,10 +3235,32 @@ async function pdfToReqRecords(file) {
   if (!recs.length) {
     text.replace(/\s+/g, " ").split(/(?<=[.;])\s+/).forEach((s) => {
       const t = s.trim();
-      if (/\bshall\b/i.test(t) && t.length > 20 && t.length < 400) recs.push({ id: null, name: "", text: t, Safety: "", parentId: null });
+      if (/\b(shall|must)\b/i.test(t) && t.length > 20 && t.length < 400) recs.push({ id: null, name: "", text: t, Safety: "", parentId: null });
     });
   }
   return { records: recs, empty: false };
+}
+// Render PDF pages to images (for scanned/image PDFs) so the vision model can read them —
+// same path as a pasted screenshot. Returns [{ url, media_type, data }]. Capped for payload size.
+async function pdfToImages(file, maxPages = 12) {
+  const pdfjs = await ensurePdfJs();
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const imgs = []; const n = Math.min(doc.numPages, maxPages);
+  for (let p = 1; p <= n; p++) {
+    const pg = await doc.getPage(p);
+    const base = pg.getViewport({ scale: 1 });
+    const fit = Math.min(2, 1800 / base.width, 2400 / base.height); // cap longest side, keep it legible
+    const vp = pg.getViewport({ scale: Math.max(1, fit) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+    const url = canvas.toDataURL("image/jpeg", 0.85);
+    const m = url.match(/^data:([^;]+);base64,(.*)$/);
+    if (m) imgs.push({ url, media_type: m[1], data: m[2] });
+  }
+  return imgs;
 }
 function kmatrixData() {
   const K = KM_STORE.data, M = K.msgs;
@@ -8287,7 +8326,7 @@ export default function App() {
   /* Import Save-As model: pick a source type, then (if it needs one) choose a file. */
   const IMPORT_SETS = {
     masters: { label: "Source masters (re-ingest)", note: "Reruns the ingestion pipeline and rebuilds the graph from the connected source masters.", file: false },
-    reqif: { label: "Requirements (ReqIF · Excel · CSV · Word · PDF)", note: "Matches rows by ID to update requirements in place and adds new ones under their function. Excel/CSV/ReqIF round-trip cleanly; Word & PDF are best-effort (a requirements table is read where present).", file: true, accept: ".reqif,.csv,.xlsx,.xls,.docx,.pdf,.xml" },
+    reqif: { label: "Requirements (ReqIF · Excel · CSV · Word · PDF)", note: "Matches rows by ID to update requirements in place and adds new ones under their function. Excel/CSV/ReqIF round-trip cleanly; Word (.docx) & PDF are best-effort. Legacy .doc isn't supported — save it as .docx.", file: true, accept: ".reqif,.csv,.xlsx,.xls,.docx,.doc,.pdf,.xml" },
     kbl: { label: "Harness connectivity (KBL / VEC)", note: "Reconcile logical nets from the supplier package against the model.", file: true, accept: ".kbl,.vec,.xml" },
   };
   /* Run the selected upload. ReqIF is parsed and RECONCILED against the L0/L1/L2 model:
@@ -8325,6 +8364,20 @@ export default function App() {
     setSysReqV((v) => v + 1);
     notify(sourceLabel + ": " + updated + " updated · " + added + " added · " + skipped + " skipped" + (skipped ? " (no matching function — select one and re-import to place them)" : "") + ".");
   };
+  /* Read a scanned/image PDF's pages with the vision model (via the secure proxy) and
+     return requirement records — used by Upload → Requirements when a PDF has no text layer. */
+  const extractReqsFromImages = async (imgs) => {
+    const content = [...imgs.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } })),
+      { type: "text", text: "These page images are a requirements specification. Read them and extract every requirement. Return ONLY a JSON array (no prose), each item {\"title\": short title, \"statement\": the requirement text verbatim}. Return [] if there are none." }];
+    const resp = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 4096, system: "You extract requirements from documents and output strict JSON only.", messages: [{ role: "user", content }] }) });
+    const data = await resp.json();
+    if (data && data.error) throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "assistant error"));
+    const txt = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).join("");
+    const m = txt.match(/\[[\s\S]*\]/); if (!m) return [];
+    let arr; try { arr = JSON.parse(m[0]); } catch (e) { return []; }
+    return (Array.isArray(arr) ? arr : []).map((r) => ({ id: null, name: String(r.title || "").slice(0, 120), text: String(r.statement || r.text || ""), Safety: "", parentId: null })).filter((r) => r.text);
+  };
   const runImport = async () => {
     const iset = IMPORT_SETS[importType] || IMPORT_SETS.masters;
     setIoMenu(false);
@@ -8335,12 +8388,19 @@ export default function App() {
         if (ext === "reqif" || ext === "xml") recs = parseReqIFText(await importFile.text());
         else if (ext === "csv") recs = aoaToReqRecords(csvToAoa(await importFile.text()));
         else if (ext === "xlsx" || ext === "xls") { const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await importFile.arrayBuffer(), { type: "array" }); const sh = wb.Sheets[wb.SheetNames[0]]; recs = aoaToReqRecords(XLSX.utils.sheet_to_json(sh, { header: 1, blankrows: false, defval: "" })); }
-        else if (ext === "docx") { const rows = await docxToAoa(importFile); recs = rows ? aoaToReqRecords(rows) : []; if (!recs.length) { notify("Couldn't find a requirements table in “" + name + "”. Word re-import is best-effort — export to Excel, CSV or ReqIF for a clean round-trip."); setImportFile(null); return; } }
+        else if (ext === "doc") { notify("Legacy .doc (Word 97–2003) can't be read. Open it in Word and “Save As” .docx, or export to PDF / Excel, then upload that."); setImportFile(null); return; }
+        else if (ext === "docx") { const rows = await docxToAoa(importFile); recs = rows ? aoaToReqRecords(rows) : await docxShallRecords(importFile); if (!recs.length) { notify("Couldn't read requirements from “" + name + "”. For a free-form spec, drop it into the Assistant instead; for a table, keep the ID / Statement columns."); setImportFile(null); return; } if (recs.some((r) => !r.id) && !selected) { notify("Select the feature (L1) to file these under first, then re-import."); setImportFile(null); return; } }
         else if (ext === "pdf") {
           const out = await pdfToReqRecords(importFile); recs = out.records || [];
-          if (out.empty) { notify("“" + name + "” has no text layer — it looks like a scanned/image PDF and can't be read (no OCR). Use a text-based PDF, or the source Word/Excel."); setImportFile(null); return; }
-          if (!recs.length) { notify("No requirements found in “" + name + "”. PDF import reads lines with SDVsolution IDs or ‘shall’ statements — for a free-form spec, drop it into the Assistant instead."); setImportFile(null); return; }
-          if (recs.some((r) => !r.id) && !selected) { notify("Select the feature (L1) to file these under first, then re-import — the PDF has new requirements with no IDs to match."); setImportFile(null); return; }
+          if (out.empty) {
+            // Scanned/image PDF — no text layer. Read the pages with the vision model.
+            if (!selected) { notify("Select the feature (L1) to file these under first — a scanned PDF has no IDs to match."); setImportFile(null); return; }
+            notify("Reading scanned PDF pages…");
+            try { const imgs = await pdfToImages(importFile, 12); recs = imgs.length ? await extractReqsFromImages(imgs) : []; }
+            catch (e) { notify("Couldn't read the scanned PDF: " + (e && e.message ? e.message : e) + " — the Assistant backend must be configured (see AUTH_SETUP.md)."); setImportFile(null); return; }
+            if (!recs.length) { notify("Couldn't read any requirements from the scanned pages of “" + name + "”."); setImportFile(null); return; }
+          } else if (!recs.length) { notify("No requirements found in “" + name + "”. PDF import reads lines with SDVsolution IDs or ‘shall’ statements — for a free-form spec, drop it into the Assistant instead."); setImportFile(null); return; }
+          else if (recs.some((r) => !r.id) && !selected) { notify("Select the feature (L1) to file these under first, then re-import — the PDF has new requirements with no IDs to match."); setImportFile(null); return; }
         }
         else { notify("Unsupported file type: " + name + ". Use ReqIF, Excel, CSV, Word or PDF."); setImportFile(null); return; }
         reconcileReqRecords(recs || [], name);
@@ -8766,7 +8826,17 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const list = Array.from(files || []).filter((f) => CHAT_FILE_RE.test(f.name || ""));
     if (!list.length) return;
     setChatFileBusy(true);
-    for (const f of list) { const parsed = await parseAttachmentFile(f); setChatFiles((prev) => [...prev, parsed]); }
+    for (const f of list) {
+      const parsed = await parseAttachmentFile(f);
+      const ext = (String(f.name || "").split(".").pop() || "").toLowerCase();
+      // A scanned/image PDF has no readable text — render its pages to images so the
+      // vision model can read them, exactly like a pasted screenshot.
+      if (ext === "pdf" && !(parsed && parsed.text && parsed.text.replace(/\s+/g, "").length)) {
+        try { const imgs = await pdfToImages(f, 12); if (imgs.length) { setChatImages((prev) => [...prev, ...imgs]); notify("“" + f.name + "” is a scanned PDF — added " + imgs.length + " page image(s) for the Assistant to read."); continue; } }
+        catch (e) { setChatFiles((prev) => [...prev, { name: f.name, kind: "pdf", text: "", error: "Couldn't render the scanned PDF: " + (e && e.message ? e.message : e) }]); continue; }
+      }
+      setChatFiles((prev) => [...prev, parsed]);
+    }
     setChatFileBusy(false);
   };
   const onChatDrop = (e) => {
