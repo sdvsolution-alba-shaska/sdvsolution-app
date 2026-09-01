@@ -1511,7 +1511,7 @@ const isSmartDevice = (n) => !!n && n.type === "ECUSmartNode" && /I\/O list$/.te
 const isCanDevice = (n) => /CAN/.test(String((n && n.props && n.props.protocol) || (n && n.subtype) || "").toUpperCase());
 /* A named ECU module that is LIN-controlled (and not on CAN) is treated as a Smart Device. */
 const isLinModule = (e) => { const t = (((e && e.scope) || "") + " " + ((e && e.deviceClass) || "")).toUpperCase(); return t.includes("LIN") && !t.includes("CAN"); };
-function computeReadiness(nodeMap) {
+function computeReadiness(nodeMap, tcExec = {}) {
   const all = Object.values(nodeMap);
   /* Hardware counts for the HWE dashboard. ECUs = compute-ECU nodes (Primary/Secondary) PLUS the
      smart bus DEVICES (LIN/CAN lamps, antennas, mirrors...) that classify as Secondary ECU. Mechatronics
@@ -1548,14 +1548,19 @@ function computeReadiness(nodeMap) {
   const nn = l1.length;
   const l2Count = l1.reduce((s, r) => s + genL2(r).nodes.length, 0);
   const tara = cyber * 2, fmea = nn * 2;
-  // Authored (curated) test cases, per ASPICE V-model stage — drives the TC card.
-  let tcTotal = 0; const tcStg = {};
+  // Authored (curated) test cases, per ASPICE V-model stage + execution — drives the TC card.
+  let tcTotal = 0, tcRun = 0, tcPass = 0, tcFail = 0; const tcStg = {};
   Object.keys(CURATED_TC).forEach((id) => {
     const lvl = id.slice(0, 2); let group = "SYS", isL3 = true;
     if (lvl === "L3" || lvl === "L4") { group = /-SW-/.test(id) ? "SW" : /-AR-/.test(id) ? "AR" : /-HW-/.test(id) ? "HW" : "SYS"; isL3 = lvl === "L3"; }
-    aspiceTests(id, group, isL3, "").forEach((c) => { tcTotal++; tcStg[c.stage] = (tcStg[c.stage] || 0) + 1; });
+    aspiceTests(id, group, isL3, "").forEach((c) => {
+      tcTotal++; tcStg[c.stage] = (tcStg[c.stage] || 0) + 1;
+      const ex = tcExec[c.id]; if (ex && ex.status) { tcRun++; if (ex.status === "pass") tcPass++; else if (ex.status === "fail") tcFail++; }
+    });
   });
   const tcReqs = Object.keys(CURATED_TC).length, tcSys4 = tcStg["SYS.4"] || 0, tcSys5 = tcStg["SYS.5"] || 0, tcSwHw = tcTotal - tcSys4 - tcSys5;
+  const tcPassPct = tcTotal ? Math.round(100 * tcPass / tcTotal) : 0;
+  const tcStatus = tcRun === 0 ? "Not executed" : (tcFail > 0 ? "Failing" : (tcPass === tcTotal ? "Passed" : "In progress"));
   return {
     disciplines: [
       { key: "SYS", label: "System Engineering", master: "SYS.1-SYS.5", primary: nn, primaryLabel: "Use cases",
@@ -1589,8 +1594,8 @@ function computeReadiness(nodeMap) {
           { id: "HWE.4", name: "Verification against HW Requirements", count: hwMech, detail: `${hwMech.toLocaleString()} mechatronic devices`, status: "Not executed" },
         ] } },
       { key: "TC", label: "Test Cases", master: "ASPICE verification", primary: tcTotal, primaryLabel: "test cases defined", view: "tctrace",
-        secondary: [["SYS.4", tcSys4], ["SYS.5", tcSys5], ["SW/HW", tcSwHw]], coverage: 0, coverageLabel: "executed",
-        status: "Not executed", flag: `${tcReqs.toLocaleString()} requirement${tcReqs === 1 ? "" : "s"} traced → ${tcTotal.toLocaleString()} test case${tcTotal === 1 ? "" : "s"} · SYS.4 + SYS.5 system verification · open the traceability table` },
+        secondary: [["SYS.4", tcSys4], ["SYS.5", tcSys5], ["SW/HW", tcSwHw]], coverage: tcPassPct, coverageLabel: "passed",
+        status: tcStatus, flag: `${tcReqs.toLocaleString()} requirement${tcReqs === 1 ? "" : "s"} traced → ${tcTotal.toLocaleString()} test case${tcTotal === 1 ? "" : "s"} · ${tcRun} run · ${tcPass} passed · ${tcFail} failed · open the traceability table` },
       { key: "SAFE", label: "Functional Safety", master: "generated", primary: safety, primaryLabel: "L1 with safety goal",
         secondary: [["FSR", safety], ["TSR", safety], ["ASIL C/D", asilCD]], coverage: fmtPct(safety, nn), coverageLabel: "of L1 have FSR + TSR",
         status: "HARA required", flag: `${(nn - safety).toLocaleString()} L1 not safety-relevant — no FSR/TSR` },
@@ -2207,7 +2212,7 @@ const statusColor = (s) =>
   : /not exec|open|hara|required|not started/i.test(s) ? "#B54708"
   : /draft/i.test(s) ? "#B54708" : /approv|base|done|pass/i.test(s) ? "#027A48" : "#475467";
 const covColor = (v) => (v >= 90 ? "#12B76A" : v >= 50 ? "#F79009" : "#F04438");
-const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A" };
+const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", LOG: "#475467" };
 
 function ProcRow({ p, accent }) {
   const st = statusColor(p.status);
@@ -7089,6 +7094,21 @@ export default function App() {
   const pendingReaderScrollRef = useRef(null); // requirement id to scroll to once the reader shows it (set by cross-view links)
   const [flashReq, setFlashReq] = useState(null); // requirement briefly highlighted after a cross-view jump (auto-clears)
   const [reqStatus, setReqStatus] = useState({}); // requirement lifecycle: id -> { status, reviewer, approver, date }
+  const [tcExec, setTcExec] = useState({}); // test-case execution: tcId -> { status: pass|fail|blocked, date, evidence }
+  const [auditLog, setAuditLog] = useState([]); // white-box change log: [{ ts, actor, action, target, detail, ai }]
+  // White-box audit trail — records who changed what (human vs AI). Kept to the last 800 entries.
+  const logAudit = useCallback((action, target, detail, ai) => {
+    const actor = ai ? "AI Assistant" : ((typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "you");
+    setAuditLog((L) => [{ ts: Date.now(), actor, action, target: target || "", detail: detail || "", ai: !!ai }, ...L].slice(0, 800));
+  }, []);
+  // Guided assistant flow — spec → requirements → architecture → test cases, one approved step at a time.
+  const [guidedStep, setGuidedStep] = useState(0); // 0 idle · 1 reqs · 2 architecture · 3 tests
+  const GUIDED_PROMPTS = [
+    "GUIDED STEP 1 — Requirements. From the attached spec and our conversation, draft the system and software requirements and add them under the correct existing feature (L1) using the addSysReq / addSwReq actions. Then list exactly what you added, for my review.",
+    "GUIDED STEP 2 — Architecture & allocation. For the requirements just drafted, identify the target ECU(s) and key interfaces; apply editNode / addInterfaces only where clearly appropriate, and summarize the allocation for my review.",
+    "GUIDED STEP 3 — Test cases. Draft verification test cases (nominal, boundary, fault) for those requirements, each mapped to its ASPICE V-model stage. Summarize them so I can then record results in the Test Cases traceability view.",
+  ];
+  const runGuided = (n) => { if (chatBusy) return; setView("assistant"); setGuidedStep(n); sendChat(GUIDED_PROMPTS[n - 1]); };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
@@ -7348,14 +7368,16 @@ export default function App() {
     v: 2,
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { statement: n.props?.statement }])),
-    reqStatus, regEdits, baselines,
-  }), [nodes, reqStatus, regEdits, baselines]);
+    reqStatus, regEdits, baselines, tcExec, auditLog,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
     if (d.reqStatus) setReqStatus(clone(d.reqStatus));
     if (d.regEdits) setRegEdits(clone(d.regEdits));
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
+    if (d.tcExec) setTcExec(clone(d.tcExec));
+    if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (d.nodeEdits) setNodes((prev) => { const nx = { ...prev }; Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement: e.statement }, edited: true }; }); return nx; });
     kmForceRef.current++;
   }, []);
@@ -7482,7 +7504,7 @@ export default function App() {
   const [confirmDel, setConfirmDel] = useState(null); // node id pending delete | null
 
   const nodeCount = Object.keys(nodes).length;
-  const readiness = useMemo(() => computeReadiness(nodes), [nodes]);
+  const readiness = useMemo(() => computeReadiness(nodes, tcExec), [nodes, tcExec]);
   /* Requirements-quality (ISO 29148) + process/approval readiness cards for the dashboard. */
   const qualityRep = useMemo(() => computeConsistency(reqStatus), [reqStatus, nodes, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
   const extraCards = useMemo(() => {
@@ -7503,8 +7525,14 @@ export default function App() {
       secondary: [["Approved", s.reviewApproved], ["Baselined", s.reviewBaselined], ["Baselines", baselines.length]], coverage: s.approvedPct, coverageLabel: "reviewed & approved",
       status: s.errors === 0 ? "Gate PASS" : "Gate FAIL",
       flag: "Consistency gate: " + (s.errors === 0 ? "PASS" : s.errors + " error" + (s.errors === 1 ? "" : "s")) + " · baseline: " + (bl ? bl.name : "none") };
-    return [rq, proc];
-  }, [qualityRep, baselines, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
+    // Audit trail card — white-box change log (human vs AI).
+    const aiN = auditLog.filter((e) => e.ai).length, humanN = auditLog.length - aiN;
+    const audit = { key: "LOG", label: "Audit Trail", master: "white-box", primary: auditLog.length, primaryLabel: "changes logged", view: "audit",
+      secondary: [["by you", humanN], ["by AI", aiN]], coverage: auditLog.length ? 100 : 0, coverageLabel: "traceable",
+      status: auditLog.length ? "Tracked" : "Empty",
+      flag: auditLog.length ? "Every change recorded — who, what, when (human vs AI) · open the log" : "No changes logged yet — edits and AI actions will appear here." };
+    return [rq, proc, audit];
+  }, [qualityRep, baselines, ecuTplV, sysReqV, swReqV, auditLog]); // eslint-disable-line
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
   /* Resolve an ECU-spec record for any selected id: a named module (NETWORK.ecus) or a smart-device node. */
@@ -7543,6 +7571,7 @@ export default function App() {
       [d.id]: { ...d, edited: true, provenance: "Human authored", maturity: "Drafted" },
     }));
     setEditing(false); setDraft(null);
+    logAudit("Edited", d.id, d.label || "");
     notify(`Updated \u201c${d.label}\u201d`);
   };
   const setDraftField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
@@ -8701,6 +8730,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
         }
       } catch (e) { /* ignore malformed action */ }
     }
+    if (done.length) logAudit("Assistant actions", "", done.join("; "), true);
     return { clean: text.replace(re, "").trim(), done };
   };
   /* Accept pasted / dropped screenshots — read as base64 for the vision model. */
@@ -8732,8 +8762,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     if (imgs.length) addChatImages(imgs);
     if (docs.length) addChatFiles(docs);
   };
-  const sendChat = async () => {
-    const text = chatInput.trim();
+  const sendChat = async (overrideText) => {
+    const text = (typeof overrideText === "string" ? overrideText : chatInput).trim();
     if ((!text && chatImages.length === 0 && chatFiles.length === 0) || chatBusy) return;
     // Bus databases (DBC / LDF / ARXML) are merged straight into the K-Matrix —
     // deterministic, no LLM needed. Everything else is sent to the assistant.
@@ -9790,27 +9820,57 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             rows.sort((a, b) => (a.feat + a.reqId).localeCompare(b.feat + b.reqId));
             const reqCount = new Set(rows.map((r) => r.reqId)).size;
             const openReq = (l1Id) => { if (l1Id && getN(l1Id)) { materialize(l1Id); setSelected(l1Id); setView("reader"); } };
+            const STAT = { pass: ["Pass", "#067647", "#ECFDF3"], fail: ["Fail", "#B42318", "#FEF3F2"], blocked: ["Blocked", "#B54708", "#FEF6EE"] };
+            const run = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status).length;
+            const passed = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status === "pass").length;
+            const failed = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status === "fail").length;
+            const setExec = (tcId, patch) => { if (!canWrite) return; setTcExec((p) => ({ ...p, [tcId]: { ...(p[tcId] || {}), ...patch } })); if (patch.status) logAudit("Test result " + ((STAT[patch.status] || [patch.status])[0]), tcId, ""); };
+            const onResults = async (file) => {
+              try {
+                const aoa = csvToAoa(await file.text()); if (!aoa.length) return;
+                const H = aoa[0].map((h) => String(h).trim().toLowerCase());
+                const idi = H.findIndex((h) => /test case|tc id|^id$|case id/.test(h));
+                const sti = H.findIndex((h) => /status|result/.test(h));
+                const evi = H.findIndex((h) => /evidence|link|note/.test(h));
+                if (idi < 0 || sti < 0) { notify("CSV needs a Test Case ID column and a Status column."); return; }
+                const patch = {}; let n = 0;
+                for (let k = 1; k < aoa.length; k++) { const row = aoa[k] || []; const id = String(row[idi] || "").trim(); const raw = String(row[sti] || "").trim().toLowerCase(); if (!id || !raw) continue; const st = /pass|ok|green/.test(raw) ? "pass" : /fail|ng|red/.test(raw) ? "fail" : /block/.test(raw) ? "blocked" : null; if (!st) continue; patch[id] = { status: st, date: new Date().toISOString().slice(0, 10), evidence: evi >= 0 ? String(row[evi] || "").trim() : "" }; n++; }
+                setTcExec((p) => ({ ...p, ...patch })); logAudit("Imported test results", file.name, n + " updated"); notify("Imported results for " + n + " test case(s).");
+              } catch (e) { notify("Results import failed: " + (e && e.message ? e.message : e)); }
+            };
             return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
-                <div className="mx-auto px-8 py-6" style={{ maxWidth: 1180 }}>
+                <div className="mx-auto px-8 py-6" style={{ maxWidth: 1240 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>ASPICE V-MODEL · VERIFICATION</div>
                   <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", marginTop: 2 }}>Test Cases traceability</h1>
-                  <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>Every requirement with authored test cases, mapped to its verification cases and V-model stage — <b>{reqCount}</b> requirements → <b>{rows.length}</b> test cases. Click a requirement to open it. Download the full set (including generated fallbacks for every other requirement) from <b>Upload / Download → Test Cases</b>.</p>
+                  <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>Every requirement with authored test cases, mapped to its verification cases and V-model stage. Record a result per case, or import them. Download the full set (incl. generated fallbacks) from <b>Upload / Download → Test Cases</b>.</p>
+                  <div className="flex items-center gap-3" style={{ marginTop: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#101828" }}>{reqCount} requirements · {rows.length} test cases</span>
+                    <span style={{ fontSize: 12, color: "#667085" }}>{run} run · <b style={{ color: "#067647" }}>{passed} passed</b> · <b style={{ color: "#B42318" }}>{failed} failed</b></span>
+                    <div style={{ flex: 1, minWidth: 120, height: 6, borderRadius: 4, background: "#EAECF0", overflow: "hidden", maxWidth: 260 }}><div style={{ width: (rows.length ? Math.round(100 * passed / rows.length) : 0) + "%", height: "100%", background: "#12B76A" }} /></div>
+                    {canWrite && <label style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", background: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }} title="CSV with columns: Test Case ID, Status (pass/fail/blocked), optional Evidence">Import results (CSV)<input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onResults(f); e.target.value = ""; }} /></label>}
+                  </div>
                   <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
                     <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
-                      <thead><tr>{["Requirement", "Feature", "Level", "Stage", "Test Case", "Title", "Expected result"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                      <thead><tr>{["Requirement", "Feature", "Stage", "Test Case", "Title", "Result", "Evidence"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
                       <tbody>
-                        {rows.map((r, i) => (
+                        {rows.map((r, i) => { const ex = tcExec[r.tcId] || {}; const meta = STAT[ex.status]; return (
                           <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
                             <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}><button onClick={() => openReq(r.l1Id)} title={"Open " + (r.feat || r.reqId)} style={{ fontFamily: "ui-monospace,monospace", fontSize: 10.5, color: "#175CD3", textDecoration: "underline" }}>{r.reqId}</button></td>
-                            <td style={{ padding: "5px 10px", color: "#344054", whiteSpace: "nowrap", maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis" }}>{r.feat}</td>
-                            <td style={{ padding: "5px 10px", color: "#667085" }}>{r.lvl}</td>
+                            <td style={{ padding: "5px 10px", color: "#344054", whiteSpace: "nowrap", maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis" }}>{r.feat}</td>
                             <td style={{ padding: "5px 10px", color: "#7A5AF8", fontWeight: 700, whiteSpace: "nowrap" }}>{r.stage}</td>
                             <td style={{ padding: "5px 10px", color: "#98A2B3", fontFamily: "ui-monospace,monospace", fontSize: 10, whiteSpace: "nowrap" }}>{r.tcId}</td>
-                            <td style={{ padding: "5px 10px", color: "#344054" }}>{r.title}</td>
-                            <td style={{ padding: "5px 10px", color: "#667085" }}>{r.exp}</td>
+                            <td style={{ padding: "5px 10px", color: "#344054", maxWidth: 280 }}>{r.title}</td>
+                            <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}>
+                              <select value={ex.status || ""} disabled={!canWrite} onChange={(e) => setExec(r.tcId, { status: e.target.value, date: new Date().toISOString().slice(0, 10) })}
+                                style={{ fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "3px 6px", border: "1px solid " + (meta ? meta[1] + "55" : "#E4E7EC"), color: meta ? meta[1] : "#98A2B3", background: meta ? meta[2] : "#fff", cursor: canWrite ? "pointer" : "default" }}>
+                                <option value="">— not run</option><option value="pass">Pass</option><option value="fail">Fail</option><option value="blocked">Blocked</option>
+                              </select>
+                              {ex.date && <span style={{ fontSize: 9, color: "#98A2B3", marginLeft: 6 }}>{ex.date}</span>}
+                            </td>
+                            <td style={{ padding: "5px 10px" }}><input value={ex.evidence || ""} disabled={!canWrite} onChange={(e) => setExec(r.tcId, { evidence: e.target.value })} placeholder={canWrite ? "link / note" : ""} style={{ width: "100%", minWidth: 120, fontSize: 11, border: "1px solid #E4E7EC", borderRadius: 5, padding: "2px 6px", background: canWrite ? "#fff" : "#F9FAFB", color: "#344054" }} /></td>
                           </tr>
-                        ))}
+                        ); })}
                         {rows.length === 0 && <tr><td colSpan={7} style={{ padding: "10px", color: "#98A2B3" }}>No authored test cases yet.</td></tr>}
                       </tbody>
                     </table>
@@ -9819,6 +9879,34 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               </div>
             );
           })()}
+
+          {/* ===== SECTION: Audit trail view (white-box change log) ===== */}
+          {view === "audit" && (
+            <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+              <div className="mx-auto px-8 py-6" style={{ maxWidth: 1100 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#475467", letterSpacing: 0.5 }}>WHITE-BOX · TRACEABILITY</div>
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", marginTop: 2 }}>Audit trail</h1>
+                <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>Every change is recorded — who, what, when — and each entry is flagged <b>human</b> or <b>AI</b>. {auditLog.length} entr{auditLog.length === 1 ? "y" : "ies"} (most recent 800 kept). {canWrite && auditLog.length > 0 && <button onClick={() => { if (window.confirm("Clear the audit log? This can't be undone.")) { setAuditLog([]); } }} style={{ color: "#B42318", fontWeight: 600 }}>Clear log</button>}</p>
+                <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+                  <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
+                    <thead><tr>{["When", "By", "Action", "Target", "Detail"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {auditLog.map((e, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+                          <td style={{ padding: "5px 10px", color: "#98A2B3", whiteSpace: "nowrap", fontSize: 10.5 }}>{new Date(e.ts).toLocaleString()}</td>
+                          <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}><span style={{ fontSize: 9, fontWeight: 800, color: e.ai ? "#7A5AF8" : "#175CD3", background: e.ai ? "#F4F3FF" : "#EFF8FF", borderRadius: 4, padding: "1px 6px", marginRight: 6 }}>{e.ai ? "AI" : "HUMAN"}</span><span style={{ fontSize: 11, color: "#344054" }}>{e.actor}</span></td>
+                          <td style={{ padding: "5px 10px", color: "#101828", fontWeight: 600, whiteSpace: "nowrap" }}>{e.action}</td>
+                          <td style={{ padding: "5px 10px", color: "#667085", fontFamily: "ui-monospace,monospace", fontSize: 10.5 }}>{e.target}</td>
+                          <td style={{ padding: "5px 10px", color: "#667085" }}>{e.detail}</td>
+                        </tr>
+                      ))}
+                      {auditLog.length === 0 && <tr><td colSpan={5} style={{ padding: "10px", color: "#98A2B3" }}>No changes logged yet. Edit a requirement or let the Assistant apply an action, and it will appear here.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ===== SECTION: Assistant view (data-grounded chat) ===== */}
           {view === "assistant" && (
@@ -9831,6 +9919,24 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 <p style={{ fontSize: 12, color: "#667085", marginTop: 2 }}>
                   Ask about this project — ECUs, requirements, ASIL/safety, interfaces, regulations — or tell it to navigate ("show me the CZM", "go to Logicals"). Attach a PDF, Excel or Word file (📎 or drag it in) and it will read the file and apply the changes you ask for. Grounded in the live data; classifications are proposed.
                 </p>
+                {canWrite && (
+                  <div className="flex items-center gap-2 mt-3" style={{ flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4 }}>GUIDED FLOW</span>
+                    {[["1", "Draft requirements"], ["2", "Architecture & allocation"], ["3", "Test cases"]].map(([n, lbl], i) => {
+                      const step = i + 1; const doneStep = guidedStep >= step; const enabled = !chatBusy && guidedStep >= step - 1;
+                      return (
+                        <button key={n} onClick={() => runGuided(step)} disabled={!enabled}
+                          title={enabled ? "Run step " + n + " — review the result, then continue" : "Complete the previous step first"}
+                          style={{ fontSize: 11.5, fontWeight: 600, borderRadius: 8, padding: "5px 11px", cursor: enabled ? "pointer" : "default",
+                            border: "1px solid " + (doneStep ? "#A6F4C5" : enabled ? "#B2CCFF" : "#E4E7EC"),
+                            background: doneStep ? "#ECFDF3" : "#fff", color: doneStep ? "#067647" : enabled ? "#175CD3" : "#98A2B3" }}>
+                          {doneStep ? "✓ " : n + ". "}{lbl}
+                        </button>
+                      );
+                    })}
+                    {guidedStep > 0 && <button onClick={() => setGuidedStep(0)} style={{ fontSize: 11, color: "#667085", fontWeight: 600 }}>reset</button>}
+                  </div>
+                )}
               </div>
               <div ref={chatScrollRef} className="flex-1 overflow-auto px-6 py-4">
                 {chatMsgs.length === 0 ? (
