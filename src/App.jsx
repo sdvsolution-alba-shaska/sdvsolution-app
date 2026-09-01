@@ -7416,7 +7416,7 @@ export default function App() {
   const collectAll = useCallback(() => ({
     v: 2,
     ...collectStores(),
-    nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { statement: n.props?.statement }])),
+    nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     reqStatus, regEdits, baselines, tcExec, auditLog,
   }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog]);
   const applyAll = useCallback((d) => {
@@ -7427,7 +7427,7 @@ export default function App() {
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
-    if (d.nodeEdits) setNodes((prev) => { const nx = { ...prev }; Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement: e.statement }, edited: true }; }); return nx; });
+    if (d.nodeEdits) setNodes((prev) => { const nx = { ...prev }; Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } }); return nx; });
     kmForceRef.current++;
   }, []);
   const collectRef = useRef(collectAll); collectRef.current = collectAll;
@@ -7465,7 +7465,7 @@ export default function App() {
   }, []);
   const snapshotWorking = useCallback(() => ({
     km: clone(KM_STORE.data),
-    nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { statement: n.props?.statement }])),
+    nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: clone(n.props) }])),
     reqStatus: clone(reqStatus),
     regEdits: clone(regEdits),
   }), [nodes, reqStatus, regEdits]);
@@ -7479,7 +7479,7 @@ export default function App() {
       // revert edits made since the snapshot back to their generated baseline
       Object.values(nx).forEach((n) => { if (n && n.edited && !want[n.id] && NODE[n.id]) nx[n.id] = { ...NODE[n.id] }; });
       // apply the snapshot's edits
-      Object.entries(want).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) nx[id] = { ...base, props: { ...base.props, statement: e.statement }, edited: true }; });
+      Object.entries(want).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } });
       return nx;
     });
     kmForceRef.current++;
