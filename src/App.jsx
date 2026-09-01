@@ -7188,6 +7188,31 @@ export default function App() {
     logAudit("Deleted feature", id, n.label || "");
     notify("Feature deleted.");
   };
+  // ---- User-created ECUs (added to the ECU tree) ----
+  const [userEcus, setUserEcus] = useState([]); // [{ id, name, kind, deviceClass, supplier, vendor, processor, asil, scope, codes, smart, userCreated }]
+  const [addEcuOpen, setAddEcuOpen] = useState(false);
+  const [addEcuName, setAddEcuName] = useState("");
+  const [addEcuKind, setAddEcuKind] = useState("secondary");
+  const createEcu = () => {
+    const name = addEcuName.trim(); if (!name) { notify("Enter an ECU name."); return; }
+    const kind = addEcuKind || "secondary";
+    const id = "ECU-USR-" + Date.now().toString(36).toUpperCase();
+    const rec = { id, name, kind, deviceClass: "User-defined " + (kind === "primary" ? "compute/zonal ECU" : kind === "smart" ? "smart device" : "ECU"), scope: "", asil: "QM", supplier: "TBD", vendor: "TBD", processor: "TBD", codes: [], smart: kind === "smart", userCreated: true };
+    setUserEcus((prev) => [...prev, rec]);
+    setSelectedEcu(id); setTreeMode("ecu"); setView("ecureq");
+    logAudit("Created ECU", id, name);
+    setAddEcuOpen(false); setAddEcuName("");
+    notify("ECU “" + name + "” added — open it to fill in the specification.");
+  };
+  const deleteEcu = (id) => {
+    const e = userEcus.find((x) => x.id === id); if (!e) return;
+    if (typeof window !== "undefined" && !window.confirm("Delete ECU “" + (e.name || id) + "”?")) return;
+    setUserEcus((prev) => prev.filter((x) => x.id !== id));
+    [ECUREQ_STORE, ICD_STORE].forEach((s) => { if (s.data[id]) delete s.data[id]; });
+    if (selectedEcu === id) { setSelectedEcu(null); if (view === "ecureq") setView("reader"); }
+    logAudit("Deleted ECU", id, e.name || "");
+    notify("ECU deleted.");
+  };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
@@ -7448,8 +7473,8 @@ export default function App() {
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
-    reqStatus, regEdits, baselines, tcExec, auditLog,
-  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog]);
+    reqStatus, regEdits, baselines, tcExec, auditLog, userEcus,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog, userEcus]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
@@ -7458,6 +7483,7 @@ export default function App() {
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
+    if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
     if (d.userNodes || d.nodeEdits) setNodes((prev) => {
       const nx = { ...prev, ...(d.userNodes || {}) }; // restore user-created features first
       if (d.nodeEdits) Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } });
@@ -7621,6 +7647,8 @@ export default function App() {
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
   /* Resolve an ECU-spec record for any selected id: a named module (NETWORK.ecus) or a smart-device node. */
   const ecuRecordFor = (id) => {
+    const u = userEcus.find((e) => e.id === id);
+    if (u) return u;
     const m = NETWORK.ecus.find((e) => e.id === id);
     if (m) return m;
     const n = nodes[id];
@@ -9733,6 +9761,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             </div>
             <div className="flex items-center gap-2">
               {treeMode === "system" && canWrite && <button onClick={() => { setAddFeatOpen((v) => !v); setAddFeatL0((prev) => prev || ((Object.values(nodes).find((n) => n && n.type === "Requirement" && /L0/.test(n.subtype || "")) || {}).id) || ""); }} title="Add a new feature" style={{ display: "flex", cursor: "pointer", color: "#175CD3" }}><Plus size={15} /></button>}
+              {treeMode === "ecu" && canWrite && <button onClick={() => setAddEcuOpen((v) => !v)} title="Add a new ECU" style={{ display: "flex", cursor: "pointer", color: "#175CD3" }}><Plus size={15} /></button>}
               <button onClick={() => setLeftHidden(true)} title="Hide panel" style={{ display: "flex", cursor: "pointer" }}><ChevronLeft size={14} color="#98A2B3" /></button>
             </div>
           </div>
@@ -9750,19 +9779,37 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               </div>
             </div>
           )}
+          {treeMode === "ecu" && addEcuOpen && (
+            <div className="px-3 py-2" style={{ borderBottom: "1px solid #F2F4F7", background: "#F9FAFB" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>NEW ECU</div>
+              <input autoFocus value={addEcuName} onChange={(e) => setAddEcuName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createEcu(); if (e.key === "Escape") setAddEcuOpen(false); }} placeholder="ECU name (e.g. Tray Control Module)" style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "5px 8px", borderRadius: 6, border: "1px solid #D0D5DD", marginBottom: 6, outline: "none" }} />
+              <select value={addEcuKind} onChange={(e) => setAddEcuKind(e.target.value)} style={{ width: "100%", boxSizing: "border-box", fontSize: 11.5, padding: "5px 8px", borderRadius: 6, border: "1px solid #D0D5DD", marginBottom: 6, background: "#fff" }}>
+                <option value="primary">Primary ECU</option>
+                <option value="secondary">Secondary ECU</option>
+                <option value="smart">Smart Device</option>
+              </select>
+              <div className="flex gap-2">
+                <button onClick={createEcu} style={{ flex: 1, fontSize: 11.5, fontWeight: 700, color: "#fff", background: "#175CD3", border: "none", borderRadius: 6, padding: "5px 0", cursor: "pointer" }}>Create</button>
+                <button onClick={() => { setAddEcuOpen(false); setAddEcuName(""); }} style={{ fontSize: 11.5, fontWeight: 600, color: "#475467", border: "1px solid #E4E7EC", borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-auto px-1 py-1">
             {treeMode === "ecu" ? (() => {
               const dot = { primary: "#175CD3", secondary: "#B54708", smart: "#9E77ED" };
               const devItem = (n, kind) => ({ id: n.id, name: n.label, tag: (resolveEcuId(n.props?.controller) || "").replace("ECU-", ""), kind, dev: true });
+              const usr = (kind) => userEcus.filter((e) => e.kind === kind).map((e) => ({ id: e.id, name: e.name, tag: "NEW", kind, usr: true }));
               const groups = [
-                ["Primary ECUs", NETWORK.ecus.filter((e) => isPrimaryEcu(e.id)).map((e) => ({ id: e.id, name: e.name, tag: ecuTag(e.id), kind: "primary" }))],
+                ["Primary ECUs", [...NETWORK.ecus.filter((e) => isPrimaryEcu(e.id)).map((e) => ({ id: e.id, name: e.name, tag: ecuTag(e.id), kind: "primary" })), ...usr("primary")]],
                 ["Secondary ECUs", [
                   ...NETWORK.ecus.filter((e) => !isPrimaryEcu(e.id) && e.kind !== "pdu" && !isLinModule(e)).map((e) => ({ id: e.id, name: e.name, tag: ecuTag(e.id), kind: "secondary" })),
                   ...smartDevices.filter(isCanDevice).map((n) => devItem(n, "secondary")),
+                  ...usr("secondary"),
                 ]],
                 ["Smart Devices", [
                   ...NETWORK.ecus.filter((e) => !isPrimaryEcu(e.id) && e.kind !== "pdu" && isLinModule(e)).map((e) => ({ id: e.id, name: e.name, tag: ecuTag(e.id), kind: "smart" })),
                   ...smartDevices.filter((n) => !isCanDevice(n)).map((n) => devItem(n, "smart")),
+                  ...usr("smart"),
                 ]],
               ];
               return groups.map(([g, list]) => {
@@ -9785,7 +9832,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           style={{ paddingLeft: 25, cursor: locked ? "not-allowed" : "pointer", background: on ? "#EAF2FF" : "transparent" }}>
                           <span style={{ width: 7, height: 7, borderRadius: 2, background: locked ? "#E4E7EC" : dot[e.kind], flexShrink: 0 }} />
                           <span className="truncate" style={{ fontSize: 12, color: locked ? "#C4CBD4" : on ? "#101828" : "#344054", fontWeight: on ? 600 : 400 }}>{e.name}</span>
-                          {e.tag && <span style={{ fontSize: 9, color: locked ? "#D5DAE1" : "#98A2B3", fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{e.dev ? "→" + e.tag : e.tag}</span>}
+                          {e.tag && <span style={{ fontSize: 9, color: e.usr ? "#7F56D9" : locked ? "#D5DAE1" : "#98A2B3", fontFamily: "ui-monospace, monospace", marginLeft: "auto", fontWeight: e.usr ? 800 : 400 }}>{e.dev ? "→" + e.tag : e.tag}</span>}
+                          {e.usr && canWrite && <span onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); deleteEcu(e.id); }} title="Delete ECU" style={{ display: "flex", color: "#B42318", opacity: 0.6, marginLeft: 6, flexShrink: 0 }}><X size={11} /></span>}
                         </button>
                       );
                     })}
