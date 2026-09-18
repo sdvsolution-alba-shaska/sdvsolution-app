@@ -2212,7 +2212,7 @@ const statusColor = (s) =>
   : /not exec|open|hara|required|not started/i.test(s) ? "#B54708"
   : /draft/i.test(s) ? "#B54708" : /approv|base|done|pass/i.test(s) ? "#027A48" : "#475467";
 const covColor = (v) => (v >= 90 ? "#12B76A" : v >= 50 ? "#F79009" : "#F04438");
-const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", LOG: "#475467" };
+const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", LOG: "#475467", GAP: "#DD2590" };
 
 function ProcRow({ p, accent }) {
   const st = statusColor(p.status);
@@ -6763,6 +6763,143 @@ function reqQuality(r) {
     vague: VAGUE_TERMS.filter((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(st)),
   };
 }
+/* ===== Gap analysis (bullet-3 of an OEM integration-test SOW) =====================================
+   Scans the authored requirement population for the classic quality/traceability gaps:
+   missing content, non-testable, duplicated, conflicting, stale, and untraced. Deterministic,
+   heuristic, and conservative — flags candidates for an engineer to confirm (never auto-edits). */
+const GAP_CAT = {
+  incomplete: { label: "Missing content", sev: "error", color: "#B42318", hint: "Requirement has no statement or no title." },
+  nontestable: { label: "Non-testable", sev: "error", color: "#B54708", hint: "No “shall”, no measurable acceptance criterion, or ambiguous wording — can't be verified." },
+  conflict: { label: "Conflicting", sev: "error", color: "#C11574", hint: "Two requirements on the same subject appear to contradict (allow vs. prohibit)." },
+  duplicate: { label: "Duplicated", sev: "warn", color: "#DD2590", hint: "Two requirements state almost the same thing." },
+  untraced: { label: "Untraced", sev: "warn", color: "#7A5AF8", hint: "Verified by Test but no test case is linked yet." },
+  stale: { label: "Stale", sev: "info", color: "#0BA5EC", hint: "A baseline was taken but this requirement is still Draft — never reviewed into it." },
+};
+const GAP_ORDER = ["incomplete", "nontestable", "conflict", "duplicate", "untraced", "stale"];
+const GAP_STOP = new Set(["shall", "must", "should", "will", "the", "and", "for", "with", "that", "this", "from", "when", "while", "system", "vehicle", "user", "then", "into", "onto", "have", "been", "than", "each", "only", "not", "request", "requests"]);
+const gapNorm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+const gapSigTokens = (s) => { const out = new Set(); gapNorm(s).split(" ").forEach((t) => { if (t.length >= 4 && !GAP_STOP.has(t)) out.add(t); }); return out; };
+const gapJaccard = (a, b) => { if (!a.size || !b.size) return 0; let i = 0; a.forEach((t) => { if (b.has(t)) i++; }); return i / (a.size + b.size - i); };
+const GAP_NEG = /\bshall not\b|\bmust not\b|\bprohibit|\bdeny\b|\bdenies\b|\bprevent|\binhibit|\bdisable|\bforbid|\bblock\b|\bnever\b|\brefuse/i;
+const GAP_POS = /\ballow|\benable|\bpermit|\bgrant|\bshall extend\b|\bshall unlatch\b/i;
+function computeGapAnalysis(reqs, opts = {}) {
+  const status = opts.status || {}, hasBaseline = !!opts.hasBaseline, tracedIds = opts.tracedIds || new Set();
+  const list = (reqs || []).filter(Boolean);
+  const issues = [];
+  const flagged = {}; // reqId -> Set(cat)
+  const mark = (r, cat, msg, detail) => {
+    issues.push({ id: r.id, title: r.title || "(untitled)", statement: r.statement || "", cat, sev: GAP_CAT[cat].sev, msg, detail: detail || "" });
+    (flagged[r.id] = flagged[r.id] || new Set()).add(cat);
+  };
+  // Per-requirement checks
+  const sig = new Map();
+  list.forEach((r) => sig.set(r.id, gapSigTokens((r.statement || "") + " " + (r.title || ""))));
+  list.forEach((r) => {
+    const st = String(r.statement || "").trim();
+    const q = reqQuality(r);
+    if (!st || !String(r.title || "").trim()) { mark(r, "incomplete", !st ? "No requirement statement" : "No title", ""); return; }
+    const nt = [];
+    if (!q.shall) nt.push("no “shall” (not EARS)");
+    if ((r.method || "Test") !== "Information" && !q.criterion) nt.push("no measurable acceptance criterion");
+    if (q.vague.length) nt.push("ambiguous: " + q.vague.join(", "));
+    if (nt.length) mark(r, "nontestable", nt.join("; "), "");
+    // Untraced: verified by Test but no linked test case (curated map or an explicit r.tc link).
+    const traced = tracedIds.has(r.id) || !!(r.tc || r.testCase || (Array.isArray(r.tests) && r.tests.length));
+    if ((r.method || "Test") === "Test" && !traced) mark(r, "untraced", "No test case links to this requirement", "");
+    // Stale: a baseline exists but this requirement is still Draft (never reviewed into it).
+    const sv = String(status[r.id] || "").toLowerCase();
+    if (hasBaseline && (!sv || sv === "draft" || sv === "proposed")) mark(r, "stale", "Draft while a baseline exists — review or baseline it", "");
+  });
+  // Pairwise checks: duplicated + conflicting (O(n²) over authored reqs, capped for safety).
+  const cap = list.length <= 600 ? list.length : 600;
+  for (let i = 0; i < cap; i++) {
+    for (let j = i + 1; j < cap; j++) {
+      const a = list[i], b = list[j];
+      const j2 = gapJaccard(sig.get(a.id), sig.get(b.id));
+      if (j2 >= 0.72) { mark(a, "duplicate", "Near-duplicate of " + b.id, b.title || ""); continue; }
+      if (j2 >= 0.5) {
+        const at = String(a.statement || ""), bt = String(b.statement || "");
+        const aNeg = GAP_NEG.test(at), bNeg = GAP_NEG.test(bt), aPos = GAP_POS.test(at) || (/\bshall\b/i.test(at) && !aNeg), bPos = GAP_POS.test(bt) || (/\bshall\b/i.test(bt) && !bNeg);
+        if ((aNeg && bPos && !bNeg) || (bNeg && aPos && !aNeg)) mark(a, "conflict", "May conflict with " + b.id + " (allow vs. prohibit on the same subject)", b.title || "");
+      }
+    }
+  }
+  const counts = {}; GAP_ORDER.forEach((c) => (counts[c] = 0));
+  issues.forEach((it) => (counts[it.cat]++));
+  const flaggedN = Object.keys(flagged).length;
+  const errorN = issues.filter((it) => it.sev === "error").length;
+  const total = list.length;
+  const clean = total - flaggedN;
+  const score = total ? Math.round(100 * clean / total) : 0;
+  // Stable display order: severity then category then id
+  const sevRank = { error: 0, warn: 1, info: 2 };
+  issues.sort((x, y) => (sevRank[x.sev] - sevRank[y.sev]) || (GAP_ORDER.indexOf(x.cat) - GAP_ORDER.indexOf(y.cat)) || String(x.id).localeCompare(String(y.id)));
+  return { issues, counts, total, clean, flaggedN, errorN, score };
+}
+function gapSummaryText(rep) {
+  if (!rep.total) return "No structured requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on me), then ask again and I'll run the gap analysis.";
+  if (!rep.issues.length) return `Gap analysis: all ${rep.total} authored requirement${rep.total === 1 ? "" : "s"} are clean — no missing content, non-testable, duplicate, conflicting, stale or untraced items found. Opened the Gap Analysis view.`;
+  const parts = GAP_ORDER.filter((c) => rep.counts[c]).map((c) => `${rep.counts[c]} ${GAP_CAT[c].label.toLowerCase()}`);
+  return `Gap analysis across ${rep.total} authored requirement${rep.total === 1 ? "" : "s"}: found ${rep.issues.length} issue${rep.issues.length === 1 ? "" : "s"} (${rep.errorN} to fix) on ${rep.flaggedN} requirement${rep.flaggedN === 1 ? "" : "s"} — ${parts.join(", ")}. ${rep.score}% are gap-free. Opened the Gap Analysis view so you can work through them.`;
+}
+/* Gap Analysis panel — categorized, filterable list of the gaps computeGapAnalysis found. */
+function GapAnalysisPanel({ rep }) {
+  const [cat, setCat] = useState("all");
+  const shown = rep.issues.filter((it) => cat === "all" || it.cat === cat);
+  const tile = (key, label, n, color) => (
+    <button key={key} onClick={() => setCat(cat === key ? "all" : key)}
+      style={{ textAlign: "left", border: "1px solid " + (cat === key ? color : "#EAECF0"), background: cat === key ? "#FCFCFD" : "#fff", borderRadius: 10, padding: "10px 12px", cursor: "pointer", minWidth: 132, flex: "1 1 132px", boxShadow: cat === key ? "0 0 0 1px " + color : "none" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: n ? color : "#D0D5DD", lineHeight: 1 }}>{n}</div>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: "#475467", marginTop: 3 }}>{label}</div>
+    </button>
+  );
+  return (
+    <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+      <div className="mx-auto px-8 py-6" style={{ maxWidth: 1100 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#475467", letterSpacing: 0.5 }}>ISO 29148 · TRACEABILITY · QUALITY</div>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", marginTop: 2 }}>Gap analysis</h1>
+        <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>
+          {rep.total === 0
+            ? "No structured requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on the Assistant), then come back."
+            : <>Scanned <b>{rep.total}</b> authored requirement{rep.total === 1 ? "" : "s"} for the classic gaps. Found <b>{rep.issues.length}</b> issue{rep.issues.length === 1 ? "" : "s"} on <b>{rep.flaggedN}</b> requirement{rep.flaggedN === 1 ? "" : "s"} — <b>{rep.errorN}</b> to fix. <b style={{ color: covColor(rep.score) }}>{rep.score}%</b> are gap-free. These are candidates — an engineer confirms each.</>}
+        </p>
+        {rep.total > 0 && (
+          <div className="flex gap-2 flex-wrap" style={{ marginTop: 14 }}>
+            {GAP_ORDER.map((c) => tile(c, GAP_CAT[c].label, rep.counts[c], GAP_CAT[c].color))}
+          </div>
+        )}
+        {cat !== "all" && (
+          <div style={{ fontSize: 11.5, color: "#667085", marginTop: 12, background: "#F9FAFB", border: "1px solid #EAECF0", borderRadius: 8, padding: "8px 12px" }}>
+            <b style={{ color: GAP_CAT[cat].color }}>{GAP_CAT[cat].label}.</b> {GAP_CAT[cat].hint} <button onClick={() => setCat("all")} style={{ color: "#175CD3", fontWeight: 600, marginLeft: 4 }}>show all</button>
+          </div>
+        )}
+        {rep.issues.length > 0 && (
+          <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
+              <thead><tr>{["", "Category", "Requirement", "Finding"].map((h, i) => <th key={i} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {shown.map((it, i) => { const cc = GAP_CAT[it.cat]; return (
+                  <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+                    <td style={{ padding: "6px 10px" }}><span style={{ width: 7, height: 7, borderRadius: 4, background: cc.color, display: "inline-block" }} title={cc.sev} /></td>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}><span style={{ fontSize: 9.5, fontWeight: 800, color: cc.color, background: cc.color + "18", borderRadius: 4, padding: "1px 7px" }}>{cc.label}</span></td>
+                    <td style={{ padding: "6px 10px", minWidth: 220 }}><div style={{ fontWeight: 600, color: "#101828" }}>{it.title}</div><div style={{ fontFamily: "ui-monospace,monospace", fontSize: 10, color: "#98A2B3" }}>{it.id}</div></td>
+                    <td style={{ padding: "6px 10px", color: "#667085" }}>{it.msg}{it.detail ? <span style={{ color: "#98A2B3" }}> — {it.detail}</span> : null}</td>
+                  </tr>
+                ); })}
+                {shown.length === 0 && <tr><td colSpan={4} style={{ padding: "10px", color: "#98A2B3" }}>No {cat === "all" ? "" : GAP_CAT[cat].label.toLowerCase() + " "}gaps.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {rep.total > 0 && rep.issues.length === 0 && (
+          <div style={{ marginTop: 16, border: "1px solid #A6F4C5", background: "#ECFDF3", borderRadius: 8, padding: "14px 16px", color: "#067647", fontSize: 13, fontWeight: 600 }}>
+            ✓ No gaps found — every authored requirement is complete, testable, unique, consistent, current and traced.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 /* ISO/IEC/IEEE 29148-conformant, attribute-based requirement card (EARS statement) for user-added SYS/SWE requirements. */
 function AddedReqCard({ r, num, editing, canWrite, onEdit, onDone, onChange, onDelete, reqStatus, setReqStatus }) {
   const q = reqQuality(r);
@@ -7617,11 +7754,18 @@ export default function App() {
   const readiness = useMemo(() => computeReadiness(nodes, tcExec), [nodes, tcExec]);
   /* Requirements-quality (ISO 29148) + process/approval readiness cards for the dashboard. */
   const qualityRep = useMemo(() => computeConsistency(reqStatus), [reqStatus, nodes, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
-  const extraCards = useMemo(() => {
+  /* Every authored (structured) requirement — the population the quality + gap analyses scan. */
+  const authoredReqs = useMemo(() => {
     const added = [];
     Object.values(SYSREQ_STORE.data).forEach((a) => added.push(...(a || [])));
     Object.values(SWREQ_STORE.data).forEach((a) => added.push(...(a || [])));
     Object.values(ECUTPL_STORE.data).forEach((byCh) => Object.values(byCh || {}).forEach((a) => added.push(...(a || []))));
+    return added;
+  }, [ecuTplV, sysReqV, swReqV]);
+  const tracedIds = useMemo(() => new Set(Object.keys(CURATED_TC)), []);
+  const gapRep = useMemo(() => computeGapAnalysis(authoredReqs, { status: reqStatus, hasBaseline: baselines.length > 0, tracedIds }), [authoredReqs, reqStatus, baselines, tracedIds]);
+  const extraCards = useMemo(() => {
+    const added = authoredReqs;
     let earsOk = 0, critOk = 0, vagueN = 0, passN = 0;
     added.forEach((r) => { const q = reqQuality(r); if (q.shall) earsOk++; if (q.criterion) critOk++; if (q.vague.length) vagueN++; if (q.shall && q.criterion && !q.vague.length) passN++; });
     const tot = added.length;
@@ -7641,8 +7785,20 @@ export default function App() {
       secondary: [["by you", humanN], ["by AI", aiN]], coverage: auditLog.length ? 100 : 0, coverageLabel: "traceable",
       status: auditLog.length ? "Tracked" : "Empty",
       flag: auditLog.length ? "Every change recorded — who, what, when (human vs AI) · open the log" : "No changes logged yet — edits and AI actions will appear here." };
-    return [rq, proc, audit];
-  }, [qualityRep, baselines, ecuTplV, sysReqV, swReqV, auditLog]); // eslint-disable-line
+    // Gap analysis card — missing / non-testable / duplicated / conflicting / stale / untraced.
+    const g = gapRep;
+    const gapFlag = g.total === 0
+      ? "No structured requirements authored yet — nothing to analyse."
+      : g.issues.length === 0
+        ? "No gaps found — all " + g.total + " authored requirements are clean."
+        : g.issues.length + " issue" + (g.issues.length === 1 ? "" : "s") + " on " + g.flaggedN + " requirement" + (g.flaggedN === 1 ? "" : "s") + " · " + g.errorN + " to fix · open to review";
+    const gap = { key: "GAP", label: "Gap Analysis", master: "ISO 29148 · trace", primary: g.issues.length, primaryLabel: "gaps found", view: "gaps",
+      secondary: [["untraced", g.counts.untraced], ["non-testable", g.counts.nontestable], ["duplicate", g.counts.duplicate]],
+      coverage: g.score, coverageLabel: "gap-free",
+      status: g.total === 0 ? "Not started" : (g.issues.length === 0 ? "Clean" : (g.errorN > 0 ? "Action needed" : "Review")),
+      flag: gapFlag };
+    return [rq, gap, proc, audit];
+  }, [qualityRep, gapRep, baselines, ecuTplV, sysReqV, swReqV, auditLog]); // eslint-disable-line
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
   /* Resolve an ECU-spec record for any selected id: a named module (NETWORK.ecus) or a smart-device node. */
@@ -8771,8 +8927,9 @@ Table (filterable requirements + ECU register), Requirements (L0\u2192L1\u2192L2
 == ACTIONS (you can navigate the tool) ==
 When the user asks to show / open / go to / focus / take me to something, append EXACTLY ONE action tag at the very end of your reply, after a brief sentence. Use exact IDs from the data. Do NOT emit an action for pure question-answering.
 - Open a node's detail panel: <action>{"type":"select","id":"ECU-CZM"}</action> (works for ECU ids, requirement ids like L1-BODY-00187, or interface ids)
-- Switch view: <action>{"type":"view","view":"logicals"}</action> (view = table | reader | graph | topology | logicals)
+- Switch view: <action>{"type":"view","view":"logicals"}</action> (view = table | reader | graph | topology | logicals | gaps | audit | dashboard)
 - Open a node in the graph: <action>{"type":"focus","id":"L1-EMS-00653"}</action>
+- If the user asks to find gaps / run a gap analysis / check requirement quality or traceability, the tool already runs this deterministically — you don't need to compute it. Reply briefly and switch to the gaps view: <action>{"type":"view","view":"gaps"}</action> (it scans for missing, non-testable, duplicated, conflicting, stale and untraced requirements).
 - Filter the table by ECU tier: <action>{"type":"filter","field":"type","value":"primary-ecu"}</action> (or "secondary-ecu")
 
 == EXPORT ACTION (download a file) ${canWrite ? "" : "— read-only Viewer; ask an Owner/Admin to change their role instead of emitting this"} ==
@@ -8795,7 +8952,7 @@ All signed-in members can edit. Write actions are allowed for the current user.
 The user may attach files (PDF, Excel, Word, CSV, text). Their extracted text is included in the message under "[Attached files]". Read them and, when the user asks you to apply/import/update something from a file, use the write actions above to make the change (e.g., turn a spreadsheet of interfaces into addInterfaces rows, correct a property from a spec with editNode). Always state, in one sentence, what you are changing before the action tag, and if a file is ambiguous, summarize what you found and ask before writing.
 Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Module." <action>{"type":"select","id":"ECU-CZM"}</action>`;
   };
-  const VIEW_MAP = { blocks: "blocks", graph: "tree", tree: "tree", topology: "deploy", deploy: "deploy", logicals: "logicals", table: "table", reader: "reader", assistant: "assistant" };
+  const VIEW_MAP = { blocks: "blocks", graph: "tree", tree: "tree", topology: "deploy", deploy: "deploy", logicals: "logicals", table: "table", reader: "reader", assistant: "assistant", gaps: "gaps", "gap analysis": "gaps", audit: "audit", dashboard: "dashboard" };
   const runChatActions = (text) => {
     const re = /<action>\s*(\{[\s\S]*?\})\s*<\/action>/g; let m; const done = [];
     while ((m = re.exec(text)) !== null) {
@@ -8941,6 +9098,15 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const userMsg = { role: "user", content: displayContent || "(screenshot attached)", apiContent, images: chatImages.map((im) => im.url) };
     const history = [...chatMsgs, userMsg];
     setChatMsgs(history); setChatInput(""); setChatImages([]); setChatFiles([]);
+    // Gap-analysis action — deterministic, runs locally (no API): scan the authored requirements
+    // for missing / non-testable / duplicated / conflicting / stale / untraced items, then open the view.
+    if (text && !docFiles.length && !busFiles.length && chatImages.length === 0 &&
+        /\bgap analysis\b|\banaly[sz]e (the )?gaps?\b|\bfind (the )?gaps?\b|\bgap[- ]?check\b|\bcheck for gaps?\b|\brun gaps?\b/i.test(text)) {
+      setView("gaps");
+      setChatMsgs((prev) => [...prev, { role: "assistant", content: gapSummaryText(gapRep) }]);
+      logAudit("Gap analysis", "", gapRep.total + " req scanned · " + gapRep.issues.length + " gap(s)", false);
+      return;
+    }
     // Only bus files and nothing to ask the model → reply locally, skip the API.
     if (busFiles.length && !text && !docFiles.length && chatImages.length === 0) {
       setChatMsgs((prev) => [...prev, { role: "assistant", content: busSummary || "(nothing imported)" }]);
@@ -10094,6 +10260,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             </div>
           )}
 
+          {view === "gaps" && <GapAnalysisPanel rep={gapRep} />}
+
           {/* ===== SECTION: Assistant view (data-grounded chat) ===== */}
           {view === "assistant" && (
             <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "#fff" }}>
@@ -10128,7 +10296,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 {chatMsgs.length === 0 ? (
                   <div className="max-w-2xl">
                     <div style={{ fontSize: 12, color: "#98A2B3", marginBottom: 10 }}>Try asking:</div>
-                    {["How many requirements are ASIL D, and on which ECUs?", "Show me the CZM", "What interfaces does the ADAS have?", "Take me to the Logicals view"].map((q) => (
+                    {["Run a gap analysis on the requirements", "How many requirements are ASIL D, and on which ECUs?", "Show me the CZM", "What interfaces does the ADAS have?"].map((q) => (
                       <button key={q} onClick={() => setChatInput(q)}
                         className="block w-full text-left mb-2 px-3.5 py-2.5 rounded-lg"
                         style={{ fontSize: 12.5, color: "#344054", background: "#F9FAFB", border: "1px solid #EAECF0", cursor: "pointer" }}>
