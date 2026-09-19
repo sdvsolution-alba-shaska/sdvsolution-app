@@ -7735,9 +7735,9 @@ export default function App() {
     const tick = () => {
       if (cancelled) return;
       const el = document.getElementById("rdr-" + target);
-      if (el) { el.scrollIntoView({ block: "center", behavior: "auto" }); if (!found) { found = true; setFlashReq(target); } }
+      if (el) { el.scrollIntoView({ block: "start", behavior: "auto" }); if (!found) { found = true; setFlashReq(target); } }
       attempts++;
-      if (attempts < 10) setTimeout(tick, 80); // keep re-centering as heavy content (diagram, test cases) settles the layout
+      if (attempts < 10) setTimeout(tick, 80); // keep re-aligning to the top as heavy content (diagram, test cases) settles the layout
       else pendingReaderScrollRef.current = null;
     };
     const t = setTimeout(tick, 50);
