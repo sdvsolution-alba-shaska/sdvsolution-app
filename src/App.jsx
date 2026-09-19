@@ -9232,7 +9232,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
       : neigh(id).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)))
       .concat(Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === id).map((x) => x.id));
     const isOpen = open.has(id);
-    const gap = UNALLOCATED.has(id);
+    /* "Gap" = the requirement isn't allocated to any architecture (Automotive SPICE SYS.3).
+       Beyond the static seed edge (UNALLOCATED), count a concrete ECU allocation OR a generated/
+       live architecture-element neighbor, so the flag clears once a real architecture exists
+       instead of relying on the seed graph alone. */
+    const gap = UNALLOCATED.has(id)
+      && !allocatedEcuName(n)
+      && !neigh(id).some((a) => { const t = getN(a.id); return t && t.type === "ArchitectureElement"; });
     const stub = depth === 0 && id !== GRAPH.focus;
     const checked = treeSel.has(id);
     return (
@@ -9258,7 +9264,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           ); })()}
           {n && n.userCreated && <span style={{ fontSize: 7.5, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 3, padding: "0 4px", flexShrink: 0 }}>NEW</span>}
           {n && n.userCreated && canWrite && <button onClick={(e) => { e.stopPropagation(); deleteFeature(id); }} title="Delete this feature" style={{ flexShrink: 0, color: "#B42318", opacity: 0.6, display: "flex" }}><X size={11} /></button>}
-          {gap && <AlertTriangle size={11} color="#B42318" />}
+          {gap && <span className="shrink-0 flex" title="No architecture element allocated yet — Automotive SPICE SYS.3 (System Architectural Design) gap. Allocate this requirement to an ECU or architecture element to clear it."><AlertTriangle size={11} color="#B42318" /></span>}
         </div>
         {isOpen && kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />)}
       </div>
