@@ -1,5 +1,6 @@
 // POST /api/checkout — start a Stripe Checkout session for the signed-in company.
-// Body: { plan: "basic" | "pro", seats: number }. Auth: Bearer <supabase access token>.
+// Body: { plan: "basic" | "advance", seats: number }. Auth: Bearer <supabase access token>.
+// (Pro is a custom, quote-based tier — not self-serve; rejected below.)
 import { stripe, admin, PRICE, readJson, getCallerOrg, countMembers, originOf, ok, err } from "./_billing.js";
 
 export default async function handler(req, res) {
@@ -13,6 +14,11 @@ export default async function handler(req, res) {
 
     const body = await readJson(req);
     const plan = String(body.plan || "").toLowerCase();
+    // Pro is a custom, quote-based tier — no self-serve checkout. Only Basic and
+    // Advance can be purchased self-serve; Pro goes through sales.
+    if (plan === "pro" || plan === "enterprise" || plan === "custom") {
+      return err(res, 400, "Pro is a custom, quote-based plan — please contact sales rather than self-serve checkout.");
+    }
     const price = PRICE[plan];
     if (!price) return err(res, 400, "Unknown or unpriced plan: " + plan);
 
