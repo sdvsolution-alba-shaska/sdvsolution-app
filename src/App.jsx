@@ -7261,6 +7261,20 @@ export default function App() {
       setAcctMsg(d && d.error ? d.error : "Could not open the billing portal."); setBillingBusy(false);
     } catch (e) { setAcctMsg("Portal error: " + (e && e.message ? e.message : e)); setBillingBusy(false); }
   }, [billingApi]);
+  /* Operator-only: billing status across every company (via /api/admin-billing, which is
+     gated server-side to SDVsolution staff / ADMIN_EMAILS). Opened from the header "Billing status" button. */
+  const [adminBill, setAdminBill] = useState(null); // { loading, error, rows:[], asOf }
+  const loadAdminBilling = useCallback(async () => {
+    if (!billingApi || !billingApi.getToken) { setAdminBill({ loading: false, error: "Billing isn't configured on the server yet (Supabase/Stripe env). See BILLING_SETUP.md.", rows: [] }); return; }
+    setAdminBill({ loading: true, error: "", rows: [] });
+    try {
+      const token = await billingApi.getToken();
+      const r = await fetch("/api/admin-billing", { headers: { Authorization: "Bearer " + token } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || (d && d.error)) { setAdminBill({ loading: false, error: (d && d.error) || ("Request failed (" + r.status + ")"), rows: [] }); return; }
+      setAdminBill({ loading: false, error: "", rows: d.orgs || [], asOf: d.as_of });
+    } catch (e) { setAdminBill({ loading: false, error: (e && e.message) || String(e), rows: [] }); }
+  }, [billingApi]);
   useEffect(() => { loadOrgPlan(); }, [loadOrgPlan]); // load plan on start so demo-gating reflects the real plan
   useEffect(() => { if (acctOpen) loadOrgPlan(); }, [acctOpen, loadOrgPlan]);
   useEffect(() => {
@@ -9613,6 +9627,14 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             title="Plans, billing & subscription">
             Billing
           </button>
+          {isStaff && (
+            <button onClick={() => { setView("adminbilling"); loadAdminBilling(); }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
+              style={{ background: "#1D2939", color: "#D0D5DD", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+              title="Operator view — subscription status across all companies">
+              Billing status
+            </button>
+          )}
           {typeof window !== "undefined" && window.__sdvAuth && (
             <button onClick={() => window.__sdvAuth.signOut()}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
@@ -10267,6 +10289,68 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           )}
 
           {view === "gaps" && <GapAnalysisPanel rep={gapRep} />}
+
+          {view === "adminbilling" && (
+            <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+              <div className="mx-auto px-8 py-6" style={{ maxWidth: 1100 }}>
+                {!isStaff ? (
+                  <div style={{ color: "#B42318", fontSize: 13, fontWeight: 600 }}>Operator access only.</div>
+                ) : (() => {
+                  const st = adminBill || { loading: true, rows: [] };
+                  const rows = st.rows || [];
+                  const STAT = { active: ["#067647", "#ECFDF3", "Active"], trialing: ["#175CD3", "#EFF8FF", "Trialing"], past_due: ["#B42318", "#FEF3F2", "Past due"], canceled: ["#667085", "#F2F4F7", "Canceled"], none: ["#98A2B3", "#F9FAFB", "No subscription"] };
+                  const count = (k) => rows.filter((r) => (r.plan_status || "none") === k).length;
+                  const fmtDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+                  const paidCurrent = (r) => r.plan_status === "active" && r.current_period_end && new Date(r.current_period_end) > new Date();
+                  return (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#475467", letterSpacing: 0.5 }}>OPERATOR · SUBSCRIPTIONS</div>
+                      <div className="flex items-center justify-between" style={{ marginTop: 2 }}>
+                        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828" }}>Billing status</h1>
+                        <button onClick={loadAdminBilling} disabled={st.loading} style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 8, padding: "5px 12px", cursor: st.loading ? "default" : "pointer" }}>{st.loading ? "Refreshing…" : "Refresh"}</button>
+                      </div>
+                      <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>
+                        Every company's Stripe subscription state, mirrored into Supabase by the webhook. <b>Active</b> with a future renewal date = the monthly payment is current; <b>Past due</b> = the last charge failed. Stripe remains the source of truth.
+                        {st.asOf && <span style={{ color: "#98A2B3" }}> · as of {new Date(st.asOf).toLocaleString()}</span>}
+                      </p>
+                      {st.error ? (
+                        <div style={{ marginTop: 14, border: "1px solid #FDA29B", background: "#FEF3F2", borderRadius: 8, padding: "12px 14px", color: "#B42318", fontSize: 12.5 }}>{st.error}</div>
+                      ) : (
+                        <>
+                          <div className="flex gap-2 flex-wrap" style={{ marginTop: 14 }}>
+                            {[["active", "Active"], ["trialing", "Trialing"], ["past_due", "Past due"], ["canceled", "Canceled"], ["none", "No subscription"]].map(([k, lbl]) => { const c = STAT[k]; return (
+                              <div key={k} style={{ border: "1px solid #EAECF0", borderRadius: 10, padding: "8px 12px", minWidth: 108 }}>
+                                <div style={{ fontSize: 20, fontWeight: 700, color: c[0], lineHeight: 1 }}>{count(k)}</div>
+                                <div style={{ fontSize: 10.5, fontWeight: 600, color: "#475467", marginTop: 3 }}>{lbl}</div>
+                              </div>
+                            ); })}
+                          </div>
+                          <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+                            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
+                              <thead><tr>{["Company", "Status", "Renews", "Seats", "Stripe"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 12px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                              <tbody>
+                                {rows.map((r) => { const c = STAT[r.plan_status] || STAT.none; return (
+                                  <tr key={r.id} style={{ borderTop: "1px solid #F2F4F7" }}>
+                                    <td style={{ padding: "7px 12px" }}><div style={{ fontWeight: 600, color: "#101828" }}>{r.name}</div>{r.domain && <div style={{ fontSize: 10.5, color: "#98A2B3" }}>{r.domain}</div>}</td>
+                                    <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}><span style={{ fontSize: 10.5, fontWeight: 700, color: c[0], background: c[1], borderRadius: 5, padding: "2px 8px" }}>{c[2]}</span>{paidCurrent(r) && <span title="Paid & current" style={{ marginLeft: 6, color: "#067647", fontWeight: 700 }}>✓</span>}</td>
+                                    <td style={{ padding: "7px 12px", whiteSpace: "nowrap", color: "#344054" }}>{fmtDate(r.current_period_end)}</td>
+                                    <td style={{ padding: "7px 12px", color: "#344054", fontFamily: "ui-monospace,monospace" }}>{r.seats || "—"}</td>
+                                    <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>{r.stripe_customer_id ? <a href={"https://dashboard.stripe.com/customers/" + r.stripe_customer_id} target="_blank" rel="noreferrer" style={{ color: "#175CD3", fontWeight: 600 }}>Open ↗</a> : <span style={{ color: "#98A2B3" }}>—</span>}</td>
+                                  </tr>
+                                ); })}
+                                {!st.loading && rows.length === 0 && <tr><td colSpan={5} style={{ padding: "12px", color: "#98A2B3" }}>No companies found.</td></tr>}
+                                {st.loading && <tr><td colSpan={5} style={{ padding: "12px", color: "#98A2B3" }}>Loading…</td></tr>}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* ===== SECTION: Assistant view (data-grounded chat) ===== */}
           {view === "assistant" && (
