@@ -9650,12 +9650,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           { k: "Trial", name: "Free trial", price: "$0", per: "14 days", accent: "#B54708", feats: ["Explore a sample feature, end to end", "SYS → SWE → HWE for that feature family", "4 Door Control Modules (ECUs)", "1 editor · no card required"] },
           { k: "Basic", name: "Basic", price: "$249", per: "per editor / month", accent: "#175CD3", feats: ["For teams starting their first program", "500 requirements · 1 project", "All exports & integrations (Word · Excel · ARXML · DBC · LDF · API)", "ISO 29148 quality gate"] },
           { k: "Advance", name: "Advance", price: "$399", per: "per editor / month", accent: "#7A5AF8", feats: ["For teams scaling complex programs", "5,000 requirements · 5 projects", "Everything in Basic, plus all features", "Review Board (SUP.4) · Baselines (SUP.8/10) · Impact", "Logicals & connector interfaces (ICD)", "Priority support"] },
-          { k: "Pro", name: "Pro", price: "$499", per: "per editor / month", accent: "#0E7090", feats: ["The full toolchain, self-serve", "Unlimited requirements & projects", "Everything in Advance, plus:", "Logicals, schematics & connector pin-outs", "K-Matrix comm matrix · ARXML/DBC/LDF", "DOORS · Polarion · Codebeamer", "SSO · audit · SLA · ASPICE-assessment support"] },
+          { k: "Pro", name: "Pro", price: "Custom", per: "priced by quote", accent: "#0E7090", feats: ["For certified programs & regulated industries", "Everything in Advance, plus:", "Unlimited requirements & projects", "Logicals, schematics & connector pin-outs", "K-Matrix comm matrix · ARXML/DBC/LDF", "DOORS · Polarion · Codebeamer", "Custom integrations", "Advanced access controls · Viewer licenses", "SSO · audit · SLA · ASPICE-assessment support"] },
         ];
-        const priceNum = { Trial: 0, Basic: 249, Advance: 399, Pro: 499 }[plan] || 0;
+        const priceNum = { Trial: 0, Basic: 249, Advance: 399, Pro: 0 }[plan] || 0;
         const monthly = priceNum * seats;
         const choose = (k) => {
-          if (k === "Trial") { setAcctMsg("You're on the free trial — pick Basic, Advance or Pro to subscribe."); return; }
+          if (k === "Trial") { setAcctMsg("You're on the free trial — pick Basic or Advance to subscribe, or contact sales for Pro."); return; }
+          if (k === "Pro") { setAcctMsg("Pro is tailored to your program and priced by quote. Opening contact…"); try { window.open("https://sdvsolution.com/#contact", "_blank", "noopener"); } catch (e) {} return; }
           startCheckout(k, seats);
         };
         const tab = (k, label) => <button onClick={() => setAcctTab(k)} style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 12px", borderRadius: 7, border: "1px solid " + (acctTab === k ? "#175CD3" : "#E4E7EC"), background: acctTab === k ? "#EFF4FF" : "#fff", color: acctTab === k ? "#175CD3" : "#667085", cursor: "pointer" }}>{label}</button>;
@@ -9675,14 +9676,14 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 {acctMsg && <div style={{ fontSize: 12, color: "#175CD3", fontWeight: 600, marginBottom: 10 }}>{acctMsg}</div>}
                 {acctTab === "plan" && (
                   <div>
-                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per team member. Pay by credit card or bank account (ACH / SEPA direct debit) at checkout. Paid plans include a 14‑day free trial; you can cancel any time.</div>
+                    <div style={{ fontSize: 12.5, color: "#475467", marginBottom: 12 }}>Monthly membership, billed per team member. Basic and Advance are self‑serve — pay by credit card or bank account (ACH / SEPA direct debit) at checkout, with a 14‑day free trial and cancel any time. <b>Pro is tailored to your program and priced by quote</b> (custom integrations, advanced access controls, viewer licenses) — contact sales.</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                       {PLANS.map((pl) => { const cur = pl.k === plan; return (
                         <div key={pl.k} style={{ border: "1px solid " + (cur ? pl.accent : "#E4E7EC"), borderRadius: 10, padding: "12px 12px", background: cur ? pl.accent + "0D" : "#fff", display: "flex", flexDirection: "column" }}>
                           <div className="flex items-center gap-2"><span style={{ fontSize: 13.5, fontWeight: 700, color: "#101828" }}>{pl.name}</span>{cur && <span style={{ fontSize: 8.5, fontWeight: 800, color: pl.accent, background: pl.accent + "1A", borderRadius: 4, padding: "1px 6px" }}>CURRENT</span>}</div>
                           <div style={{ marginTop: 6 }}><span style={{ fontSize: 22, fontWeight: 800, color: "#101828" }}>{pl.price}</span> <span style={{ fontSize: 10.5, color: "#98A2B3" }}>{pl.per}</span></div>
                           <div style={{ marginTop: 8, flex: 1 }}>{pl.feats.map((f, i) => <div key={i} className="flex items-start gap-1.5" style={{ marginBottom: 4 }}><Check size={12} color={pl.accent} style={{ marginTop: 2, flexShrink: 0 }} /><span style={{ fontSize: 10.5, color: "#475467" }}>{f}</span></div>)}</div>
-                          <button onClick={() => choose(pl.k)} disabled={cur} style={{ marginTop: 10, fontSize: 12, fontWeight: 700, padding: "6px 0", borderRadius: 7, cursor: cur ? "default" : "pointer", border: "1px solid " + pl.accent, background: cur ? "#fff" : pl.accent, color: cur ? pl.accent : "#fff", opacity: cur ? 0.6 : 1 }}>{cur ? "Current plan" : pl.k === "Enterprise" ? "Contact sales" : pl.k === "Trial" ? "Start free trial" : "Upgrade"}</button>
+                          <button onClick={() => choose(pl.k)} disabled={cur} style={{ marginTop: 10, fontSize: 12, fontWeight: 700, padding: "6px 0", borderRadius: 7, cursor: cur ? "default" : "pointer", border: "1px solid " + pl.accent, background: cur ? "#fff" : pl.accent, color: cur ? pl.accent : "#fff", opacity: cur ? 0.6 : 1 }}>{cur ? "Current plan" : (pl.k === "Enterprise" || pl.k === "Pro") ? "Contact sales" : pl.k === "Trial" ? "Start free trial" : "Upgrade"}</button>
                         </div>
                       ); })}
                     </div>
@@ -9695,7 +9696,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                       <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
                         <span style={{ fontSize: 12, color: "#475467" }}>Seats (team members)</span>
                         <span style={{ fontSize: 13, fontWeight: 800, color: "#101828" }}>{seats}</span>
-                        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#101828" }}>{priceNum ? "$" + monthly.toLocaleString() + " / mo" : "$0"}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#101828" }}>{priceNum ? "$" + monthly.toLocaleString() + " / mo" : plan === "Pro" ? "Custom (quoted)" : "$0"}</span>
                       </div>
                       <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8 }}>{priceNum ? seats + " member" + (seats === 1 ? "" : "s") + " × $" + priceNum + "/mo. Seats follow your team automatically — invite or remove people in the Team tab and Stripe prorates the change on your next invoice." : "No charge on the free trial. When you subscribe you'll be billed for your current team size; it then updates automatically as the team changes."}</div>
                     </div>
