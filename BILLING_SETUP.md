@@ -46,8 +46,12 @@ Vercel → project → Settings → Environment Variables (Production). Add:
 | `STRIPE_PRICE_PRO` | `price_…` for Pro ($499) |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key (Secret) |
 | `SUPABASE_URL` | your `https://<ref>.supabase.co` (or it reuses `VITE_SUPABASE_URL`) |
+| `ADMIN_EMAILS` | `gshaska@gmail.com` — comma-separated operators allowed to open the in-app **Billing status** view (`/api/admin-billing`). Any `@sdvsolution.com` email is allowed automatically; add non-staff operator addresses here. |
 
 Then **redeploy** (env vars are baked in at deploy time).
+
+### Operator "Billing status" view
+Signed in as an operator (an `@sdvsolution.com` address, or any address listed in `ADMIN_EMAILS`), a **Billing status** button appears in the app's top bar. It opens a read-only list of every company with its subscription status (Active / Trialing / Past due / Canceled), renewal date, seat count and a deep-link to the customer in Stripe. It's served by `api/admin-billing.js`, which uses the `service_role` key and **only** returns data after verifying the caller is an operator. Because `gshaska@gmail.com` is not an `@sdvsolution.com` address, it must be in `ADMIN_EMAILS` or the endpoint returns `403 Operator access only`. Stripe remains the source of truth; these values are mirrored into Supabase by the webhook.
 
 ## Part 5 — Test the flow (test mode)
 1. Sign in to the app → **Billing → Plan & Pricing → Upgrade** on Basic.
