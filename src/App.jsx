@@ -9290,6 +9290,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             {titleCase(n ? n.label : "")}
           </button>
           ); })()}
+          {kids.length > 0 && <span style={{ fontSize: 9.5, color: "#B6C0CC", flexShrink: 0, marginLeft: "auto" }}>{kids.length}</span>}
           {n && n.userCreated && <span style={{ fontSize: 7.5, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 3, padding: "0 4px", flexShrink: 0 }}>NEW</span>}
           {n && n.userCreated && canWrite && <button onClick={(e) => { e.stopPropagation(); deleteFeature(id); }} title="Delete this feature" style={{ flexShrink: 0, color: "#B42318", opacity: 0.6, display: "flex" }}><X size={11} /></button>}
           {gap && <span className="shrink-0 flex" title="No architecture element allocated yet — Automotive SPICE SYS.3 (System Architectural Design) gap. Allocate this requirement to an ECU or architecture element to clear it."><AlertTriangle size={11} color="#B42318" /></span>}
@@ -10071,8 +10072,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           className="flex items-center gap-1 w-full py-1 pr-2 rounded" style={{ paddingLeft: 6, cursor: "pointer" }}>
                           {dopen ? <ChevronDown size={13} color="#98A2B3" /> : <ChevronRight size={13} color="#98A2B3" />}
                           <span style={{ width: 7, height: 7, borderRadius: 2, background: dc, flexShrink: 0 }} />
-                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: "#475467" }}>{dom.toUpperCase()}</span>
-                          <span style={{ fontSize: 9.5, color: "#B6C0CC", marginLeft: "auto" }}>{members.length}</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: dc }}>{dom.toUpperCase()}</span>
+                          <span style={{ fontSize: 9.5, fontWeight: 700, color: dc, marginLeft: "auto" }}>{members.length}</span>
                         </button>
                         {dopen && members.map((m) => <TreeRow key={m.id} id={m.id} depth={1} />)}
                       </div>
