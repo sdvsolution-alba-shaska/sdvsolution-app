@@ -7175,7 +7175,7 @@ function SwArchDiagram({ canWrite = false }) {
 }
 
 export default function App() {
-  const focus0 = GRAPH.focus;
+  const focus0 = (L0S.find((r) => (r.label || "").trim() === "Vehicle Dynamics") || {}).id || GRAPH.focus;
   const [focus, setFocus] = useState(focus0);
   const [expanded, setExpanded] = useState(() => new Set([focus0, ...(ADJ[focus0] || []).map((a) => a.id)]));
   const [selected, setSelected] = useState(null); // nothing selected by default
