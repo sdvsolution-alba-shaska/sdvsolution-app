@@ -2143,10 +2143,11 @@ const FEATURE_DOMAINS = [
   ["ADAS", ["Camera & Surround View", "Driver Assistance"]],
   ["Body", ["Accessories", "Closures", "Exterior Lighting", "Interior Lighting", "Occupant Accommodation", "Occupant Visibility", "Vehicle Access & Anti-Theft", "Cabin Climate & Comfort", "Vehicle Thermal Management"]],
   ["Energy", ["Charging & Bidirectional Energy", "Energy Management", "High-Voltage Energy Management", "Low-Voltage Energy Management"]],
-  ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "OTA Update"]],
+  ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "Connectivity & Telematics", "Mobile App & Remote Services"]],
   ["Drive", ["Vehicle Dynamics", "Longitudinal Motion Control"]],
+  ["Software Platform", ["Security & Privacy", "OTA Update", "Diagnostics, Manufacturing & Service"]],
 ];
-const DOMAIN_COLOR = { ADAS: "#175CD3", Body: "#B54708", Energy: "#12B76A", Infotainment: "#7A5AF8", Drive: "#0E7090" };
+const DOMAIN_COLOR = { ADAS: "#175CD3", Body: "#B54708", Energy: "#12B76A", Infotainment: "#7A5AF8", Drive: "#0E7090", "Software Platform": "#DD2590" };
 
 
 /* Table column schemas. Default columns suit any node; a few analysis types
@@ -7376,7 +7377,7 @@ export default function App() {
     notify("ECU deleted.");
   };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
-  const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive"])); // Features-tree domain groups expanded by default
+  const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive", "Software Platform"])); // Features-tree domain groups expanded by default
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
   const [execOpen, setExecOpen] = useState(false); // Engineering Readiness dashboard collapsed by default
