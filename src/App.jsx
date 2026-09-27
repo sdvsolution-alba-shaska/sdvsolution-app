@@ -9262,7 +9262,6 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
 
   const sel = getN(selected);
   const selOpsReq = selOps ? (OPS_REQS[selOps.l0] || []).find((r) => r.id === selOps.id) : null;
-  useEffect(() => { const l0 = getN(activeSystem); if (!(l0 && OPS_REQS[l0.label])) setSelOps(null); }, [activeSystem]); // eslint-disable-line
   /* In the ECU spec view, the right detail panel follows the selected ECU (so picking an
      ECU shows the ECU on the right, not the previously-selected feature requirement). */
   useEffect(() => { if (view === "ecureq" && selectedEcu && getN(selectedEcu)) setSelected(selectedEcu); }, [view, selectedEcu]);
@@ -9283,6 +9282,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     return sel ? systemOf(sel) : focus;
   })();
   useEffect(() => { if (treeAutoOpenRef.current) { treeAutoOpenRef.current = false; return; } if (activeSystem) setOpen((p) => p.has(activeSystem) ? p : new Set([...p, activeSystem])); }, [activeSystem]);
+  // Clear the operational-requirement selection when navigating away from its subdomain.
+  useEffect(() => { const l0 = getN(activeSystem); if (!(l0 && OPS_REQS[l0.label])) setSelOps(null); }, [activeSystem]); // eslint-disable-line
 
   /* ===== Blocks (Systems Block Diagram) model ===== */
   const blockEcuIds = (() => {
