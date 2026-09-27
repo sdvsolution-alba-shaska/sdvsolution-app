@@ -2137,6 +2137,17 @@ const L0S = GRAPH.nodes.filter((n) => n.type === "Requirement" && /L0/.test(n.su
 const CHILDREN = (id) => (ADJ[id] || []).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id);
 const L1S = CHILDREN(GRAPH.focus);
 
+/* Optional Domain grouping for the Features tree — maps L0 group labels into domains.
+   L0 groups not listed here stay ungrouped at the top level of the tree. */
+const FEATURE_DOMAINS = [
+  ["ADAS", ["Camera & Surround View", "Driver Assistance"]],
+  ["Body", ["Accessories", "Closures", "Exterior Lighting", "Interior Lighting", "Occupant Accommodation", "Occupant Visibility", "Vehicle Access & Anti-Theft", "Cabin Climate & Comfort", "Vehicle Thermal Management"]],
+  ["Energy", ["Charging & Bidirectional Energy", "Energy Management", "High-Voltage Energy Management", "Low-Voltage Energy Management"]],
+  ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "OTA Update"]],
+  ["Drive", ["Vehicle Dynamics", "Longitudinal Motion Control"]],
+];
+const DOMAIN_COLOR = { ADAS: "#175CD3", Body: "#B54708", Energy: "#12B76A", Infotainment: "#7A5AF8", Drive: "#0E7090" };
+
 
 /* Table column schemas. Default columns suit any node; a few analysis types
    surface the fields engineers actually triage on, RPN chief among them. */
@@ -7365,6 +7376,7 @@ export default function App() {
     notify("ECU deleted.");
   };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
+  const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive"])); // Features-tree domain groups expanded by default
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
   const [execOpen, setExecOpen] = useState(false); // Engineering Readiness dashboard collapsed by default
@@ -10043,7 +10055,30 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                   <span className="truncate" style={{ fontSize: 12, color: "#344054" }}>{n.label}</span>
                   <span style={{ fontSize: 9.5, color: "#98A2B3", fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{n.id}</span>
                 </button>))
-              : L0S.map((r) => <TreeRow key={r.id} id={r.id} depth={0} />)}
+              : (() => {
+                  const byLabel = {}; L0S.forEach((r) => { byLabel[(r.label || "").trim()] = r; });
+                  const used = new Set(); const out = [];
+                  FEATURE_DOMAINS.forEach(([dom, labels]) => {
+                    const members = labels.map((l) => byLabel[l]).filter(Boolean);
+                    if (!members.length) return;
+                    members.forEach((m) => used.add(m.id));
+                    const dopen = domOpen.has(dom), dc = DOMAIN_COLOR[dom] || "#667085";
+                    out.push(
+                      <div key={"dom-" + dom}>
+                        <button onClick={() => setDomOpen((p) => { const s = new Set(p); s.has(dom) ? s.delete(dom) : s.add(dom); return s; })}
+                          className="flex items-center gap-1 w-full py-1 pr-2 rounded" style={{ paddingLeft: 6, cursor: "pointer" }}>
+                          {dopen ? <ChevronDown size={13} color="#98A2B3" /> : <ChevronRight size={13} color="#98A2B3" />}
+                          <span style={{ width: 7, height: 7, borderRadius: 2, background: dc, flexShrink: 0 }} />
+                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: "#475467" }}>{dom.toUpperCase()}</span>
+                          <span style={{ fontSize: 9.5, color: "#B6C0CC", marginLeft: "auto" }}>{members.length}</span>
+                        </button>
+                        {dopen && members.map((m) => <TreeRow key={m.id} id={m.id} depth={1} />)}
+                      </div>
+                    );
+                  });
+                  L0S.forEach((r) => { if (!used.has(r.id)) out.push(<TreeRow key={r.id} id={r.id} depth={0} />); });
+                  return out;
+                })()}
           </div>
           {treeSel.size > 0 && (
             <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderTop: "1px solid #E4E7EC", background: "#EAF2FF" }}>
