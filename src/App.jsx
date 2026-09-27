@@ -2140,11 +2140,11 @@ const L1S = CHILDREN(GRAPH.focus);
 /* Optional Domain grouping for the Features tree — maps L0 group labels into domains.
    L0 groups not listed here stay ungrouped at the top level of the tree. */
 const FEATURE_DOMAINS = [
-  ["ADAS", ["Camera & Surround View", "Driver Assistance"]],
-  ["Body", ["Accessories", "Closures", "Exterior Lighting", "Interior Lighting", "Occupant Accommodation", "Occupant Visibility", "Vehicle Access & Anti-Theft", "Cabin Climate & Comfort", "Vehicle Thermal Management", "Vehicle Safety"]],
-  ["Energy", ["Charging & Bidirectional Energy", "Energy Management", "High-Voltage Energy Management", "Low-Voltage Energy Management"]],
-  ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "Connectivity & Telematics", "Mobile App & Remote Services"]],
   ["Drive", ["Vehicle Dynamics", "Longitudinal Motion Control"]],
+  ["Energy", ["Charging & Bidirectional Energy", "Energy Management", "High-Voltage Energy Management", "Low-Voltage Energy Management"]],
+  ["Body", ["Accessories", "Closures", "Exterior Lighting", "Interior Lighting", "Occupant Accommodation", "Occupant Visibility", "Vehicle Access & Anti-Theft", "Cabin Climate & Comfort", "Vehicle Thermal Management", "Vehicle Safety"]],
+  ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "Connectivity & Telematics", "Mobile App & Remote Services"]],
+  ["ADAS", ["Camera & Surround View", "Driver Assistance"]],
   ["Software Platform", ["Security & Privacy", "OTA Update", "Diagnostics, Manufacturing & Service"]],
   ["Vehicle Platform", ["Identity, Profiles & Personalization", "Vehicle Applications", "Vehicle Controls Applications", "Vehicle Modes & Experiences", "Vehicle State & Power Management"]],
 ];
