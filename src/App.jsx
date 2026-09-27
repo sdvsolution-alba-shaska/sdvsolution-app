@@ -6861,8 +6861,30 @@ function gapSummaryText(rep) {
    for ENGINEERING & OPERATIONS subdomains: process/standards-based requirements with interface/tooling,
    lifecycle phase, applicable standards, verification and owner. Data comes from OPS_REQS. */
 const OPS_CAT_COLOR = { "EOL Programming": "#175CD3", "Configuration & Coding": "#0E7090", "Calibration": "#7A5AF8", "Traceability": "#B54708", "Diagnostic Access": "#0BA5EC", "Vehicle Modes": "#12B76A", "Security": "#B42318", "Repair & Replacement": "#DC6803", "Predictive Maintenance": "#9E77ED", "Service & Aftersales": "#DD2590", "Process Quality": "#475467", "Tool Qualification": "#175CD3", "Requirements & Traceability": "#0E7090", "Configuration & Change": "#7A5AF8", "Model-Based Dev": "#B54708", "Test Automation": "#0BA5EC", "Calibration & Diagnostics": "#12B76A", "CI/CD & Build": "#DC6803", "Simulation": "#9E77ED", "Toolchain Security": "#B42318", "Data & Retention": "#475467", "Extended Vehicle Data": "#0E7090", "Remote Diagnostics": "#0BA5EC", "OTA Campaign Mgmt": "#DD2590", "Fleet Management": "#175CD3", "Warranty & Claims": "#B54708", "Aftersales Analytics": "#9E77ED", "Connected Services": "#12B76A", "Security & Privacy": "#B42318" };
-function OpsReqDoc({ rDoc, reqs }) {
+function OpsReqDetail({ r }) {
+  const c = OPS_CAT_COLOR[r.cat] || "#475467";
+  const row = (k, v) => v ? (<div style={{ marginTop: 10 }}><div style={{ fontSize: 9, fontWeight: 800, color: "#98A2B3", letterSpacing: 0.4 }}>{k}</div><div style={{ fontSize: 12, color: "#344054", marginTop: 2, lineHeight: 1.5 }}>{v}</div></div>) : null;
+  return (
+    <div style={{ padding: "10px 14px", overflow: "auto" }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#7A5AF8", letterSpacing: 0.3 }}>OPERATIONAL REQUIREMENT</div>
+      <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span>
+        <span style={{ fontSize: 9, fontWeight: 700, color: c, background: c + "18", borderRadius: 4, padding: "1px 7px" }}>{r.cat}</span>
+      </div>
+      <p style={{ fontSize: 13, color: "#101828", marginTop: 8, lineHeight: 1.55 }}>{r.req}</p>
+      {row("PHASE", r.phase)}{row("LEVEL", r.level)}{row("INTERFACE / TOOLING", r.iface)}{row("STANDARD(S)", r.std)}{row("ACCEPTANCE / VERIFICATION", r.ac)}{row("VERIFICATION METHOD", r.method)}{row("SAFETY / SECURITY", r.safety)}{row("OWNER", r.owner)}{row("RATIONALE", r.rationale)}
+    </div>
+  );
+}
+function opsTitle(r) {
+  let s = (r.req || "").replace(/^The [^,]*? shall\s+/i, "").replace(/^Every [^,]*? shall\s+/i, "").replace(/^[A-Z][^,]*? shall\s+/i, "");
+  s = s.split(/[,;.]/)[0].trim() || r.cat || r.id;
+  if (s.length > 50) s = s.slice(0, 48).trim() + "…";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function OpsReqDoc({ rDoc, reqs, sel, onPick }) {
   const [q, setQ] = useState("");
+  useEffect(() => { if (sel) { const el = typeof document !== "undefined" && document.getElementById("ops-" + sel); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); } }, [sel]);
   const ql = q.trim().toLowerCase();
   const shown = ql ? reqs.filter((r) => (r.id + " " + r.req + " " + r.cat + " " + r.std + " " + r.owner + " " + r.ac).toLowerCase().includes(ql)) : reqs;
   const chip = (t, c) => <span style={{ fontSize: 9, fontWeight: 700, color: c, background: c + "18", borderRadius: 4, padding: "1px 7px" }}>{t}</span>;
@@ -6880,8 +6902,8 @@ function OpsReqDoc({ rDoc, reqs }) {
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#101828", marginTop: 4 }}>{rDoc?.label}</h1>
         <p style={{ fontSize: 13, color: "#475467", marginTop: 8, lineHeight: 1.55 }}>Operational / process requirements — standards-based, with a layout tailored to interface/tooling, lifecycle phase and verification (distinct from the functional EARS document). Curated draft; bracketed [values] are targets to set.</p>
         <div style={{ marginTop: 16 }}>
-          {shown.map((r) => { const c = OPS_CAT_COLOR[r.cat] || "#475467"; return (
-            <div key={r.id} style={{ border: "1px solid #EAECF0", borderLeft: "3px solid " + c, borderRadius: 8, padding: "10px 14px", marginBottom: 10 }}>
+          {shown.map((r) => { const c = OPS_CAT_COLOR[r.cat] || "#475467"; const on = sel === r.id; return (
+            <div key={r.id} id={"ops-" + r.id} onClick={() => onPick && onPick(r.id)} style={{ border: "1px solid " + (on ? c : "#EAECF0"), borderLeft: "3px solid " + c, borderRadius: 8, padding: "10px 14px", marginBottom: 10, cursor: "pointer", background: on ? "#FEFCE8" : "#fff", boxShadow: on ? "0 0 0 1px " + c : "none" }}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span style={{ fontSize: 11, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span>
                 {chip(r.cat, c)}
@@ -7430,6 +7452,7 @@ export default function App() {
   };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
   const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive", "Software Platform", "Vehicle Platform", "Engineering & Operations"])); // Features-tree domain groups expanded by default
+  const [selOps, setSelOps] = useState(null); // selected operational requirement { l0, id } for the tailored reader
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
   const [execOpen, setExecOpen] = useState(false); // Engineering Readiness dashboard collapsed by default
@@ -9238,6 +9261,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
   });
 
   const sel = getN(selected);
+  const selOpsReq = selOps ? (OPS_REQS[selOps.l0] || []).find((r) => r.id === selOps.id) : null;
+  useEffect(() => { const l0 = getN(activeSystem); if (!(l0 && OPS_REQS[l0.label])) setSelOps(null); }, [activeSystem]); // eslint-disable-line
   /* In the ECU spec view, the right detail panel follows the selected ECU (so picking an
      ECU shows the ECU on the right, not the previously-selected feature requirement). */
   useEffect(() => { if (view === "ecureq" && selectedEcu && getN(selectedEcu)) setSelected(selectedEcu); }, [view, selectedEcu]);
@@ -9310,6 +9335,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const kids = (id === GRAPH.focus ? L1S
       : neigh(id).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)))
       .concat(Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === id).map((x) => x.id));
+    const opsList = /L0/.test(n.subtype || "") ? OPS_REQS[n.label] : null; // operational subdomains list curated ops requirements
+    const childCount = opsList ? opsList.length : kids.length;
     const isOpen = open.has(id);
     /* "Gap" = the requirement isn't allocated to any architecture (Automotive SPICE SYS.3).
        Beyond the static seed edge (UNALLOCATED), count a concrete ECU allocation OR a generated/
@@ -9330,23 +9357,30 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           }}>
           <button className="shrink-0 w-4 h-4 flex items-center justify-center"
             onClick={() => setOpen((p) => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; })}
-            style={{ visibility: kids.length ? "visible" : "hidden", color: "#98A2B3" }}>
+            style={{ visibility: childCount ? "visible" : "hidden", color: "#98A2B3" }}>
             {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           </button>
           {(() => { const locked = !featureAllowed(id); return (
           <button className="text-left truncate flex-1" disabled={locked}
             title={locked ? "Demo — available on a paid plan" : undefined}
-            onClick={locked ? undefined : () => { refocus(id); if (n?.type === "Requirement") { pendingReaderScrollRef.current = id; setView("reader"); } }}
+            onClick={locked ? undefined : () => { setSelOps(null); refocus(id); if (n?.type === "Requirement") { pendingReaderScrollRef.current = id; setView("reader"); } }}
             style={{ fontSize: 12, cursor: locked ? "not-allowed" : "pointer", color: locked ? "#C4CBD4" : ((selected && activeSystem === id) || selected === id) ? "#101828" : stub ? "#98A2B3" : "#344054", fontWeight: ((selected && activeSystem === id) || selected === id) ? 600 : 400 }}>
             {titleCase(n ? n.label : "")}
           </button>
           ); })()}
-          {/L0/.test(n.subtype || "") && <span style={{ fontSize: 9.5, color: "#B6C0CC", flexShrink: 0, marginLeft: "auto", whiteSpace: "nowrap" }}>Feature {kids.length}</span>}
+          {/L0/.test(n.subtype || "") && <span style={{ fontSize: 9.5, color: "#B6C0CC", flexShrink: 0, marginLeft: "auto", whiteSpace: "nowrap" }}>{opsList ? "Requirement" : "Feature"} {childCount}</span>}
           {n && n.userCreated && <span style={{ fontSize: 7.5, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 3, padding: "0 4px", flexShrink: 0 }}>NEW</span>}
           {n && n.userCreated && canWrite && <button onClick={(e) => { e.stopPropagation(); deleteFeature(id); }} title="Delete this feature" style={{ flexShrink: 0, color: "#B42318", opacity: 0.6, display: "flex" }}><X size={11} /></button>}
           {gap && <span className="shrink-0 flex" title="No architecture element allocated yet — Automotive SPICE SYS.3 (System Architectural Design) gap. Allocate this requirement to an ECU or architecture element to clear it."><AlertTriangle size={11} color="#B42318" /></span>}
         </div>
-        {isOpen && kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />)}
+        {isOpen && (opsList ? opsList.map((r) => { const on = selOps && selOps.id === r.id; const cc = OPS_CAT_COLOR[r.cat] || "#475467"; return (
+          <div key={r.id} className="flex items-center gap-1 py-1 pr-2 rounded" style={{ paddingLeft: 6 + (depth + 1) * 13, background: on ? "#EAF2FF" : "transparent", cursor: "pointer" }}
+            onClick={() => { setSelOps({ l0: n.label, id: r.id }); refocus(id); setView("reader"); }} title={r.req}>
+            <span style={{ width: 16, flexShrink: 0 }} />
+            <span style={{ fontSize: 10, fontWeight: 700, color: cc, fontFamily: "ui-monospace,monospace", flexShrink: 0 }}>{r.id}</span>
+            <span className="truncate" style={{ fontSize: 11.5, color: on ? "#101828" : "#475467", fontWeight: on ? 600 : 400 }}>{opsTitle(r)}</span>
+          </div>
+        ); }) : kids.map((k) => <TreeRow key={k} id={k} depth={depth + 1} />))}
       </div>
     );
   };
@@ -10111,7 +10145,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 </button>))
               : (() => {
                   const byLabel = {}; L0S.forEach((r) => { byLabel[(r.label || "").trim()] = r; });
-                  const featCount = (mid) => neigh(mid).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)).length + Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === mid).length;
+                  const featCount = (mid) => { const nn = getN(mid); if (nn && OPS_REQS[nn.label]) return OPS_REQS[nn.label].length; return neigh(mid).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)).length + Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === mid).length; };
                   const used = new Set(); const out = [];
                   FEATURE_DOMAINS.forEach(([dom, labels]) => {
                     const members = labels.map((l) => byLabel[l]).filter(Boolean);
@@ -11207,7 +11241,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               );
             };
             // Operational (ENGINEERING & OPERATIONS) subdomains use a tailored operational-requirement layout.
-            if (rDoc && OPS_REQS[rDoc.label]) return <OpsReqDoc rDoc={rDoc} reqs={OPS_REQS[rDoc.label]} />;
+            if (rDoc && OPS_REQS[rDoc.label]) return <OpsReqDoc rDoc={rDoc} reqs={OPS_REQS[rDoc.label]} sel={selOps && selOps.l0 === rDoc.label ? selOps.id : null} onPick={(id) => setSelOps({ l0: rDoc.label, id })} />;
             return (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
               <div className="sticky top-0 z-10 px-10 py-2 flex items-center gap-2" style={{ background: "rgba(255,255,255,0.97)", borderBottom: "1px solid #EAECF0" }}>
@@ -12765,12 +12799,23 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
         </div>
 
         {/* detail — in the ECU spec view this follows the selected ECU (see the sync effect). */}
-        {sel && rightHidden && (
+        {selOpsReq && rightHidden && (
+          <div className="shrink-0 flex flex-col items-center pt-3" style={{ width: 26, background: "#fff", borderLeft: "1px solid #E4E7EC", cursor: "pointer" }} onClick={() => setRightHidden(false)} title="Show details"><ChevronLeft size={16} color="#98A2B3" /></div>
+        )}
+        {selOpsReq && !rightHidden && (
+          <div className="shrink-0 flex flex-col relative" style={{ width: rightW, background: "#fff", borderLeft: "1px solid #E4E7EC", overflow: "auto" }}>
+            <div className="flex justify-end items-center px-2" style={{ height: 22, borderBottom: "1px solid #F2F4F7" }}>
+              <button onClick={() => setRightHidden(true)} title="Hide details panel"><ChevronRight size={15} color="#98A2B3" /></button>
+            </div>
+            <OpsReqDetail r={selOpsReq} />
+          </div>
+        )}
+        {sel && !selOpsReq && rightHidden && (
           <div className="shrink-0 flex flex-col items-center pt-3" style={{ width: 26, background: "#fff", borderLeft: "1px solid #E4E7EC", cursor: "pointer" }} onClick={() => setRightHidden(false)} title="Show details panel">
             <ChevronLeft size={16} color="#98A2B3" />
           </div>
         )}
-        {sel && !rightHidden && (
+        {sel && !selOpsReq && !rightHidden && (
           <div className="shrink-0 flex flex-col relative" style={{ width: rightW, background: "#fff", borderLeft: "1px solid #E4E7EC" }}>
             <div onMouseDown={(e) => { paneDrag.current = { side: "right", startX: e.clientX, startW: rightW }; document.body.style.userSelect = "none"; }} title="Drag to resize" style={{ position: "absolute", top: 0, left: -3, width: 6, height: "100%", cursor: "col-resize", zIndex: 30 }} />
             <div className="flex justify-end items-center px-2" style={{ height: 22, borderBottom: "1px solid #F2F4F7" }}>
