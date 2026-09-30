@@ -6861,7 +6861,44 @@ function gapSummaryText(rep) {
    for ENGINEERING & OPERATIONS subdomains: process/standards-based requirements with interface/tooling,
    lifecycle phase, applicable standards, verification and owner. Data comes from OPS_REQS. */
 const OPS_CAT_COLOR = { "EOL Programming": "#175CD3", "Configuration & Coding": "#0E7090", "Calibration": "#7A5AF8", "Traceability": "#B54708", "Diagnostic Access": "#0BA5EC", "Vehicle Modes": "#12B76A", "Security": "#B42318", "Repair & Replacement": "#DC6803", "Predictive Maintenance": "#9E77ED", "Service & Aftersales": "#DD2590", "Process Quality": "#475467", "Tool Qualification": "#175CD3", "Requirements & Traceability": "#0E7090", "Configuration & Change": "#7A5AF8", "Model-Based Dev": "#B54708", "Test Automation": "#0BA5EC", "Calibration & Diagnostics": "#12B76A", "CI/CD & Build": "#DC6803", "Simulation": "#9E77ED", "Toolchain Security": "#B42318", "Data & Retention": "#475467", "Extended Vehicle Data": "#0E7090", "Remote Diagnostics": "#0BA5EC", "OTA Campaign Mgmt": "#DD2590", "Fleet Management": "#175CD3", "Warranty & Claims": "#B54708", "Aftersales Analytics": "#9E77ED", "Connected Services": "#12B76A", "Security & Privacy": "#B42318", "Diagnostic Communication": "#175CD3", "DTC & Fault Mgmt": "#B54708", "OBD & Emissions": "#DC6803", "Diagnostic Data (ODX)": "#0E7090", "Diagnostic Security": "#B42318", "Data Logging & Telemetry": "#9E77ED", "Vehicle Health & Prognostics": "#12B76A", "Remote Diagnostics (SOVD)": "#0BA5EC", "Platform Diagnostics": "#475467", "Campaign Management": "#175CD3", "Update Delivery & Download": "#0BA5EC", "In-Vehicle Orchestration": "#0E7090", "Safety & Vehicle State": "#B54708", "Security & Integrity": "#B42318", "User Consent & HMI": "#9E77ED", "Regulatory Compliance": "#475467", "Logging & Observability": "#12B76A", "Next-Gen Architecture": "#7A5AF8", "Cybersecurity Management": "#475467", "Secure Communication": "#175CD3", "Key Management & PKI": "#0E7090", "Secure Boot & Code Authenticity": "#B54708", "Access Control & Auditing": "#DC6803", "Intrusion Detection & Response": "#B42318", "Anti-Theft & Component Protection": "#9E3720", "Time Integrity": "#0BA5EC", "Privacy & Consent (GDPR)": "#12B76A", "Profile & Identity": "#175CD3", "Authentication & Access": "#B42318", "Roles & Permissions": "#7A5AF8", "Saved Settings & Sync": "#0E7090", "Ownership Management": "#DC6803", "Privacy & Data Control": "#12B76A", "App Platform": "#175CD3", "Information Services": "#0BA5EC", "Notifications": "#9E77ED", "Support": "#475467", "Drive Modes & Selection": "#175CD3", "EREV Controls & Indications": "#B54708", "Tire Monitoring": "#DC6803", "Towing & Trailer": "#0E7090", "Off-road & Terrain": "#7A5AF8", "Vehicle Controls HMI": "#0BA5EC", "Utility & Comfort Modes": "#12B76A", "Comfort & Wellbeing": "#9E77ED", "Utility & Service Modes": "#0E7090", "Staging & Ambience": "#DD2590", "Special-Purpose Modes": "#475467", "Power Moding & States": "#175CD3", "Wake & Sleep": "#0BA5EC", "Terminal Control (KL)": "#B54708", "Network Power Management": "#0E7090", "Presence & Activation": "#9E77ED", "Reset & Shutdown": "#DC6803", "HV / E-Fuse Control": "#B42318", "Comfort & Access": "#DD2590", "Sustainability & Compliance": "#027A48" };
-function OpsReqDetail({ r }) {
+/* Editable overlay for OPS_REQS. The curated constant stays the read-only default; owner edits, additions and
+   deletions live in the workspace document as { edits: {id: patch}, added: {subdomain: [req]}, deleted: {id: true} }. */
+const OPS_FIELDS_OP = [["req", "REQUIREMENT", 1], ["cat", "CATEGORY"], ["phase", "PHASE"], ["level", "LEVEL"], ["iface", "INTERFACE / TOOLING"], ["std", "STANDARD(S)"], ["ac", "ACCEPTANCE / VERIFICATION", 1], ["method", "VERIFICATION METHOD"], ["safety", "SAFETY / SECURITY / REGULATORY"], ["owner", "OWNER"], ["rationale", "RATIONALE", 1]];
+const OPS_FIELDS_FN = [["req", "REQUIREMENT (EARS)", 1], ["cat", "CATEGORY"], ["ears", "EARS PATTERN"], ["trigger", "TRIGGER / PRECONDITION", 1], ["ac", "ACCEPTANCE CRITERION", 1], ["safety", "SAFETY / REG / PRIVACY"], ["owner", "OWNER"], ["rationale", "RATIONALE", 1]];
+const OPS_EMPTY_OV = { edits: {}, added: {}, deleted: {} };
+function opsEffective(ov, label) {
+  const base = OPS_REQS[label]; if (!base) return null;
+  const o = ov || OPS_EMPTY_OV, ed = o.edits || {}, del = o.deleted || {};
+  return base.filter((r) => !del[r.id]).map((r) => (ed[r.id] ? { ...r, ...ed[r.id], _edited: true } : r)).concat((o.added && o.added[label]) || []);
+}
+function OpsReqEditor({ r, cats, onSave, onCancel }) {
+  const fields = r.func ? OPS_FIELDS_FN : OPS_FIELDS_OP;
+  const [d, setD] = useState(() => Object.fromEntries(fields.map(([k]) => [k, r[k] || ""])));
+  const c = OPS_CAT_COLOR[r.cat] || "#475467";
+  const inp = { width: "100%", fontSize: 12, padding: "5px 8px", borderRadius: 6, border: "1px solid #D0D5DD", outline: "none", fontFamily: "inherit", color: "#101828" };
+  const ok = (d.req || "").trim().length > 0;
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2"><span style={{ fontSize: 11, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span><span style={{ fontSize: 9, fontWeight: 800, color: "#B54708", background: "#FEF6EE", borderRadius: 4, padding: "1px 7px" }}>EDITING</span></div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10, marginTop: 8 }}>
+        {fields.map(([k, label, big]) => (
+          <div key={k} style={{ gridColumn: big ? "1 / -1" : "auto" }}>
+            <div style={{ fontSize: 8.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.3, marginBottom: 2 }}>{label}</div>
+            {big ? <textarea rows={k === "req" ? 3 : 2} value={d[k]} onChange={(e) => setD({ ...d, [k]: e.target.value })} style={{ ...inp, resize: "vertical", lineHeight: 1.45 }} />
+              : <input value={d[k]} list={k === "cat" ? "ops-cats-" + r.id : undefined} onChange={(e) => setD({ ...d, [k]: e.target.value })} style={inp} />}
+          </div>
+        ))}
+      </div>
+      <datalist id={"ops-cats-" + r.id}>{(cats || []).map((x) => <option key={x} value={x} />)}</datalist>
+      <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
+        <button disabled={!ok} onClick={() => onSave(d)} style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: ok ? "#175CD3" : "#98A2B3", borderRadius: 6, padding: "4px 12px" }}>Save</button>
+        <button onClick={onCancel} style={{ fontSize: 11.5, fontWeight: 600, color: "#475467", border: "1px solid #D0D5DD", borderRadius: 6, padding: "4px 12px" }}>Cancel</button>
+        {!ok && <span style={{ fontSize: 10.5, color: "#B42318" }}>Requirement text can't be empty.</span>}
+      </div>
+    </div>
+  );
+}
+function OpsReqDetail({ r, canWrite, onEdit }) {
   const c = OPS_CAT_COLOR[r.cat] || "#475467";
   const row = (k, v) => v ? (<div style={{ marginTop: 10 }}><div style={{ fontSize: 9, fontWeight: 800, color: "#98A2B3", letterSpacing: 0.4 }}>{k}</div><div style={{ fontSize: 12, color: "#344054", marginTop: 2, lineHeight: 1.5 }}>{v}</div></div>) : null;
   return (
@@ -6870,6 +6907,9 @@ function OpsReqDetail({ r }) {
       <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span>
         <span style={{ fontSize: 9, fontWeight: 700, color: c, background: c + "18", borderRadius: 4, padding: "1px 7px" }}>{r.cat}</span>
+        {r._edited && <span style={{ fontSize: 9, fontWeight: 800, color: "#B54708", background: "#FEF6EE", borderRadius: 4, padding: "1px 7px" }}>EDITED</span>}
+        {r._added && <span style={{ fontSize: 9, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 4, padding: "1px 7px" }}>NEW</span>}
+        {canWrite && onEdit && <button onClick={() => onEdit(r.id)} style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 6, padding: "2px 10px" }}>Edit</button>}
       </div>
       <p style={{ fontSize: 13, color: "#101828", marginTop: 8, lineHeight: 1.55 }}>{r.req}</p>
       {row("EARS PATTERN", r.ears)}{row("TRIGGER / PRECONDITION", r.trigger)}{row("PHASE", r.phase)}{row("LEVEL", r.level)}{row("INTERFACE / TOOLING", r.iface)}{row("STANDARD(S)", r.std)}{row("ACCEPTANCE / VERIFICATION", r.ac)}{row("VERIFICATION METHOD", r.method)}{row("SAFETY / SECURITY / REGULATORY", r.safety)}{row("OWNER", r.owner)}{row("RATIONALE", r.rationale)}
@@ -6882,8 +6922,9 @@ function opsTitle(r) {
   if (s.length > 50) s = s.slice(0, 48).trim() + "…";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-function OpsReqDoc({ rDoc, reqs, sel, onPick }) {
+function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, onDelete, onReset, onAdd, deletedCount, onRestore }) {
   const [q, setQ] = useState("");
+  const cats = Array.from(new Set(reqs.map((r) => r.cat).filter(Boolean)));
   const fn = !!(reqs[0] && reqs[0].func); // functional (VEHICLE PLATFORM) vs operational layout
   useEffect(() => { if (sel) { const el = typeof document !== "undefined" && document.getElementById("ops-" + sel); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); } }, [sel]);
   const ql = q.trim().toLowerCase();
@@ -6896,6 +6937,8 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick }) {
         <span style={{ fontSize: 12, fontWeight: 700, color: "#101828" }}>{rDoc?.label}</span>
         <span style={{ fontSize: 10, fontWeight: 800, color: "#7A5AF8", background: "#F4F1FE", borderRadius: 5, padding: "1px 7px", letterSpacing: 0.3 }}>{fn ? "FUNCTIONAL" : "OPERATIONAL"}</span>
         <span style={{ fontSize: 11, color: "#98A2B3" }}>{reqs.length} requirements</span>
+        {canWrite && onAdd && <button onClick={onAdd} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 6, padding: "2px 10px" }}>+ Add requirement</button>}
+        {canWrite && deletedCount > 0 && <button onClick={onRestore} style={{ fontSize: 11, fontWeight: 600, color: "#667085", textDecoration: "underline" }}>Restore {deletedCount} deleted</button>}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find…" style={{ marginLeft: "auto", flex: "0 1 260px", fontSize: 12, padding: "4px 9px", borderRadius: 8, border: "1px solid #D0D5DD", outline: "none" }} />
       </div>
       <div className="mx-auto px-10 py-8" style={{ maxWidth: 1100 }}>
@@ -6903,15 +6946,23 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick }) {
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#101828", marginTop: 4 }}>{rDoc?.label}</h1>
         <p style={{ fontSize: 13, color: "#475467", marginTop: 8, lineHeight: 1.55 }}>{fn ? "Functional requirements — customer- and vehicle-facing behavior in EARS form, with trigger/precondition, acceptance criteria and safety/regulatory/privacy tags. Curated from the feature set; confirm each against your program." : "Operational / process requirements — standards-based, with a layout tailored to interface/tooling, lifecycle phase and verification (distinct from the functional EARS document). Target values are set to typical industry figures — confirm/adjust per your program."}</p>
         <div style={{ marginTop: 16 }}>
-          {shown.map((r) => { const c = OPS_CAT_COLOR[r.cat] || "#475467"; const on = sel === r.id; return (
+          {shown.map((r) => { const c = OPS_CAT_COLOR[r.cat] || "#475467"; const on = sel === r.id; const ed = editId === r.id; return (
             <div key={r.id} id={"ops-" + r.id} onClick={() => onPick && onPick(r.id)} style={{ border: "1px solid " + (on ? c : "#EAECF0"), borderLeft: "3px solid " + c, borderRadius: 8, padding: "10px 14px", marginBottom: 10, cursor: "pointer", background: on ? "#FEFCE8" : "#fff", boxShadow: on ? "0 0 0 1px " + c : "none" }}>
+              {ed ? <OpsReqEditor r={r} cats={cats} onSave={(d) => onSave(r, d)} onCancel={() => onEdit(null, r)} /> : (<>
               <div className="flex items-center gap-2 flex-wrap">
                 <span style={{ fontSize: 11, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span>
                 {chip(r.cat, c)}
+                {r._edited && chip("EDITED", "#B54708")}
+                {r._added && chip("NEW", "#7F56D9")}
                 {r.phase && chip(r.phase, "#475467")}
                 {r.level && <span style={{ fontSize: 9, fontWeight: 700, color: /Low/.test(r.level) ? "#B54708" : "#0E7090", background: /Low/.test(r.level) ? "#FEF6EE" : "#E0F2FE", borderRadius: 4, padding: "1px 7px" }}>{r.level}</span>}
                 {r.ears && <span style={{ fontSize: 9, fontWeight: 700, color: "#475467", background: "#F2F4F7", borderRadius: 4, padding: "1px 7px" }}>{r.ears}</span>}
                 {r.safety && /Security|ASIL|Privacy|Regulat|Safety/.test(r.safety) && <span style={{ fontSize: 9, fontWeight: 700, color: "#B42318", background: "#FEF3F2", borderRadius: 4, padding: "1px 7px" }}>{r.safety}</span>}
+                {canWrite && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 10 }}>
+                  <button onClick={(e) => { e.stopPropagation(); onPick && onPick(r.id); onEdit(r.id, r); }} style={{ fontSize: 10.5, fontWeight: 700, color: "#175CD3" }}>Edit</button>
+                  {r._edited && <button onClick={(e) => { e.stopPropagation(); onReset(r); }} title="Discard your edits and restore the curated default" style={{ fontSize: 10.5, fontWeight: 600, color: "#667085" }}>Reset</button>}
+                  <button onClick={(e) => { e.stopPropagation(); onDelete(r); }} style={{ fontSize: 10.5, fontWeight: 600, color: "#B42318" }}>Delete</button>
+                </span>}
               </div>
               <p style={{ fontSize: 13, color: "#101828", marginTop: 6, lineHeight: 1.55 }}>{r.req}</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginTop: 8, paddingTop: 8, borderTop: "1px solid #F2F4F7" }}>
@@ -6922,6 +6973,7 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick }) {
               </div>
               {r.ac && <div style={{ fontSize: 11, color: "#344054", marginTop: 8 }}><b style={{ color: "#667085", fontWeight: 700 }}>Acceptance / Verification: </b>{r.ac}</div>}
               {r.rationale && <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 3, fontStyle: "italic" }}>Rationale: {r.rationale}</div>}
+              </>)}
             </div>
           ); })}
           {shown.length === 0 && <div style={{ color: "#98A2B3", fontSize: 12 }}>No matching requirements.</div>}
@@ -7455,6 +7507,63 @@ export default function App() {
   const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
   const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive", "Software Platform", "Vehicle Platform", "Engineering & Operations"])); // Features-tree domain groups expanded by default
   const [selOps, setSelOps] = useState(null); // selected operational requirement { l0, id } for the tailored reader
+  const [opsOv, setOpsOv] = useState(OPS_EMPTY_OV); // owner edits/additions/deletions layered over OPS_REQS (persisted with the workspace)
+  const [opsEditId, setOpsEditId] = useState(null); // operational requirement currently open in the inline editor
+  const opsSave = (l0, r, d) => {
+    const fields = (r.func ? OPS_FIELDS_FN : OPS_FIELDS_OP).map(([k]) => k);
+    const clean = Object.fromEntries(fields.map((k) => [k, (d[k] || "").trim()]));
+    const before = Object.fromEntries(fields.map((k) => [k, r[k] || ""]));
+    const changed = fields.filter((k) => clean[k] !== before[k]);
+    setOpsOv((p) => {
+      const o = { edits: { ...p.edits }, added: { ...p.added }, deleted: { ...p.deleted } };
+      if (r._added) o.added[l0] = (o.added[l0] || []).map((x) => (x.id === r.id ? { ...x, ...clean, _new: false } : x));
+      else {
+        const base = (OPS_REQS[l0] || []).find((x) => x.id === r.id) || {};
+        const patch = Object.fromEntries(fields.filter((k) => clean[k] !== (base[k] || "")).map((k) => [k, clean[k]]));
+        if (Object.keys(patch).length) o.edits[r.id] = patch; else delete o.edits[r.id];
+      }
+      return o;
+    });
+    if (changed.length || r._new) logAudit(r._new ? "Added requirement" : "Edited requirement", r.id, changed.join(", "));
+    setOpsEditId(null);
+  };
+  const opsCancel = (l0, r) => {
+    if (r && r._new) setOpsOv((p) => ({ ...p, added: { ...p.added, [l0]: (p.added[l0] || []).filter((x) => x.id !== r.id) } }));
+    setOpsEditId(null);
+  };
+  const opsDelete = (l0, r) => {
+    if (typeof window !== "undefined" && !window.confirm("Delete requirement " + r.id + "?" + (r._added ? "" : " You can restore deleted requirements from the subdomain header."))) return;
+    setOpsOv((p) => {
+      const o = { edits: { ...p.edits }, added: { ...p.added }, deleted: { ...p.deleted } };
+      if (r._added) o.added[l0] = (o.added[l0] || []).filter((x) => x.id !== r.id);
+      else { o.deleted[r.id] = true; delete o.edits[r.id]; }
+      return o;
+    });
+    logAudit("Deleted requirement", r.id, opsTitle(r));
+    if (selOps && selOps.id === r.id) setSelOps(null);
+    if (opsEditId === r.id) setOpsEditId(null);
+  };
+  const opsReset = (r) => {
+    setOpsOv((p) => { const ed = { ...p.edits }; delete ed[r.id]; return { ...p, edits: ed }; });
+    logAudit("Reset requirement", r.id, "restored curated default");
+  };
+  const opsAdd = (l0) => {
+    const base = OPS_REQS[l0] || []; if (!base.length) return;
+    const fn = !!base[0].func;
+    const pre = base[0].id.replace(/-\d+$/, "");
+    const used = new Set(Object.values(OPS_REQS).flat().map((x) => x.id).concat(Object.values(opsOv.added).flat().map((x) => x.id)));
+    let n = 1, id; do { id = pre + "-U" + String(n++).padStart(2, "0"); } while (used.has(id));
+    const cur = opsEffective(opsOv, l0) || [];
+    const nr = { id, cat: (cur[cur.length - 1] || base[0]).cat || "", req: "The system shall ", owner: "", _added: true, _new: true, ...(fn ? { func: true, ears: "", trigger: "", ac: "", safety: "", rationale: "" } : { phase: "", level: "", iface: "", std: "", ac: "", method: "", safety: "", rationale: "" }) };
+    setOpsOv((p) => ({ ...p, added: { ...p.added, [l0]: [...(p.added[l0] || []), nr] } }));
+    setSelOps({ l0, id }); setOpsEditId(id);
+    setTimeout(() => { const el = typeof document !== "undefined" && document.getElementById("ops-" + id); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }, 60);
+  };
+  const opsRestore = (l0) => {
+    const ids = new Set((OPS_REQS[l0] || []).map((x) => x.id));
+    setOpsOv((p) => ({ ...p, deleted: Object.fromEntries(Object.keys(p.deleted).filter((k) => !ids.has(k)).map((k) => [k, true])) }));
+    logAudit("Restored requirements", l0, "deleted requirements restored");
+  };
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
   const [ecuOpen, setEcuOpen] = useState(() => new Set(["Primary ECUs"])); // ECU tree expanded groups
   const [execOpen, setExecOpen] = useState(false); // Engineering Readiness dashboard collapsed by default
@@ -7714,8 +7823,8 @@ export default function App() {
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
-    reqStatus, regEdits, baselines, tcExec, auditLog, userEcus,
-  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog, userEcus]);
+    reqStatus, regEdits, baselines, tcExec, auditLog, userEcus, opsOv,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog, userEcus, opsOv]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
@@ -7725,6 +7834,7 @@ export default function App() {
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
+    if (d.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(d.opsOv) });
     if (d.userNodes || d.nodeEdits) setNodes((prev) => {
       const nx = { ...prev, ...(d.userNodes || {}) }; // restore user-created features first
       if (d.nodeEdits) Object.entries(d.nodeEdits).forEach(([id, e]) => { const base = nx[id] || NODE[id]; if (base) { const mergedProps = e.props ? { ...base.props, ...e.props } : { ...base.props, statement: e.statement }; nx[id] = { ...base, label: (e.label != null ? e.label : base.label), props: mergedProps, edited: true }; } });
@@ -9263,7 +9373,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
   });
 
   const sel = getN(selected);
-  const selOpsReq = selOps ? (OPS_REQS[selOps.l0] || []).find((r) => r.id === selOps.id) : null;
+  const selOpsReq = selOps ? (opsEffective(opsOv, selOps.l0) || []).find((r) => r.id === selOps.id) : null;
   /* In the ECU spec view, the right detail panel follows the selected ECU (so picking an
      ECU shows the ECU on the right, not the previously-selected feature requirement). */
   useEffect(() => { if (view === "ecureq" && selectedEcu && getN(selectedEcu)) setSelected(selectedEcu); }, [view, selectedEcu]);
@@ -9338,7 +9448,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
     const kids = (id === GRAPH.focus ? L1S
       : neigh(id).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)))
       .concat(Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === id).map((x) => x.id));
-    const opsList = /L0/.test(n.subtype || "") ? OPS_REQS[n.label] : null; // operational subdomains list curated ops requirements
+    const opsList = /L0/.test(n.subtype || "") ? opsEffective(opsOv, n.label) : null; // operational subdomains list curated ops requirements
     const childCount = opsList ? opsList.length : kids.length;
     const isOpen = open.has(id);
     /* "Gap" = the requirement isn't allocated to any architecture (Automotive SPICE SYS.3).
@@ -10148,7 +10258,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 </button>))
               : (() => {
                   const byLabel = {}; L0S.forEach((r) => { byLabel[(r.label || "").trim()] = r; });
-                  const featCount = (mid) => { const nn = getN(mid); if (nn && OPS_REQS[nn.label]) return OPS_REQS[nn.label].length; return neigh(mid).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)).length + Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === mid).length; };
+                  const featCount = (mid) => { const nn = getN(mid); if (nn && OPS_REQS[nn.label]) return opsEffective(opsOv, nn.label).length; return neigh(mid).filter((a) => a.e === "decomposes_to" && a.dir === "out").map((a) => a.id).filter((c) => getN(c)).length + Object.values(nodes).filter((x) => x && x.userCreated && x.props?.parentL0 === mid).length; };
                   const used = new Set(); const out = [];
                   FEATURE_DOMAINS.forEach(([dom, labels]) => {
                     const members = labels.map((l) => byLabel[l]).filter(Boolean);
@@ -11244,7 +11354,9 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               );
             };
             // Operational (ENGINEERING & OPERATIONS) subdomains use a tailored operational-requirement layout.
-            if (rDoc && OPS_REQS[rDoc.label]) return <OpsReqDoc rDoc={rDoc} reqs={OPS_REQS[rDoc.label]} sel={selOps && selOps.l0 === rDoc.label ? selOps.id : null} onPick={(id) => setSelOps({ l0: rDoc.label, id })} />;
+            if (rDoc && OPS_REQS[rDoc.label]) return <OpsReqDoc rDoc={rDoc} reqs={opsEffective(opsOv, rDoc.label)} sel={selOps && selOps.l0 === rDoc.label ? selOps.id : null} onPick={(id) => setSelOps({ l0: rDoc.label, id })}
+              canWrite={canWrite} editId={opsEditId} onEdit={(id, r) => (id ? setOpsEditId(id) : opsCancel(rDoc.label, r))} onSave={(r, d) => opsSave(rDoc.label, r, d)} onDelete={(r) => opsDelete(rDoc.label, r)} onReset={opsReset}
+              onAdd={() => opsAdd(rDoc.label)} deletedCount={(OPS_REQS[rDoc.label] || []).filter((x) => opsOv.deleted[x.id]).length} onRestore={() => opsRestore(rDoc.label)} />;
             return (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
               <div className="sticky top-0 z-10 px-10 py-2 flex items-center gap-2" style={{ background: "rgba(255,255,255,0.97)", borderBottom: "1px solid #EAECF0" }}>
@@ -12810,7 +12922,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             <div className="flex justify-end items-center px-2" style={{ height: 22, borderBottom: "1px solid #F2F4F7" }}>
               <button onClick={() => setRightHidden(true)} title="Hide details panel"><ChevronRight size={15} color="#98A2B3" /></button>
             </div>
-            <OpsReqDetail r={selOpsReq} />
+            <OpsReqDetail r={selOpsReq} canWrite={canWrite} onEdit={(id) => { setOpsEditId(id); setTimeout(() => { const el = typeof document !== "undefined" && document.getElementById("ops-" + id); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }, 60); }} />
           </div>
         )}
         {sel && !selOpsReq && rightHidden && (
