@@ -6898,24 +6898,6 @@ function OpsReqEditor({ r, cats, onSave, onCancel }) {
     </div>
   );
 }
-function OpsReqDetail({ r, canWrite, onEdit }) {
-  const c = OPS_CAT_COLOR[r.cat] || "#475467";
-  const row = (k, v) => v ? (<div style={{ marginTop: 10 }}><div style={{ fontSize: 9, fontWeight: 800, color: "#98A2B3", letterSpacing: 0.4 }}>{k}</div><div style={{ fontSize: 12, color: "#344054", marginTop: 2, lineHeight: 1.5 }}>{v}</div></div>) : null;
-  return (
-    <div style={{ padding: "10px 14px", overflow: "auto" }}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#7A5AF8", letterSpacing: 0.3 }}>{r.func ? "FUNCTIONAL REQUIREMENT" : "OPERATIONAL REQUIREMENT"}</div>
-      <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 800, color: c, fontFamily: "ui-monospace,monospace" }}>{r.id}</span>
-        <span style={{ fontSize: 9, fontWeight: 700, color: c, background: c + "18", borderRadius: 4, padding: "1px 7px" }}>{r.cat}</span>
-        {r._edited && <span style={{ fontSize: 9, fontWeight: 800, color: "#B54708", background: "#FEF6EE", borderRadius: 4, padding: "1px 7px" }}>EDITED</span>}
-        {r._added && <span style={{ fontSize: 9, fontWeight: 800, color: "#7F56D9", background: "#F6F1FE", borderRadius: 4, padding: "1px 7px" }}>NEW</span>}
-        {canWrite && onEdit && <button onClick={() => onEdit(r.id)} style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 6, padding: "2px 10px" }}>Edit</button>}
-      </div>
-      <p style={{ fontSize: 13, color: "#101828", marginTop: 8, lineHeight: 1.55 }}>{r.req}</p>
-      {row("EARS PATTERN", r.ears)}{row("TRIGGER / PRECONDITION", r.trigger)}{row("PHASE", r.phase)}{row("LEVEL", r.level)}{row("INTERFACE / TOOLING", r.iface)}{row("STANDARD(S)", r.std)}{row("ACCEPTANCE / VERIFICATION", r.ac)}{row("VERIFICATION METHOD", r.method)}{row("SAFETY / SECURITY / REGULATORY", r.safety)}{row("OWNER", r.owner)}{row("RATIONALE", r.rationale)}
-    </div>
-  );
-}
 function opsTitle(r) {
   let s = (r.req || "").replace(/^The [^,]*? shall\s+/i, "").replace(/^Every [^,]*? shall\s+/i, "").replace(/^[A-Z][^,]*? shall\s+/i, "");
   s = s.split(/[,;.]/)[0].trim() || r.cat || r.id;
@@ -12914,17 +12896,6 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
         </div>
 
         {/* detail — in the ECU spec view this follows the selected ECU (see the sync effect). */}
-        {selOpsReq && rightHidden && (
-          <div className="shrink-0 flex flex-col items-center pt-3" style={{ width: 26, background: "#fff", borderLeft: "1px solid #E4E7EC", cursor: "pointer" }} onClick={() => setRightHidden(false)} title="Show details"><ChevronLeft size={16} color="#98A2B3" /></div>
-        )}
-        {selOpsReq && !rightHidden && (
-          <div className="shrink-0 flex flex-col relative" style={{ width: rightW, background: "#fff", borderLeft: "1px solid #E4E7EC", overflow: "auto" }}>
-            <div className="flex justify-end items-center px-2" style={{ height: 22, borderBottom: "1px solid #F2F4F7" }}>
-              <button onClick={() => setRightHidden(true)} title="Hide details panel"><ChevronRight size={15} color="#98A2B3" /></button>
-            </div>
-            <OpsReqDetail r={selOpsReq} canWrite={canWrite} onEdit={(id) => { setOpsEditId(id); setTimeout(() => { const el = typeof document !== "undefined" && document.getElementById("ops-" + id); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }, 60); }} />
-          </div>
-        )}
         {sel && !selOpsReq && rightHidden && (
           <div className="shrink-0 flex flex-col items-center pt-3" style={{ width: 26, background: "#fff", borderLeft: "1px solid #E4E7EC", cursor: "pointer" }} onClick={() => setRightHidden(false)} title="Show details panel">
             <ChevronLeft size={16} color="#98A2B3" />
