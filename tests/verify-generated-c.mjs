@@ -12,7 +12,7 @@ const has = spawnSync(CC, ["--version"], { encoding: "utf8" });
 if (has.error || has.status !== 0) { console.log("SKIPPED: no C compiler found (" + CC + "). Install GCC/Clang or set CC."); process.exit(0); }
 console.log("compiler: " + has.stdout.split("\n")[0]);
 
-const FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Wconversion", "-Werror", "-O0", "-g", "-Isrc", "-Istubs", "-Itest"];
+const FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Wconversion", "-Werror", "-O0", "-g", "-DSDV_UNIT_TEST", "-Isrc", "-Istubs", "-Itest"];
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
 const bm = JSON.parse(JSON.stringify(PILOT_MODELS["L2-BODY-00194-MODE"]));
 const g = await generate(bm, { build: "verify" }); if (!g.ok) { console.error("generation failed", g.errors); process.exit(1); }
@@ -48,6 +48,9 @@ const MUTANTS = [
   ["ignition-off release removed", "(!(ignition_on != 0u)) || ", ""],
   ["FAULT retry timeout removed", " && ((int32_t)state_time_ms >= (int32_t)CAL_FAULT_RETRY_MS)", ""],
   ["fault flag never raised", "heater_fault = TRUE;", "heater_fault = FALSE;"],
+  ["defensive: corrupted state is not recovered", "/* defensive: unknown state, recover to the initial state */\n        fired = TRUE;", "/* defensive: unknown state, recover to the initial state */"],
+  ["defensive: state timer wraps instead of saturating", "MirrorHeating_stateTimeMs = MIRRORHEATING_TIME_MAX;", "MirrorHeating_stateTimeMs = 0u;"],
+  ["output: wrong output in the last state", "heater_fault = TRUE;\n    }", "heater_fault = FALSE;\n    }"],
 ];
 MUTANTS.forEach((m, i) => {
   const r = build(path.join(base, "m" + i), [m[1], m[2]]);

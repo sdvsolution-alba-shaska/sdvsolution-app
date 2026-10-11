@@ -32,9 +32,25 @@ customer runner, its builds are routed there (their code and toolchain stay on t
 2. **gate** — the model must be approved and QM-confirmed (re-checked here, independently of the server).
 3. **generate** — deterministic C + tests from the model.
 4. **compile** — strict warnings as errors.
-5. **unit-tests** — all generated tests must run and pass; the count must match what was generated.
-6. **static-analysis, coverage** — *recorded as `not-run`* until item 6 adds them. A result never implies they passed.
-7. **package** — manifest hash; generated files and `results.xml` are uploaded.
+5. **unit-tests** — all generated tests must run and pass; the count must match what was generated. The test build defines
+   `SDV_UNIT_TEST`, which enables test-only hooks (never compiled into production code) so the tests can reach defensive paths.
+6. **static-analysis** — the production sources only, *without* the test hooks, with a wider warning set than the build
+   (`-Wshadow -Wswitch-default -Wnull-dereference -Wmissing-prototypes …`) plus GCC's `-fanalyzer` when the compiler has it.
+   Any finding fails the build. If `cppcheck` is on `PATH` it is run as well (`CPPCHECK` to override). **MISRA is always
+   reported as `not-run`** — a clean analysis is not MISRA compliance; that needs a licensed checker (see below).
+7. **coverage** — a separate instrumented build runs the same tests; `gcov` reports **line, branch and condition (MC/DC-style)**
+   coverage of the generated production code. Condition coverage needs GCC 14+; on older compilers it is reported as
+   *unavailable*, never as 100%. In Phase 1 coverage is **informational** — it does not fail the build, but the result says
+   plainly when it is incomplete and lists the uncovered code. Requires `gcov` next to the compiler (`GCOV` to override).
+8. **package** — manifest hash; generated files, `results.xml`, `testcases.json`, `analysis.json` and `coverage.json` are uploaded.
+
+Failed builds stop at the failing step and gather no further evidence, so a failing build is never mistaken for a release candidate.
+
+### Open policy decisions
+- **Coverage threshold:** should the build fail below some percentage? Today it is informational. The generated tests currently
+  reach 100% on the pilot, so a threshold of 100% for generated code would be achievable — but functions the test solver can't
+  fully cover would then be blocked until manual tests can be added.
+- **MISRA:** which checker to support (customer-licensed). The step exists as "not-run" and is the place to plug one in.
 
 ## Security notes
 

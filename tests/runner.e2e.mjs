@@ -45,17 +45,23 @@ async function setup(models) {
   const got = (await call(api.url, "editor", { action: "get", id: rq.body.build.id, files: true })).body;
   const b = got.build;
   ok(b.status === "passed", "build status is 'passed' (" + b.status + ")" + (b.status === "passed" ? "" : "\n" + (b.result && b.result.error) + "\n" + r.out.slice(-800)));
-  ok(b.result.tests && b.result.tests.run === 30 && b.result.tests.passed === 30 && b.result.tests.failed === 0, "30 of 30 generated tests ran and passed on the runner");
-  ok(["integrity", "gate", "generate", "compile", "unit-tests", "package"].every((n) => b.result.steps.find((s) => s.name === n && s.status === "passed")), "all six real steps passed, in order");
-  ok(b.result.steps.filter((s) => s.status === "not-run").map((s) => s.name).join() === "static-analysis,coverage", "static analysis and coverage are recorded as NOT RUN (never implied clean)");
+  ok(b.result.tests && b.result.tests.run === 32 && b.result.tests.passed === 32 && b.result.tests.failed === 0, "32 of 32 generated tests ran and passed on the runner");
+  ok(["integrity", "gate", "generate", "compile", "unit-tests", "static-analysis", "coverage", "package"].every((n, i) => b.result.steps[i] && b.result.steps[i].name === n && b.result.steps[i].status === "passed"), "all eight steps ran and passed, in order (incl. static-analysis and coverage)");
+  const A = b.result.analysis, C = b.result.coverage;
+  ok(A && A.status === "clean" && A.total === 0 && A.tools[0].name === "gcc" && A.tools[0].warnings >= 15, "static analysis: clean — gcc with a wide warning set (" + (A && A.tools[0].version) + ")");
+  ok(A && A.misra.status === "not-run" && /checker/.test(A.misra.reason), "MISRA is recorded as NOT RUN with the reason — a clean analysis never implies MISRA compliance");
+  ok(C && C.lines.pct === 100 && C.branches.pct === 100 && C.complete === true && C.policy === "informational", "coverage: 100% of lines and branches of the generated production code (" + (C && C.lines.covered + "/" + C.lines.total) + " lines, " + (C && C.branches.covered + "/" + C.branches.total) + " branches)");
+  const gccMajor = Number(((A && A.tools[0].version.match(/\)\s+(\d+)\./)) || [])[1] || 0);
+  ok(gccMajor < 14 ? C.conditions === null : (C.conditions && C.conditions.pct === 100), "condition (MC/DC-style) coverage: " + (C && C.conditions ? C.conditions.pct + "%" : "unavailable on this compiler") + " (gcc " + gccMajor + ")");
+  ok(C && C.files.length >= 1 && C.files.some((f) => f.file === "src/MirrorHeating.c") && C.files.every((f) => /^src\//.test(f.file)) && C.files.every((f) => !f.functionsNeverRun.length), "only production sources are measured, and every production function ran");
   const names = got.files.map((f) => f.name);
-  ok(["src/MirrorHeating.c", "src/MirrorHeating.h", "src/MirrorHeating_cfg.c", "test/test_MirrorHeating.c", "manifest.json", "results.xml"].every((n) => names.includes(n)), "generated sources, manifest and results.xml were uploaded (" + names.length + " files)");
+  ok(["src/MirrorHeating.c", "src/MirrorHeating.h", "src/MirrorHeating_cfg.c", "test/test_MirrorHeating.c", "manifest.json", "results.xml", "testcases.json", "analysis.json", "coverage.json"].every((n) => names.includes(n)), "generated sources, manifest, results, test definitions, analysis.json and coverage.json were uploaded (" + names.length + " files)");
   const xml = got.files.find((f) => f.name === "results.xml").content;
   ok(/name="build" value="B-1"/.test(xml), "the test results carry the build ID B-1 (traceable to the build)");
   ok(got.files.every((f) => f.sha256.length === 64), "every uploaded file has a server-computed SHA-256");
   const tcj = got.files.find((f) => f.name === "testcases.json"); const tcd = tcj ? JSON.parse(tcj.content) : null;
-  ok(tcd && tcd.tests.length === 30 && tcd.tests.every((t) => /^TC-L2-BODY-00194-FUN-GEN-\d+$/.test(t.id) && t.title && t.exp), "testcases.json carries all 30 generated test definitions (id, title, expectation)");
-  ok(tcd && Object.keys(tcd.testIds).length === 30 && tcd.tests.every((t) => tcd.testIds[t.key] && t.id.endsWith("-GEN-" + tcd.testIds[t.key])), "…with the key→number map, so the app registers IDs consistently and never reuses them");
+  ok(tcd && tcd.tests.length === 32 && tcd.tests.every((t) => /^TC-L2-BODY-00194-FUN-GEN-\d+$/.test(t.id) && t.title && t.exp), "testcases.json carries all 32 generated test definitions (id, title, expectation)");
+  ok(tcd && Object.keys(tcd.testIds).length === 32 && tcd.tests.every((t) => tcd.testIds[t.key] && t.id.endsWith("-GEN-" + tcd.testIds[t.key])), "…with the key→number map, so the app registers IDs consistently and never reuses them");
   const resIds = [...xml0(got.files)].sort().join(); ok(resIds === tcd.tests.map((t) => t.id).sort().join(), "the result IDs in results.xml are exactly the IDs defined in testcases.json");
   ok(/compile/.test(b.log) && /finished: passed/.test(b.log), "the runner log was stored");
   ok(b.result.compiler && /GCC|gcc/.test(b.result.compiler) && b.result.runner.version && b.result.generator, "the result records compiler, generator and runner versions");
@@ -110,11 +116,46 @@ async function setup(models) {
   await runRunner(api.url, token, { CC: wrapper });
   const got = (await call(api.url, "owner", { action: "get", id: rq.body.build.id, files: true })).body, b = got.build;
   ok(b.status === "failed", "a build whose generated tests catch a defect is 'failed' (" + b.status + ")" + (b.status === "failed" ? "" : " — " + (b.result && b.result.error)));
-  ok(b.result.tests && b.result.tests.failed === 1 && b.result.tests.passed === 29 && b.result.tests.run === 30, "the result says exactly 1 of 30 tests failed");
+  ok(b.result.tests && b.result.tests.failed >= 1 && b.result.tests.run === 32, "the result says " + b.result.tests.failed + " of 32 tests failed");
   ok(b.result.steps.find((s) => s.name === "compile").status === "passed" && b.result.steps.find((s) => s.name === "unit-tests").status === "failed", "compile passed, unit-tests failed");
-  ok(!b.result.steps.some((s) => s.name === "package"), "a failed build is not packaged as a release candidate");
+  ok(!b.result.steps.some((s) => s.name === "package" || s.name === "static-analysis" || s.name === "coverage"), "a failed build is not packaged and gathers no further evidence");
   const xml = got.files.find((f) => f.name === "results.xml"); ok(xml && /<failure /.test(xml.content), "the failing results.xml is still uploaded as evidence");
   fs.rmSync(dir, { recursive: true, force: true }); await api.close();
+}
+
+// 4b) static analysis catches what the build flags don't: a shadowed variable + a function without a prototype.
+//     The build (compile, unit-tests) still passes — only the wider analysis flags see it — so the build fails at 'static-analysis'.
+async function wrapperFor(mutationJs) {
+  const fs2 = await import("node:fs"), os2 = await import("node:os");
+  const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), "sdv-ccw-"));
+  fs2.writeFileSync(path.join(dir, "mut.mjs"), 'import fs from "node:fs"; const p = "src/MirrorHeating.c"; let t = fs.readFileSync(p, "utf8"); if (!t.includes("SDV_MUTANT")) { ' + mutationJs + ' fs.writeFileSync(p, t); }\n');
+  const w = path.join(dir, process.platform === "win32" ? "cc-mut.cmd" : "cc-mut.sh");
+  fs2.writeFileSync(w, process.platform === "win32" ? '@echo off\r\nnode "%~dp0mut.mjs" || exit /b 9\r\n' + CC + " %*\r\n" : '#!/bin/sh\nnode "$(dirname "$0")/mut.mjs" || exit 9\nexec ' + CC + ' "$@"\n', { mode: 0o755 });
+  return { w, cleanup: () => fs2.rmSync(dir, { recursive: true, force: true }) };
+}
+{
+  const { w, cleanup } = await wrapperFor('t += "\\n/* SDV_MUTANT */\\nint sdv_bad(int a)\\n{\\n    int b = a;\\n    { int b = 1; a += b; }\\n    return b + a;\\n}\\n";');
+  const { api, token } = await setup(); const rq = await call(api.url, "owner", { action: "request", bmId: BM, baselineId: "BL-1" });
+  await runRunner(api.url, token, { CC: w }); const got = (await call(api.url, "owner", { action: "get", id: rq.body.build.id, files: true })).body, b = got.build;
+  const sa = b.result.steps.find((s) => s.name === "static-analysis");
+  ok(b.status === "failed" && sa && sa.status === "failed", "static analysis fails the build when it finds a defect (" + b.status + ")");
+  ok(["compile", "unit-tests"].every((n) => b.result.steps.find((s) => s.name === n && s.status === "passed")), "…even though compile and unit tests passed (the wider analysis flags caught it)");
+  ok(b.result.analysis.total >= 2 && b.result.analysis.findings.some((f) => f.rule === "-Wshadow" && /shadows/.test(f.message)) && b.result.analysis.findings.some((f) => f.rule === "-Wmissing-prototypes"), "findings are recorded with rule and message (" + b.result.analysis.findings.map((f) => f.rule).join(", ") + ")");
+  ok(b.result.analysis.findings.every((f) => /^src\//.test(f.file) && f.line > 0), "each finding has a project-relative file and a line number");
+  ok(got.files.some((f) => f.name === "analysis.json"), "analysis.json is stored as evidence even for a failed analysis");
+  ok(!b.result.steps.some((s) => s.name === "coverage" || s.name === "package"), "a build that fails analysis is not packaged and gathers no coverage");
+  cleanup(); await api.close();
+}
+// 4c) coverage tells the truth: an extra function no test exercises makes coverage INCOMPLETE and names the uncovered code.
+//     Coverage is informational in Phase 1, so the build still passes — but the evidence must say it is not complete.
+{
+  const { w, cleanup } = await wrapperFor('t += "\\n/* SDV_MUTANT */\\nint sdv_extra(void);\\nint sdv_extra(void)\\n{\\n    return 42;\\n}\\n";');
+  const { api, token } = await setup(); const rq = await call(api.url, "owner", { action: "request", bmId: BM, baselineId: "BL-1" });
+  await runRunner(api.url, token, { CC: w }); const b = (await call(api.url, "owner", { action: "get", id: rq.body.build.id })).body.build; const C = b.result.coverage;
+  ok(b.status === "passed" && C && C.complete === false, "unexercised code → build still passes (informational policy) but coverage is flagged INCOMPLETE");
+  ok(C.lines.covered < C.lines.total && C.uncovered.some((u) => /return 42/.test(u.text) && u.kind === "line"), "the uncovered line is named, with its source text ('return 42;')");
+  ok(C.files.find((f) => f.file === "src/MirrorHeating.c").functionsNeverRun.includes("sdv_extra"), "the function that never ran is named");
+  cleanup(); await api.close();
 }
 
 // 5) auth
