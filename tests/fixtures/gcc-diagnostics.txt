@@ -1,0 +1,37 @@
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c: In function 'shadowed':
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c:7:11: warning: declaration of 'a2' shadows a previous local [-Wshadow]
+    7 |     { int a2 = 5; g_x += a2; }
+      |           ^~
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c:6:9: note: shadowed declaration is here
+    6 |     int a2 = a;
+      |         ^~
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c: In function 'sw':
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c:22:5: warning: switch missing default case [-Wswitch-default]
+   22 |     switch (k) { case 1: return 1; }
+      |     ^~~~~~
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c: In function 'deref':
+C:\Users\gshas\AppData\Local\Temp\claude\C--Users-gshas-Downloads-Cowork-task-EKG-Explorer-prototype-continuation-2026-09-29-1\589fb689-f5ca-4bb6-8e38-e2c33a00d7f0\scratchpad\bad.c:13:12: warning: dereference of NULL 'p' [CWE-476] [-Wanalyzer-null-dereference]
+   13 |     return *p;
+      |            ^~
+  'deref': event 1
+   12 |     if (flag != 0) { p = NULL; }
+      |        ^
+      |        |
+      |        (1) following 'true' branch (when 'flag != 0')... ─>─┐
+      |                                                             │
+  'deref': event 2
+      |                                                             │
+      |┌────────────────────────────────────────────────────────────┘
+   12 |│    if (flag != 0) { p = NULL; }
+      |│                       ^
+      |│                       |
+      |└──────────────────────>(2) ...to here
+  'deref': events 3-4
+   12 |     if (flag != 0) { p = NULL; }
+      |                        ^
+      |                        |
+      |                        (3) 'p' is NULL
+   13 |     return *p;
+      |            ~~           
+      |            |
+      |            (4) ⚠️  dereference of NULL 'p'

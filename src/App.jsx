@@ -7225,10 +7225,24 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
                   {sb.result && sb.result.steps && (<table style={{ borderCollapse: "collapse", width: "100%", marginTop: 8 }}><tbody>{sb.result.steps.map((s) => (
                     <tr key={s.name} style={{ borderTop: "1px solid #F2F4F7" }}><td style={{ padding: "3px 8px", width: 24, color: s.status === "passed" ? "#067647" : s.status === "failed" ? "#B42318" : s.status === "errored" ? "#B54708" : "#98A2B3" }}>{s.status === "passed" ? "✔" : s.status === "failed" ? "✘" : s.status === "errored" ? "⚠" : "–"}</td>
                       <td style={{ padding: "3px 8px", fontSize: 11.5, fontWeight: 600, color: "#344054", whiteSpace: "nowrap" }}>{s.name}</td><td style={{ padding: "3px 8px", fontSize: 11, color: s.status === "not-run" ? "#98A2B3" : "#667085", whiteSpace: "pre-wrap" }}>{s.status === "not-run" ? "NOT RUN — " + s.detail : s.detail}</td><td style={{ padding: "3px 8px", fontSize: 10, color: "#98A2B3", whiteSpace: "nowrap" }}>{s.ms ? s.ms + " ms" : ""}</td></tr>))}</tbody></table>)}
+                  {sb.result && sb.result.analysis && (<div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>STATIC ANALYSIS</div>
+                    <div style={{ fontSize: 11.5, marginTop: 2, color: sb.result.analysis.status === "clean" ? "#067647" : "#B42318", fontWeight: 600 }}>{sb.result.analysis.status === "clean" ? "Clean — no findings" : sb.result.analysis.total + " finding(s)"} <span style={{ fontWeight: 400, color: "#667085" }}>· {(sb.result.analysis.tools || []).map((x) => (String(x.version).startsWith(x.name) ? x.version : x.name + " " + x.version) + (x.analyzer === false ? " (no -fanalyzer)" : x.analyzer ? " + analyzer" : "")).join(" · ")}</span></div>
+                    {(sb.result.analysis.findings || []).map((f, i) => <div key={i} style={{ fontSize: 11, color: "#B42318", marginTop: 2, fontFamily: "ui-monospace,monospace" }}>{f.file}:{f.line} {f.rule || f.tool}{f.cwe ? " " + f.cwe : ""} — {f.message}</div>)}
+                    <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 3 }}>MISRA: <b>NOT RUN</b> — {sb.result.analysis.misra && sb.result.analysis.misra.reason}</div>
+                  </div>)}
+                  {sb.result && sb.result.coverage && (() => { const C = sb.result.coverage; const bar = (label, x) => (<div style={{ minWidth: 150 }}><div style={{ fontSize: 9.5, color: "#667085", fontWeight: 700 }}>{label}</div>{x && x.total ? (<><div style={{ height: 6, background: "#EAECF0", borderRadius: 3, overflow: "hidden", marginTop: 2 }}><div style={{ width: x.pct + "%", height: "100%", background: x.pct === 100 ? "#12B76A" : "#F79009" }} /></div><div style={{ fontSize: 11, color: "#344054", marginTop: 1 }}>{x.pct}% <span style={{ color: "#98A2B3" }}>({x.covered}/{x.total})</span></div></>) : <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 4 }}>{label.startsWith("CONDITIONS") ? "unavailable" : "n/a"}</div>}</div>); return (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>CODE COVERAGE <span style={{ fontWeight: 400, color: "#98A2B3" }}>· generated production code only · {C.tool} · informational (no pass/fail threshold yet)</span></div>
+                      <div className="flex gap-4 flex-wrap" style={{ marginTop: 4 }}>{bar("LINES", C.lines)}{bar("BRANCHES", C.branches)}{bar("CONDITIONS (MC/DC-style)", C.conditions)}</div>
+                      {C.conditionNote && <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 3 }}>{C.conditionNote}</div>}
+                      {!C.complete && (<div style={{ marginTop: 6, fontSize: 11, color: "#B54708" }}><b>Not fully exercised by the generated tests:</b>{(C.uncovered || []).map((u, i) => <div key={i} style={{ fontFamily: "ui-monospace,monospace", marginTop: 1 }}>{u.file}:{u.line} ({u.kind}) {u.text}</div>)}{C.uncoveredTruncated && <div>…more not shown</div>}</div>)}
+                      {C.complete && <div style={{ fontSize: 11, color: "#067647", marginTop: 4 }}>Every line, branch and condition of the generated code is exercised by the generated tests.</div>}
+                    </div>); })()}
                   {sb.result && sb.result.compiler && <div style={{ marginTop: 6, fontSize: 10.5, color: "#98A2B3" }}>{sb.result.compiler} · runner {sb.result.runner && sb.result.runner.version} · {sb.result.runner && sb.result.runner.platform}</div>}
                   <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
                     {bFiles && bFiles.length > 0 && <button onClick={() => downloadBuildZip(sb)} style={{ fontSize: 11.5, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 7, padding: "3px 10px" }}>Download files (.zip)</button>}
-                    {canWrite && done && hasRes && <button disabled={imported} onClick={() => onImportResults(sb, bFiles)} style={{ fontSize: 11.5, fontWeight: 700, color: imported ? "#98A2B3" : "#067647", border: "1px solid " + (imported ? "#EAECF0" : "#ABEFC6"), borderRadius: 7, padding: "3px 10px" }}>{imported ? "Results imported" : "Import results into Test Cases"}</button>}
+                    {canWrite && done && hasRes && <button disabled={imported} onClick={() => onImportResults(sb, bFiles)} style={{ fontSize: 11.5, fontWeight: 700, color: imported ? "#98A2B3" : "#067647", border: "1px solid " + (imported ? "#EAECF0" : "#ABEFC6"), borderRadius: 7, padding: "3px 10px" }}>{imported ? "Results imported" : "Import results & evidence"}</button>}
                     {bFiles && <span style={{ fontSize: 10.5, color: "#98A2B3" }}>{bFiles.length} files stored</span>}
                   </div>
                   {sb.log && <pre style={{ marginTop: 8, maxHeight: 200, overflow: "auto", background: "#FCFCFD", border: "1px solid #EAECF0", borderRadius: 6, padding: 8, fontSize: 10.5, lineHeight: 1.4 }}>{sb.log}</pre>}
@@ -7716,6 +7730,7 @@ export default function App() {
   const [reqStatus, setReqStatus] = useState({}); // requirement lifecycle: id -> { status, reviewer, approver, date }
   const [tcExec, setTcExec] = useState({}); // test-case execution: tcId -> { status: pass|fail|blocked, date, evidence, build, tool, coverage, durationSec, source }
   const [tcBuild, setTcBuild] = useState(""); // build / commit the next results belong to (stamped on results + audit entries)
+  const [reqEvidence, setReqEvidence] = useState({}); // implementation evidence per requirement id, from imported builds: { reqId: { build, tests, coverage, analysis, modelHash, … } }
   const [behaviorModels, setBehaviorModels] = useState({}); // Phase 1 Behavior Models: id -> model (+ testIds, generatedTests, lastGen)
   const [tcRuns, setTcRuns] = useState([]); // imported result sets: [{ id, ts, file, source, build, matched, unmatched, pass, fail, blocked, covAvg }]
   const [auditLog, setAuditLog] = useState([]); // white-box change log: [{ ts, actor, action, target, detail, ai }]
@@ -8106,8 +8121,8 @@ export default function App() {
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
-    reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels,
-  }), [nodes, reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels]);
+    reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels, reqEvidence,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels, reqEvidence]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
@@ -8117,6 +8132,7 @@ export default function App() {
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.tcRuns)) setTcRuns(clone(d.tcRuns));
     if (d.behaviorModels && typeof d.behaviorModels === "object") setBehaviorModels(clone(d.behaviorModels));
+    if (d.reqEvidence && typeof d.reqEvidence === "object") setReqEvidence(clone(d.reqEvidence));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
     if (d.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(d.opsOv) });
@@ -8182,6 +8198,13 @@ export default function App() {
     if (!n) { notify("None of this build's tests match a known generated test case (" + miss + " unmatched)."); return; }
     const vals = Object.values(patch), cnt = (s) => vals.filter((v) => v.status === s).length;
     const run = { id: "RUN-" + Date.now(), buildId: build.id, ts: Date.now(), file: "results.xml (" + build.label + ")", source: props.tool || "build runner", build: build.label, matched: n, unmatched: miss, pass: cnt("pass"), fail: cnt("fail"), blocked: cnt("blocked"), covAvg: null };
+    // Implementation evidence: what this build proved about every requirement the function implements.
+    { const bmx = behaviorModels[build.bmId], r = build.result || {}, ids = (bmx && bmx.implements && bmx.implements.length) ? bmx.implements : [build.functionId];
+      const ev = { fn: build.functionId, bmId: build.bmId, build: build.label, buildId: build.id, ts: Date.now(), status: build.status, modelHash: build.modelHash, generator: build.generatorVersion,
+        tests: r.tests ? { run: r.tests.run, passed: r.tests.passed, failed: r.tests.failed } : null,
+        coverage: r.coverage ? { lines: r.coverage.lines, branches: r.coverage.branches, conditions: r.coverage.conditions, complete: r.coverage.complete, tool: r.coverage.tool } : null,
+        analysis: r.analysis ? { status: r.analysis.status, total: r.analysis.total, tools: (r.analysis.tools || []).map((x) => (String(x.version).startsWith(x.name) ? x.version : x.name + " " + x.version)), misra: r.analysis.misra ? r.analysis.misra.status : "not-run" } : null };
+      setReqEvidence((p) => { const n = { ...p }; ids.forEach((id) => { if (!n[id] || n[id].ts <= ev.ts) n[id] = { ...ev, reqId: id }; }); return n; }); }
     if (merged) setBehaviorModels((p) => (p[build.bmId] ? { ...p, [build.bmId]: merged } : p));
     setTcExec((p) => ({ ...p, ...patch })); setTcRuns((r) => [run, ...r].slice(0, 100));
     logAudit("Imported build results", build.label, n + " matched · " + run.pass + " pass / " + run.fail + " fail" + (added ? " · " + added + " test case(s) registered from the build" : "") + (conflicts ? " · " + conflicts + " ID conflict(s) skipped" : "") + (miss ? " · " + miss + " unmatched" : ""), false, build.label);
@@ -11691,6 +11714,24 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             const gotoMatch = (dir) => { const els = document.querySelectorAll("[data-rmatch]"); if (!els.length) return; const idx = (((readerIdx + dir) % els.length) + els.length) % els.length; setReaderIdx(idx); els.forEach((el, i) => (el.style.outline = i === idx ? "2px solid #F59E0B" : "none")); els[idx].scrollIntoView({ block: "center", behavior: "smooth" }); };
             /* Small badge showing the ASPICE process a requirement belongs to (SYS.2/SYS.3 · SWE.1/2/3 · HWE.1/2). */
             const procBadge = (code) => code ? <span style={{ fontSize: 8.5, fontWeight: 700, borderRadius: 3, padding: "0 4px", color: code.startsWith("SYS") ? "#0E7090" : code.startsWith("SWE") ? "#175CD3" : "#B54708", background: code.startsWith("SYS") ? "#E0F2FE" : code.startsWith("SWE") ? "#EFF4FF" : "#FEF6EE" }}>{code}</span> : null;
+            /* Implementation evidence from imported builds (tests · coverage · static analysis), with a STALE flag once the model has changed since. */
+            const evBlock = (reqId) => {
+              const e = reqEvidence[reqId]; if (!e) return null; const CGx = typeof window !== "undefined" ? window.__sdvCodegen : null; const m = behaviorModels[e.bmId];
+              const stale = !!(CGx && m && CGx.modelHash(m) !== e.modelHash);
+              const chip = (txt, color, bg, tip) => <span title={tip || ""} style={{ fontSize: 8.5, fontWeight: 700, color, background: bg, borderRadius: 3, padding: "0 5px", whiteSpace: "nowrap" }}>{txt}</span>;
+              const pc = (x, label) => (x && x.pct != null ? chip(label + " " + x.pct + "%", x.pct === 100 ? "#067647" : "#B54708", x.pct === 100 ? "#ECFDF3" : "#FEF6EE", x.covered + " of " + x.total) : null);
+              return (
+                <div className="flex items-center gap-1.5 flex-wrap" style={{ marginTop: 3, fontSize: 8.5 }}>
+                  <span style={{ fontWeight: 700, color: "#175CD3" }}>▪ Implementation evidence · {e.build} · {e.fn}</span>
+                  {e.tests && chip(e.tests.passed + "/" + e.tests.run + " tests", e.tests.failed ? "#B42318" : "#067647", e.tests.failed ? "#FEF3F2" : "#ECFDF3")}
+                  {e.coverage && pc(e.coverage.lines, "lines")}{e.coverage && pc(e.coverage.branches, "branches")}{e.coverage && (e.coverage.conditions ? pc(e.coverage.conditions, "MC/DC") : chip("MC/DC n/a", "#667085", "#F2F4F7", "condition coverage not supported by that compiler"))}
+                  {e.coverage && !e.coverage.complete && chip("coverage incomplete", "#B54708", "#FEF6EE")}
+                  {e.analysis && (e.analysis.status === "clean" ? chip("static analysis clean", "#067647", "#ECFDF3", (e.analysis.tools || []).join(" · ")) : chip(e.analysis.total + " analysis finding(s)", "#B42318", "#FEF3F2"))}
+                  {e.analysis && chip("MISRA not run", "#667085", "#F2F4F7", "no MISRA checker was configured — a clean analysis is not MISRA compliance")}
+                  {e.status === "failed" && chip("build FAILED", "#B42318", "#FEF3F2")}
+                  {stale && chip("STALE — model changed since " + e.build, "#B54708", "#FEF6EE", "re-baseline and rebuild to refresh this evidence")}
+                </div>);
+            };
             /* Collapsible ASPICE test cases under a requirement — collapsed by default. */
             const tcBlock = (reqId, group, isL3, title) => {
               const tests = aspiceTests(reqId, group, isL3, title); if (!tests.length) return null;
@@ -11869,7 +11910,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                                   </p>
                                 )}
                                 {FUNC_DIAGRAMS[proj.id] && (() => { const D = FUNC_DIAGRAMS[proj.id]; return <D canWrite={canWrite} onEcu={(ecuId) => { setSelectedEcu(ecuId); setTreeMode("ecu"); setView("ecureq"); }} setStmt={(text) => setNodes((prv) => prv[proj.id] ? { ...prv, [proj.id]: { ...prv[proj.id], props: { ...prv[proj.id].props, statement: text }, edited: true } } : prv)} />; })()}
-                                {tcBlock(proj.id, "SYS", true, disp.props.aspect)}
+                                {tcBlock(proj.id, "SYS", true, disp.props.aspect)}{evBlock(proj.id)}
                               </div>))}
                             {(() => {
                               const added = SYSREQ_STORE.data[n.id] || [];
@@ -11924,7 +11965,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                               </div>
                               <p style={{ fontSize: isL3 ? 12 : 11, color: "#667085", marginTop: 2, lineHeight: 1.5 }}>{hl(r.statement)}</p>
                               {isL3 && <div style={{ fontSize: 8.5, color: "#98A2B3", marginTop: 1 }}>traces: {r.from} · alloc: {r.alloc}</div>}
-                              {tcBlock(r.id, kind, isL3, r.title)}
+                              {tcBlock(r.id, kind, isL3, r.title)}{evBlock(r.id)}
                             </div>);
                           if (r.id === "L3-BODY-00187-AR-01") els.push(<SwArchDiagram key="swarch" canWrite={canWrite} />);
                         });
@@ -11955,7 +11996,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                                     <span style={{ fontSize: 8.5, color: "#98A2B3" }}>[{s.kind === "AR" ? "L3 SW arch" : "L3 SW"}]</span>
                                   </div>
                                   <p style={{ fontSize: 12, color: "#667085", marginTop: 2, lineHeight: 1.5 }}>{s.statement}</p>
-                                  {tcBlock(s.id, s.kind === "AR" ? "AR" : "SW", true, s.title)}
+                                  {tcBlock(s.id, s.kind === "AR" ? "AR" : "SW", true, s.title)}{evBlock(s.id)}
                                 </div>);
                             });
                             return els;
@@ -12248,7 +12289,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               (() => {
                 const tcCard = (readiness.disciplines || []).find((d) => d.key === "TC") || {}; const ran = Object.values(tcExec).filter((x) => x && x.status).length, failed = Object.values(tcExec).filter((x) => x && x.status === "fail").length, tot = tcCard.primary || 0;
                 const execPct = tot ? Math.round(100 * ran / tot) : 0;
-                return { proc: "SYS.4/5 · SWE.4–6 · HWE.3/4", label: "Verification & Validation", metric: "Curated tests " + curAvg + "% · " + execPct + "% executed" + (ran ? " · " + (tcCard.coverage || 0) + "% passed" : ""),
+                return { proc: "SYS.4/5 · SWE.4–6 · HWE.3/4", label: "Verification & Validation", metric: "Curated tests " + curAvg + "% · " + execPct + "% executed" + (ran ? " · " + (tcCard.coverage || 0) + "% passed" : "") + (() => { const evs = Object.values(reqEvidence).filter((e) => e.coverage).sort((a, b) => b.ts - a.ts); return evs.length ? " · code coverage " + evs[0].coverage.lines.pct + "% lines / " + evs[0].coverage.branches.pct + "% branches (" + evs[0].build + ")" : ""; })(),
                   status: ran === 0 ? "Gap" : (failed === 0 && execPct >= 80 ? "Ready" : "Partial"),
                   note: ran === 0 ? "Test cases are authored but no execution results are tracked — no verification evidence yet. Import JUnit XML / CSV results from the Test Cases view." : ran + " of " + tot.toLocaleString() + " test cases have recorded results" + (failed ? " (" + failed + " failing)" : "") + (tcRuns.length ? " · last import " + new Date(tcRuns[0].ts).toLocaleDateString() + (tcRuns[0].build ? " · build " + tcRuns[0].build : "") : "") + ".", view: "tctrace" };
               })(),

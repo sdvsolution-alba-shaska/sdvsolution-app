@@ -15,9 +15,13 @@ import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs"; import os from "node:os"; import path from "node:path"; import { pathToFileURL } from "node:url";
 import { generate, checkBuildable, modelHash, GENERATOR_VERSION } from "../src/lib/codegen.js";
+import { parseGccDiagnostics, parseCppcheckXml, parseGcovJson, summarizeCoverage } from "./analysis.mjs";
 
 export const RUNNER_VERSION = "0.1.0";
-const FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Wconversion", "-Werror", "-O0", "-g", "-Isrc", "-Istubs", "-Itest"];
+const FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Wconversion", "-Werror", "-O0", "-g", "-DSDV_UNIT_TEST", "-Isrc", "-Istubs", "-Itest"]; // unit-test build (test hooks enabled)
+// Static analysis looks at what SHIPS: production sources only, WITHOUT the test hooks, with a wider warning set than the build uses.
+const ANALYSIS_FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Wconversion", "-Wshadow", "-Wcast-qual", "-Wpointer-arith", "-Wstrict-prototypes", "-Wmissing-prototypes", "-Wswitch-default", "-Wswitch-enum", "-Wundef", "-Wformat=2", "-Wnull-dereference", "-Wduplicated-cond", "-Wduplicated-branches", "-Wlogical-op", "-Wredundant-decls", "-Wold-style-definition", "-pedantic", "-Isrc", "-Istubs"];
+const UNSUPPORTED = /unrecognized (command[- ]line )?option|unknown option|not supported|invalid option/i;
 const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -105,8 +109,51 @@ export async function processJob(job, cfg, api) {
       return total + " tests passed";
     });
     // Planned in item 6 — recorded explicitly so nobody mistakes "not run" for "clean".
-    steps.push({ name: "static-analysis", status: "not-run", ms: 0, detail: "planned (item 6) — no MISRA or defect analysis performed" });
-    steps.push({ name: "coverage", status: "not-run", ms: 0, detail: "planned (item 6) — statement/branch coverage not measured" });
+    const prodSrcs = srcs.filter((s) => /^src\//.test(s));
+    const clip = (s, n) => String(s || "").trim().slice(0, n);
+    await step("static-analysis", async () => {
+      const gccV = ((spawnSync(cfg.cc, ["--version"], { encoding: "utf8" }).stdout || "").split("\n")[0] || "").trim();
+      let analyzer = true, out = "", failedRun = false;
+      const compileAll = async (withAnalyzer) => { let all = "", bad = false; for (const s of prodSrcs) { const r = await run(cfg.cc, [...(withAnalyzer ? ["-fanalyzer"] : []), ...ANALYSIS_FLAGS, "-c", "-o", path.join(work, "analysis-" + path.basename(s, ".c") + ".o"), s], { cwd: work, timeoutMs: 180000, signal: ac.signal }); if (r.spawnError) throw new StepError("compiler '" + cfg.cc + "' could not be started: " + r.out.trim(), "errored"); all += r.out + "\n"; if (r.code !== 0) bad = true; } return { all, bad }; };
+      let r1 = await compileAll(true);
+      if (r1.bad && UNSUPPORTED.test(r1.all) && /fanalyzer/.test(r1.all)) { analyzer = false; r1 = await compileAll(false); } // compiler too old for -fanalyzer: say so, don't pretend
+      out = r1.all; failedRun = r1.bad;
+      const findings = parseGccDiagnostics(out, { root: work });
+      const tools = [{ name: "gcc", version: gccV, analyzer, warnings: ANALYSIS_FLAGS.filter((f) => /^-W/.test(f)).length }];
+      let cpp = null; const cppCmd = process.env.CPPCHECK || "cppcheck"; const cv = spawnSync(cppCmd, ["--version"], { encoding: "utf8" });
+      if (!cv.error && cv.status === 0) {
+        const cr = await run(cppCmd, ["--xml", "--enable=warning,performance,portability", "--inline-suppr", "--std=c99", "-Isrc", "-Istubs", "src"], { cwd: work, timeoutMs: 180000, signal: ac.signal });
+        const cf = parseCppcheckXml(cr.out).filter((f) => f.severity !== "info"); findings.push(...cf); cpp = (cv.stdout || "").trim(); tools.push({ name: "cppcheck", version: cpp });
+      }
+      result.analysis = { tools, total: findings.length, errors: findings.filter((f) => f.severity === "error").length, warnings: findings.filter((f) => f.severity === "warning").length, findings: findings.slice(0, 40), truncated: findings.length > 40,
+        files: prodSrcs.length, misra: { status: "not-run", reason: "no MISRA checker is configured on this runner (needs a licensed checker, e.g. via cppcheck's MISRA add-on or a commercial tool)" }, analyzerUsed: analyzer, status: findings.length ? "findings" : "clean" };
+      files.push({ name: "analysis.json", content: JSON.stringify({ tools, findings, misra: result.analysis.misra, flags: ANALYSIS_FLAGS, analyzerUsed: analyzer }, null, 2) + "\n" });
+      if (failedRun && !findings.length) throw new StepError("the analysis compile failed but produced no diagnostics: " + clip(out, 300), "errored");
+      if (findings.length) throw new StepError(findings.length + " finding(s), e.g. " + findings.slice(0, 2).map((f) => f.file + ":" + f.line + " " + (f.rule || f.tool) + " " + clip(f.message, 70)).join(" | "), "failed");
+      return gccV + (analyzer ? " + -fanalyzer" : " (no -fanalyzer: compiler too old)") + " · " + ANALYSIS_FLAGS.filter((f) => /^-W/.test(f)).length + " warning classes · " + prodSrcs.length + " files · 0 findings · MISRA not run";
+    });
+    await step("coverage", async () => {
+      const covExe = path.join(work, process.platform === "win32" ? "tcov.exe" : "tcov");
+      const base = ["-std=c99", "-O0", "-g", "--coverage", "-DSDV_UNIT_TEST", "-Isrc", "-Istubs", "-Itest"];
+      let cond = true, r = await run(cfg.cc, [...base, "-fcondition-coverage", "-o", "tcov", ...srcs], { cwd: work, timeoutMs: 180000, signal: ac.signal });
+      if (r.spawnError) throw new StepError("compiler '" + cfg.cc + "' could not be started: " + r.out.trim(), "errored");
+      if (r.code !== 0 && UNSUPPORTED.test(r.out)) { cond = false; r = await run(cfg.cc, [...base, "-o", "tcov", ...srcs], { cwd: work, timeoutMs: 180000, signal: ac.signal }); } // no condition coverage on this compiler: reported as unavailable
+      if (r.code !== 0) throw new StepError("coverage build failed:\n" + clip(r.out, 800), "errored");
+      const rr = await run(covExe, ["results-cov.xml"], { cwd: work, timeoutMs: 180000, env: { SDV_BUILD: job.label }, signal: ac.signal });
+      if (!/^\d+ tests, 0 failed/m.test(rr.out)) throw new StepError("the tests did not all pass under the coverage build: " + clip(rr.out, 200), "errored");
+      const gcda = fs.readdirSync(work).filter((n) => /^tcov-.*\.gcda$/.test(n) && prodSrcs.some((s) => path.basename(s, ".c") === n.replace(/^tcov-/, "").replace(/\.gcda$/, "")));
+      if (!gcda.length) throw new StepError("no coverage data was produced for the production sources", "errored");
+      const gcovCmd = process.env.GCOV || "gcov"; let g = await run(gcovCmd, ["--json-format", "--stdout", "-b", ...(cond ? ["--conditions"] : []), ...gcda], { cwd: work, timeoutMs: 120000, signal: ac.signal });
+      if (g.spawnError) throw new StepError("gcov could not be started (" + gcovCmd + "): " + g.out.trim() + " — install gcov alongside the compiler", "errored");
+      if (g.code !== 0 && cond && UNSUPPORTED.test(g.out)) { cond = false; g = await run(gcovCmd, ["--json-format", "--stdout", "-b", ...gcda], { cwd: work, timeoutMs: 120000, signal: ac.signal }); }
+      const parsed = parseGcovJson(g.out); if (!parsed.files.length) throw new StepError("gcov produced no usable coverage report: " + clip(g.out, 300), "errored");
+      const sources = {}; for (const f of parsed.files) { try { sources[f.file] = fs.readFileSync(path.join(work, f.file), "utf8"); } catch (e) { /* source not found: lines are listed without text */ } }
+      const cov = summarizeCoverage(parsed, sources); if (!cond) cov.conditions = null; cov.conditionNote = cond ? "" : "condition (MC/DC-style) coverage is not supported by this compiler version";
+      result.coverage = cov;
+      files.push({ name: "coverage.json", content: JSON.stringify({ ...cov, perFile: parsed.files }, null, 2) + "\n" });
+      const f = (x) => (x ? (x.pct == null ? "n/a" : x.pct + "% (" + x.covered + "/" + x.total + ")") : "unavailable");
+      return "lines " + f(cov.lines) + " · branches " + f(cov.branches) + " · conditions " + f(cov.conditions) + " · " + cov.tool + (cov.complete ? "" : " · INCOMPLETE: " + cov.uncovered.length + " uncovered item(s) listed");
+    });
     await step("package", async () => { const m = files.find((f) => f.name === "manifest.json"); result.manifestSha256 = m ? sha256(m.content) : null; return files.length + " files, manifest " + (result.manifestSha256 || "missing").slice(0, 12); });
   } catch (e) {
     status = e instanceof StepError && e.kind === "failed" ? "failed" : "errored";

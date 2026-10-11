@@ -233,8 +233,10 @@ export function simulateStep(bm, st, inputs) {
   const vars = {}; (bm.signals || []).forEach((s) => { vars[s.name] = s.baseType === "boolean" ? !!inputs[s.name] : Number(inputs[s.name]); });
   Object.values(C).forEach((c) => { vars[c.name] = c.baseType === "boolean" ? !!Number(c.value) : Number(c.value); });
   vars[TIME_SIGNAL] = st.tms;
-  const trs = (sm.transitions || []).filter((t) => t.from === st.state);
+  const known = (sm.states || []).some((s) => s.id === st.state);
+  const trs = known ? (sm.transitions || []).filter((t) => t.from === st.state) : [];
   let next = st.state, fired = null;
+  if (!known) { next = sm.init; fired = { recovered: true }; } // corrupted state value: recover to the initial state (restarts the timer)
   for (const t of trs) { if (evalAst(parseExpr(t.guard), vars)) { fired = t; next = t.to; break; } }
   const tms = fired ? 0 : Math.min(st.tms + P, INT32_MAX);
   const ns = (sm.states || []).find((s) => s.id === next); const outputs = {};
@@ -323,7 +325,7 @@ const runsFor = (time, P) => (time > 0 ? Math.ceil(time / P) + 1 : 1); // run n 
 function runScenario(bm, steps) {
   // steps: [{ inputs (full), runs }] ; returns trace of final state after each step + per-run states for the last step
   let st = { state: bm.stateMachine.init, tms: 0 }, last = null, perRun = [];
-  steps.forEach((s, si) => { perRun = []; for (let i = 0; i < s.runs; i++) { last = simulateStep(bm, st, s.inputs); st = { state: last.state, tms: last.tms }; perRun.push(last); } });
+  steps.forEach((s, si) => { perRun = []; if (s.force) { if (s.force.state != null) st = { ...st, state: s.force.state }; if (s.force.tms != null) st = { ...st, tms: s.force.tms }; } for (let i = 0; i < s.runs; i++) { last = simulateStep(bm, st, s.inputs); st = { state: last.state, tms: last.tms }; perRun.push(last); } });
   return { st, last, perRun };
 }
 
@@ -364,7 +366,7 @@ export function generateTests(bm) {
   }
   const expectOf = (steps) => { const sc = runScenario(bm, steps); return { state: sc.st.state, outputs: sc.last ? sc.last.outputs : null }; };
   const addTest = (key, req, title, exp, steps, checks) => tests.push({ key, req, title, exp, steps, checks });
-  const mkChecks = (steps) => { const sc = runScenario(bm, steps); return sc.last ? { state: sc.st.state, outputs: sc.last.outputs } : { state: sm.init, outputs: null }; };
+  const mkChecks = (steps) => { const sc = runScenario(bm, steps); return sc.last ? { state: sc.st.state, outputs: sc.last.outputs, tms: sc.st.tms } : { state: sm.init, outputs: null, tms: 0 }; };
 
   // 2) initial state + outputs
   { const steps = [{ inputs: full({}), runs: 1 }]; const c = mkChecks(steps);
@@ -429,6 +431,16 @@ export function generateTests(bm) {
       addTest("prio:" + E.key + "|" + Tj.key, bm.function, "Priority in " + s.id + ": → " + E.t.to + " wins over → " + Tj.t.to + " when both guards hold", "With both '" + E.t.guard + "' and '" + Tj.t.guard + "' true in " + s.id + ", the earlier transition (to " + E.t.to + ") is taken.", steps, mkChecks(steps));
     }
   });
+  // 6) defensive paths, reached through the test-only hooks
+  {
+    const st0 = { inputs: full({}), runs: 1 };
+    const s1 = [{ ...st0, force: { state: "__invalid__" } }];
+    addTest("def:state", bm.function, "Defensive: a corrupted state value recovers to " + sm.init, "If the state variable holds an invalid value, the next cycle returns the machine to " + sm.init + " (with its outputs) and restarts the state timer.", s1, mkChecks(s1));
+    let picked = null;
+    for (const s of sm.states || []) { const sc = runScenario(bm, [{ ...st0, force: { state: s.id, tms: INT32_MAX - 5 } }]); if (sc.last && !sc.last.fired) { picked = s.id; break; } }
+    if (picked) { const s2 = [{ ...st0, force: { state: picked, tms: INT32_MAX - 5 } }]; addTest("def:timer", bm.function, "Defensive: the state timer saturates instead of wrapping", "Close to the 32-bit limit, the state timer stops at its maximum (2147483647 ms) rather than overflowing.", s2, mkChecks(s2)); }
+    else gaps.push("State timer saturation: every state leaves immediately at the timer limit with default inputs — add a manual test.");
+  }
   return { tests, gaps, path };
 }
 
@@ -469,7 +481,9 @@ export async function generate(bm, opts = {}) {
   const E = (id) => swc + "_STATE_" + id.toUpperCase();
   add("src/" + swc + ".h", [hdr(bm, swc + ".h", "Public interface of " + swc + " (" + bm.title + ").", status), "#ifndef " + swc.toUpperCase() + "_H", "#define " + swc.toUpperCase() + "_H", '#include "Std_Types.h"',
     "#define " + swc.toUpperCase() + "_PERIOD_MS (" + P + "u)", "typedef enum {", ...statesList.map((id, i) => "    " + E(id) + " = " + i + (i < statesList.length - 1 ? "," : "")), "} " + swc + "_StateType;",
-    "void " + swc + "_Init(void);", "void " + swc + "_Run(void); /* runnable, period " + P + " ms */", swc + "_StateType " + swc + "_GetState(void);", "uint32_t " + swc + "_GetStateTimeMs(void);", "#endif", ""].join(NL));
+    "void " + swc + "_Init(void);", "void " + swc + "_Run(void); /* runnable, period " + P + " ms */", swc + "_StateType " + swc + "_GetState(void);", "uint32_t " + swc + "_GetStateTimeMs(void);",
+    "", "#ifdef SDV_UNIT_TEST", "/* Test-only hooks: compiled into the unit-test build ONLY, never into production code. They let the generated tests", " * reach defensive paths (corrupted state, timer saturation) that normal operation cannot. */",
+    "void " + swc + "_TestForceState(uint32_t raw);", "void " + swc + "_TestForceStateTimeMs(uint32_t ms);", "#endif", "", "#endif", ""].join(NL));
   // --- component source ---
   const L = [];
   L.push(hdr(bm, swc + ".c", "Behavior of " + swc + " (" + bm.title + ") as a table of states, guarded transitions and Moore outputs.", status));
@@ -477,6 +491,7 @@ export async function generate(bm, opts = {}) {
     "static " + swc + "_StateType " + swc + "_state;", "static uint32_t " + swc + "_stateTimeMs;", "",
     "void " + swc + "_Init(void)", "{", "    " + swc + "_state = " + E(sm.init) + ";", "    " + swc + "_stateTimeMs = 0u;", "}", "",
     swc + "_StateType " + swc + "_GetState(void) { return " + swc + "_state; }", "uint32_t " + swc + "_GetStateTimeMs(void) { return " + swc + "_stateTimeMs; }", "",
+    "#ifdef SDV_UNIT_TEST", "void " + swc + "_TestForceState(uint32_t raw) { " + swc + "_state = (" + swc + "_StateType)raw; }", "void " + swc + "_TestForceStateTimeMs(uint32_t ms) { " + swc + "_stateTimeMs = ms; }", "#endif", "",
     "/* @req " + (bm.implements || []).join(", ") + " */", "void " + swc + "_Run(void)", "{");
   L.push("    " + swc + "_StateType next = " + swc + "_state;", "    boolean fired = FALSE;", "    uint32_t state_time_ms = " + swc + "_stateTimeMs;", "    (void)state_time_ms; /* referenced only by guards that use state_time_ms */");
   sigs.forEach((s) => { const init = s.dir === "in" && s.invalid !== "" && s.invalid != null && !isNaN(Number(s.invalid)) ? Number(s.invalid) : Number(s.init); L.push("    " + T(s) + " " + s.name + " = (" + T(s) + ")" + (init < 0 ? "(" + init + ")" : init) + "; /* " + (s.dir === "in" ? "input, " + (s.invalid !== "" && s.invalid != null && !isNaN(Number(s.invalid)) ? "invalid-substitute" : "fallback = initial value") : "output") + (s.unit ? ", " + s.unit : "") + " */"); });
@@ -494,17 +509,19 @@ export async function generate(bm, opts = {}) {
     if (out.length) L.push("        else", "        {", "            /* no transition: remain in " + id + " */", "        }");
     L.push("        break;");
   });
-  L.push("    default:", "        next = " + E(sm.init) + "; /* defensive: unknown state */", "        break;", "    }", "",
+  L.push("    default:", "        next = " + E(sm.init) + "; /* defensive: unknown state, recover to the initial state */", "        fired = TRUE;", "        break;", "    }", "",
     "    /* state bookkeeping (a taken transition always restarts the state timer, even a self-transition) */", "    if (fired != FALSE)", "    {", "        " + swc + "_state = next;", "        " + swc + "_stateTimeMs = 0u;", "    }",
     "    else if (" + swc + "_stateTimeMs <= (" + swc.toUpperCase() + "_TIME_MAX - " + swc.toUpperCase() + "_PERIOD_MS))", "    {", "        " + swc + "_stateTimeMs += " + swc.toUpperCase() + "_PERIOD_MS;", "    }",
     "    else", "    {", "        " + swc + "_stateTimeMs = " + swc.toUpperCase() + "_TIME_MAX;", "    }", "");
-  L.push("    /* outputs of the (new) state — Moore */", "    switch (" + swc + "_state)", "    {");
-  sm.states.forEach((st) => {
-    L.push("    case " + E(st.id) + ":");
+  L.push("    /* outputs of the (new) state - Moore. The state is valid here (an unknown value was recovered above), so the last branch is the last state. */");
+  sm.states.forEach((st, si) => {
+    const last = si === sm.states.length - 1;
+    L.push(si === 0 ? (last ? "    {" : "    if (" + swc + "_state == " + E(st.id) + ")") + (last ? "" : "") : (last ? "    else" : "    else if (" + swc + "_state == " + E(st.id) + ")"));
+    if (!(si === 0 && last)) L.push("    {"); else L.push("        /* single state */");
     outs.forEach((o) => { const ast = parseExpr(st.outputs[o.name]); const val = o.baseType === "boolean" ? (ast.t === "bool" ? (ast.v ? "TRUE" : "FALSE") : "(" + cExpr(ast, env) + " ? TRUE : FALSE)") : "(" + T(o) + ")" + cExpr(ast, env); L.push("        " + o.name + " = " + val + ";"); });
-    L.push("        break;");
+    L.push("    }");
   });
-  L.push("    default:", "        break;", "    }", "");
+  L.push("");
   outs.forEach((o) => L.push("    (void)Rte_Write_" + portFor(o) + "_" + elementFor(o) + "(" + o.name + ");"));
   L.push("}", "");
   add("src/" + swc + ".c", L.join(NL));
@@ -524,8 +541,8 @@ export async function generate(bm, opts = {}) {
     ...outs.map((s) => T(s) + " RteStub_Get_" + s.name + "(void) { return stub_" + s.name + "; }\nStd_ReturnType Rte_Write_" + portFor(s) + "_" + elementFor(s) + "(" + T(s) + " data) { stub_" + s.name + " = data; return E_OK; }"), ""].join(NL));
   // test source
   const cv = (s, x) => "(" + T(s) + ")" + (x < 0 ? "(" + x + ")" : x);
-  const stepLines = (st) => { const o = []; ins.forEach((s) => o.push("    RteStub_Set_" + s.name + "(" + cv(s, st.inputs[s.name]) + ");")); o.push("    for (i = 0u; i < " + st.runs + "u; i++) { " + swc + "_Run(); }"); return o; };
-  const checkLines = (c) => { const o = ["    CHECK_STATE(" + E(c.state) + ");"]; if (c.outputs) outs.forEach((s) => o.push("    CHECK_EQ(\"" + s.name + "\", (int32_t)RteStub_Get_" + s.name + "(), " + c.outputs[s.name] + ");")); return o; };
+  const stepLines = (st) => { const o = []; if (st.force) { if (st.force.state != null) o.push("    " + swc + "_TestForceState(" + (st.force.state === "__invalid__" ? "255u" : "(uint32_t)" + E(st.force.state)) + ");"); if (st.force.tms != null) o.push("    " + swc + "_TestForceStateTimeMs(" + st.force.tms + "u);"); } ins.forEach((s) => o.push("    RteStub_Set_" + s.name + "(" + cv(s, st.inputs[s.name]) + ");")); o.push("    for (i = 0u; i < " + st.runs + "u; i++) { " + swc + "_Run(); }"); return o; };
+  const checkLines = (c) => { const o = ["    CHECK_STATE(" + E(c.state) + ");"]; if (c.tms != null) o.push("    CHECK_EQ(\"state_time_ms\", (int32_t)" + swc + "_GetStateTimeMs(), " + c.tms + ");"); if (c.outputs) outs.forEach((s) => o.push("    CHECK_EQ(\"" + s.name + "\", (int32_t)RteStub_Get_" + s.name + "(), " + c.outputs[s.name] + ");")); return o; };
   const TL = [hdr(bm, "test_" + swc + ".c", "Unit tests generated from the Behavior Model (state, transition, boundary and timeout coverage). Emits JUnit XML.", status),
     "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "' + swc + '.h"', '#include "Rte_' + swc + '_stub.h"', "",
     "static int g_failed;", "static char g_msg[160];",
@@ -548,7 +565,7 @@ export async function generate(bm, opts = {}) {
     "    (void)fprintf(out, \"</testsuite></testsuites>\\n\");", "    if (out != stdout) { (void)fclose(out); }", "    (void)printf(\"%u tests, %u failed\\n\", n, failed);", "    return (failed == 0u) ? 0 : 1;", "}", "");
   add("test/test_" + swc + ".c", TL.join(NL));
   // Makefile (host SIL build)
-  add("Makefile", ["# Host (SIL) build of the generated unit tests. Not the target build.", "CC ?= gcc", "CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Werror -O0 -g -Isrc -Istubs -Itest", "SRC = src/" + swc + ".c src/" + swc + "_cfg.c test/Rte_" + swc + "_stub.c test/test_" + swc + ".c",
+  add("Makefile", ["# Host (SIL) build of the generated unit tests. Not the target build.", "CC ?= gcc", "CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Werror -O0 -g -DSDV_UNIT_TEST -Isrc -Istubs -Itest", "SRC = src/" + swc + ".c src/" + swc + "_cfg.c test/Rte_" + swc + "_stub.c test/test_" + swc + ".c",
     "test_" + swc + ": $(SRC)", "\t$(CC) $(CFLAGS) -o $@ $(SRC)", "run: test_" + swc, "\t./test_" + swc + " results.xml", "clean:", "\trm -f test_" + swc + " results.xml", ""].join(NL));
 
   // manifest
