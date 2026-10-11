@@ -1560,6 +1560,8 @@ function computeReadiness(nodeMap, tcExec = {}, genTests = []) {
   });
   genTests.forEach((c) => { tcTotal++; tcStg[c.stage] = (tcStg[c.stage] || 0) + 1; const ex = tcExec[c.id]; if (ex && ex.status) { tcRun++; if (ex.status === "pass") tcPass++; else if (ex.status === "fail") tcFail++; } }); // generated unit tests count as defined test cases
   const tcReqs = Object.keys(CURATED_TC).length, tcSys4 = tcStg["SYS.4"] || 0, tcSys5 = tcStg["SYS.5"] || 0, tcSwHw = tcTotal - tcSys4 - tcSys5;
+  const genN = genTests.length, genStat = (s) => genTests.filter((c) => tcExec[c.id] && tcExec[c.id].status === s).length;
+  const genPass = genStat("pass"), genFail = genStat("fail"), genRun = genTests.filter((c) => tcExec[c.id] && tcExec[c.id].status).length; // generated unit tests: defined / run / passed / failed
   const tcPassPct = tcTotal ? Math.round(100 * tcPass / tcTotal) : 0;
   const tcStatus = tcRun === 0 ? "Not executed" : (tcFail > 0 ? "Failing" : (tcPass === tcTotal ? "Passed" : "In progress"));
   return {
@@ -1581,7 +1583,8 @@ function computeReadiness(nodeMap, tcExec = {}, genTests = []) {
           { id: "SWE.1", name: "Software Requirements Analysis", count: nn, detail: `${nn.toLocaleString()} SW requirements`, status: "Draft" },
           { id: "SWE.2", name: "Software Architectural Design", count: nn, detail: `${nn.toLocaleString()} components`, status: "Draft" },
           { id: "SWE.3", name: "Detailed Design & Units", count: nn, detail: `${nn.toLocaleString()} designs`, status: "Draft" },
-          { id: "SWE.4", name: "Software Unit Verification", count: nn * 3, detail: `${(nn * 3).toLocaleString()} cases (~3 per SW req: nominal · boundary · error) · 0 run`, status: "Not executed" },
+          { id: "SWE.4", name: "Software Unit Verification", count: nn * 3, detail: `${(nn * 3).toLocaleString()} estimated (~3 per SW req) · ${genN} generated & defined · ${genRun} run` + (genRun ? ` · ${genPass} passed` + (genFail ? ` · ${genFail} failed` : "") : ""),
+            status: genFail > 0 ? "Failing" : genRun === 0 ? "Not executed" : genPass === genN && genN > 0 ? "Passing (generated)" : "In progress" },
           { id: "SWE.5", name: "Software Integration Test", count: nn * 2, detail: `${(nn * 2).toLocaleString()} cases (~2 per SW req) · 0 run`, status: "Not executed" },
           { id: "SWE.6", name: "Software Qualification Test", count: nn, detail: `${nn.toLocaleString()} cases (~1 per SW req) · 0 run`, status: "Not executed" },
         ] } },
@@ -1595,8 +1598,8 @@ function computeReadiness(nodeMap, tcExec = {}, genTests = []) {
           { id: "HWE.4", name: "Verification against HW Requirements", count: hwMech, detail: `${hwMech.toLocaleString()} mechatronic devices`, status: "Not executed" },
         ] } },
       { key: "TC", label: "Test Cases", master: "ASPICE verification", primary: tcTotal, primaryLabel: "test cases defined", view: "tctrace",
-        secondary: [["SYS.4", tcSys4], ["SYS.5", tcSys5], ["SW/HW", tcSwHw]], coverage: tcPassPct, coverageLabel: "passed",
-        status: tcStatus, flag: `${tcReqs.toLocaleString()} requirement${tcReqs === 1 ? "" : "s"} traced → ${tcTotal.toLocaleString()} test case${tcTotal === 1 ? "" : "s"} · ${tcRun} run · ${tcPass} passed · ${tcFail} failed · open the traceability table` },
+        secondary: [["SYS.4", tcSys4], ["SYS.5", tcSys5], ["SW/HW", tcSwHw - genN], ["Generated", genN]], coverage: tcPassPct, coverageLabel: "passed",
+        status: tcStatus, flag: `${tcReqs.toLocaleString()} requirement${tcReqs === 1 ? "" : "s"} traced → ${tcTotal.toLocaleString()} test case${tcTotal === 1 ? "" : "s"} (${(tcTotal - genN).toLocaleString()} authored + ${genN} generated) · ${tcRun} run · ${tcPass} passed · ${tcFail} failed · open the traceability table` },
       { key: "SAFE", label: "Functional Safety", master: "generated", primary: safety, primaryLabel: "L1 with safety goal",
         secondary: [["FSR", safety], ["TSR", safety], ["ASIL C/D", asilCD]], coverage: fmtPct(safety, nn), coverageLabel: "of L1 have FSR + TSR",
         status: "HARA required", flag: `${(nn - safety).toLocaleString()} L1 not safety-relevant — no FSR/TSR` },
@@ -1607,7 +1610,7 @@ function computeReadiness(nodeMap, tcExec = {}, genTests = []) {
         secondary: [["High AP", dfH], ["Medium", dfM], ["Low", dfL]], coverage: 100, coverageLabel: "of L1 analysed",
         status: "Action open", flag: `${dfH.toLocaleString()} High action-priority items` },
     ],
-    safetyPct: fmtPct(safety, nn), cyberPct: fmtPct(cyber, nn), N: nn, l0: l0.length,
+    safetyPct: fmtPct(safety, nn), cyberPct: fmtPct(cyber, nn), N: nn, l0: l0.length, tc: { total: tcTotal, run: tcRun, pass: tcPass, fail: tcFail, gen: genN },
   };
 }
 
@@ -2225,10 +2228,10 @@ const ASPICE = {"SYS":{"note":"ASPICE SYS.1-5, fully represented across masters 
 
 const statusColor = (s) =>
   /fail/i.test(s) ? "#B42318"
-  : /not exec|open|hara|required|not started/i.test(s) ? "#B54708"
+  : /not exec|open|hara|required|not started|not built|stale|incomplete/i.test(s) ? "#B54708"
   : /draft/i.test(s) ? "#B54708" : /approv|base|done|pass/i.test(s) ? "#027A48" : "#475467";
 const covColor = (v) => (v >= 90 ? "#12B76A" : v >= 50 ? "#F79009" : "#F04438");
-const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", LOG: "#475467", GAP: "#DD2590" };
+const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", IMPL: "#0E9384", LOG: "#475467", GAP: "#DD2590" };
 
 function ProcRow({ p, accent }) {
   const st = statusColor(p.status);
@@ -6821,8 +6824,10 @@ const GAP_CAT = {
   duplicate: { label: "Duplicated", sev: "warn", color: "#DD2590", hint: "Two requirements state almost the same thing." },
   untraced: { label: "Untraced", sev: "warn", color: "#7A5AF8", hint: "Verified by Test but no test case is linked yet." },
   stale: { label: "Stale", sev: "info", color: "#0BA5EC", hint: "A baseline was taken but this requirement is still Draft — never reviewed into it." },
+  ears: { label: "EARS / wording", sev: "warn", color: "#0E9384", hint: "The declared EARS pattern doesn't match how the sentence is built, or there is more than one “shall” (not singular)." },
+  attrs: { label: "Missing attribute", sev: "warn", color: "#667085", hint: "Owner, rationale, verification method, standard or trigger/precondition is missing." },
 };
-const GAP_ORDER = ["incomplete", "nontestable", "conflict", "duplicate", "untraced", "stale"];
+const GAP_ORDER = ["incomplete", "nontestable", "ears", "attrs", "conflict", "duplicate", "untraced", "stale"];
 const GAP_STOP = new Set(["shall", "must", "should", "will", "the", "and", "for", "with", "that", "this", "from", "when", "while", "system", "vehicle", "user", "then", "into", "onto", "have", "been", "than", "each", "only", "not", "request", "requests"]);
 const gapNorm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const gapSigTokens = (s) => { const out = new Set(); gapNorm(s).split(" ").forEach((t) => { if (t.length >= 4 && !GAP_STOP.has(t)) out.add(t); }); return out; };
@@ -6835,7 +6840,7 @@ function computeGapAnalysis(reqs, opts = {}) {
   const issues = [];
   const flagged = {}; // reqId -> Set(cat)
   const mark = (r, cat, msg, detail) => {
-    issues.push({ id: r.id, title: r.title || "(untitled)", statement: r.statement || "", cat, sev: GAP_CAT[cat].sev, msg, detail: detail || "" });
+    issues.push({ id: r.id, title: r.title || "(untitled)", statement: r.statement || "", cat, sev: GAP_CAT[cat].sev, msg, detail: detail || "", source: r.curated ? "curated" : "authored", subdomain: r.subdomain || "" });
     (flagged[r.id] = flagged[r.id] || new Set()).add(cat);
   };
   // Per-requirement checks
@@ -6853,6 +6858,8 @@ function computeGapAnalysis(reqs, opts = {}) {
     // Untraced: verified by Test but no linked test case (curated map or an explicit r.tc link).
     const traced = tracedIds.has(r.id) || !!(r.tc || r.testCase || (Array.isArray(r.tests) && r.tests.length));
     if ((r.method || "Test") === "Test" && !traced) mark(r, "untraced", "No test case links to this requirement", "");
+    // Curated sets: EARS pattern vs wording, singular, and missing attributes (module registered in main.jsx; skipped if absent).
+    if (r.curated && typeof window !== "undefined" && window.__sdvReqChecks) window.__sdvReqChecks.curatedFindings(r).forEach((f) => mark(r, f.cat, f.msg, ""));
     // Stale: a baseline exists but this requirement is still Draft (never reviewed into it).
     const sv = String(status[r.id] || "").toLowerCase();
     if (hasBaseline && (!sv || sv === "draft" || sv === "proposed")) mark(r, "stale", "Draft while a baseline exists — review or baseline it", "");
@@ -6881,13 +6888,14 @@ function computeGapAnalysis(reqs, opts = {}) {
   // Stable display order: severity then category then id
   const sevRank = { error: 0, warn: 1, info: 2 };
   issues.sort((x, y) => (sevRank[x.sev] - sevRank[y.sev]) || (GAP_ORDER.indexOf(x.cat) - GAP_ORDER.indexOf(y.cat)) || String(x.id).localeCompare(String(y.id)));
-  return { issues, counts, total, clean, flaggedN, errorN, score };
+  const bySource = { authored: list.filter((r) => !r.curated).length, curated: list.filter((r) => r.curated).length };
+  return { issues, counts, total, clean, flaggedN, errorN, score, bySource };
 }
 function gapSummaryText(rep) {
-  if (!rep.total) return "No structured requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on me), then ask again and I'll run the gap analysis.";
-  if (!rep.issues.length) return `Gap analysis: all ${rep.total} authored requirement${rep.total === 1 ? "" : "s"} are clean — no missing content, non-testable, duplicate, conflicting, stale or untraced items found. Opened the Gap Analysis view.`;
+  if (!rep.total) return "No requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on me), then ask again and I'll run the gap analysis.";
+  if (!rep.issues.length) return `Gap analysis: all ${rep.total} requirement${rep.total === 1 ? "" : "s"} (${rep.bySource.authored} authored + ${rep.bySource.curated} curated) are clean — no missing content, non-testable, duplicate, conflicting, stale or untraced items found. Opened the Gap Analysis view.`;
   const parts = GAP_ORDER.filter((c) => rep.counts[c]).map((c) => `${rep.counts[c]} ${GAP_CAT[c].label.toLowerCase()}`);
-  return `Gap analysis across ${rep.total} authored requirement${rep.total === 1 ? "" : "s"}: found ${rep.issues.length} issue${rep.issues.length === 1 ? "" : "s"} (${rep.errorN} to fix) on ${rep.flaggedN} requirement${rep.flaggedN === 1 ? "" : "s"} — ${parts.join(", ")}. ${rep.score}% are gap-free. Opened the Gap Analysis view so you can work through them.`;
+  return `Gap analysis across ${rep.total} requirement${rep.total === 1 ? "" : "s"} (${rep.bySource.authored} authored + ${rep.bySource.curated} curated): found ${rep.issues.length} issue${rep.issues.length === 1 ? "" : "s"} (${rep.errorN} to fix) on ${rep.flaggedN} requirement${rep.flaggedN === 1 ? "" : "s"} — ${parts.join(", ")}. ${rep.score}% are gap-free. Opened the Gap Analysis view so you can work through them.`;
 }
 /* Operational-requirement reader — a tailored layout (distinct from the functional EARS document)
    for ENGINEERING & OPERATIONS subdomains: process/standards-based requirements with interface/tooling,
@@ -6936,7 +6944,7 @@ function opsTitle(r) {
   if (s.length > 50) s = s.slice(0, 48).trim() + "…";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, onDelete, onReset, onAdd, deletedCount, onRestore }) {
+function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, onDelete, onReset, onAdd, deletedCount, onRestore, reviewOf, onReview }) {
   const [q, setQ] = useState("");
   const cats = Array.from(new Set(reqs.map((r) => r.cat).filter(Boolean)));
   const fn = !!(reqs[0] && reqs[0].func); // functional (VEHICLE PLATFORM) vs operational layout
@@ -6968,11 +6976,17 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, 
                 {chip(r.cat, c)}
                 {r._edited && chip("EDITED", "#B54708")}
                 {r._added && chip("NEW", "#7F56D9")}
+                {reviewOf && (() => { const rec = reviewOf(r.id) || {}; const st = STATUS_ORDER.includes(rec.status) ? rec.status : "Draft"; const m = STATUS_META[st]; return <span title={"Review: " + st + (rec.reviewer ? " · reviewer " + rec.reviewer : "") + (rec.approver ? " · approver " + rec.approver : "") + (rec.date ? " · " + rec.date : "")} style={{ fontSize: 9, fontWeight: 800, color: m.c, background: m.bg, border: "1px solid " + m.c + "44", borderRadius: 4, padding: "0 6px" }}>{st.toUpperCase()}</span>; })()}
                 {r.phase && chip(r.phase, "#475467")}
                 {r.level && <span style={{ fontSize: 9, fontWeight: 700, color: /Low/.test(r.level) ? "#B54708" : "#0E7090", background: /Low/.test(r.level) ? "#FEF6EE" : "#E0F2FE", borderRadius: 4, padding: "1px 7px" }}>{r.level}</span>}
                 {r.ears && <span style={{ fontSize: 9, fontWeight: 700, color: "#475467", background: "#F2F4F7", borderRadius: 4, padding: "1px 7px" }}>{r.ears}</span>}
                 {r.safety && /Security|ASIL|Privacy|Regulat|Safety/.test(r.safety) && <span style={{ fontSize: 9, fontWeight: 700, color: "#B42318", background: "#FEF3F2", borderRadius: 4, padding: "1px 7px" }}>{r.safety}</span>}
                 {canWrite && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 10 }}>
+                  {reviewOf && onReview && (() => { const rec = reviewOf(r.id) || {}; const st = STATUS_ORDER.includes(rec.status) ? rec.status : "Draft"; return (<>
+                    {st === "Draft" && <button onClick={(e) => { e.stopPropagation(); onReview(r, "submit"); }} title="Name a reviewer and move it to In Review" style={{ fontSize: 10.5, fontWeight: 700, color: "#B54708" }}>Submit for review</button>}
+                    {st === "In Review" && <button onClick={(e) => { e.stopPropagation(); onReview(r, "approve"); }} title="Record the approver and approve it" style={{ fontSize: 10.5, fontWeight: 700, color: "#067647" }}>Approve…</button>}
+                    {st !== "Draft" && <button onClick={(e) => { e.stopPropagation(); onReview(r, "reopen"); }} title={st === "In Review" ? "Back to Draft" : "Withdraw the approval and send it back to In Review"} style={{ fontSize: 10.5, fontWeight: 600, color: "#667085" }}>Reopen</button>}
+                  </>); })()}
                   <button onClick={(e) => { e.stopPropagation(); onPick && onPick(r.id); onEdit(r.id, r); }} style={{ fontSize: 10.5, fontWeight: 700, color: "#175CD3" }}>Edit</button>
                   {r._edited && <button onClick={(e) => { e.stopPropagation(); onReset(r); }} title="Discard your edits and restore the curated default" style={{ fontSize: 10.5, fontWeight: 600, color: "#667085" }}>Reset</button>}
                   <button onClick={(e) => { e.stopPropagation(); onDelete(r); }} style={{ fontSize: 10.5, fontWeight: 600, color: "#B42318" }}>Delete</button>
@@ -6987,6 +7001,7 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, 
               </div>
               {r.ac && <div style={{ fontSize: 11, color: "#344054", marginTop: 8 }}><b style={{ color: "#667085", fontWeight: 700 }}>Acceptance / Verification: </b>{r.ac}</div>}
               {r.rationale && <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 3, fontStyle: "italic" }}>Rationale: {r.rationale}</div>}
+              {reviewOf && (() => { const rec = reviewOf(r.id) || {}; if (!rec.status || rec.status === "Draft") return null; return <div style={{ fontSize: 10, color: "#667085", marginTop: 3 }}>Review: <b>{rec.status}</b>{rec.reviewer ? " · reviewer " + rec.reviewer : ""}{rec.approver ? " · approver " + rec.approver : ""}{rec.date ? " · " + rec.date : ""}{rec.selfApproved ? <span style={{ color: "#B54708" }}> · ⚠ self-approved (reviewer = approver)</span> : null}{rec.revokedAt ? <span style={{ color: "#B54708" }}> · approval withdrawn {rec.revokedAt} (edited after approval)</span> : null}</div>; })()}
               </>)}
             </div>
           ); })}
@@ -7277,16 +7292,18 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
   );
 }
 /* Gap Analysis panel — categorized, filterable list of the gaps computeGapAnalysis found. */
-function GapAnalysisPanel({ rep }) {
-  const [cat, setCat] = useState("all");
-  const shown = rep.issues.filter((it) => cat === "all" || it.cat === cat);
+function GapAnalysisPanel({ rep, onOpen }) {
+  const [cat, setCat] = useState("all"); const [src, setSrc] = useState("all"); const [sub, setSub] = useState("all");
+  const subs = Array.from(new Set(rep.issues.filter((it) => it.source === "curated").map((it) => it.subdomain))).sort();
+  const shown = rep.issues.filter((it) => (cat === "all" || it.cat === cat) && (src === "all" || it.source === src) && (sub === "all" || it.subdomain === sub));
   const tile = (key, label, n, color) => (
     <button key={key} onClick={() => setCat(cat === key ? "all" : key)}
-      style={{ textAlign: "left", border: "1px solid " + (cat === key ? color : "#EAECF0"), background: cat === key ? "#FCFCFD" : "#fff", borderRadius: 10, padding: "10px 12px", cursor: "pointer", minWidth: 132, flex: "1 1 132px", boxShadow: cat === key ? "0 0 0 1px " + color : "none" }}>
+      style={{ textAlign: "left", border: "1px solid " + (cat === key ? color : "#EAECF0"), background: cat === key ? "#FCFCFD" : "#fff", borderRadius: 10, padding: "10px 12px", cursor: "pointer", minWidth: 118, flex: "1 1 118px", boxShadow: cat === key ? "0 0 0 1px " + color : "none" }}>
       <div style={{ fontSize: 22, fontWeight: 700, color: n ? color : "#D0D5DD", lineHeight: 1 }}>{n}</div>
       <div style={{ fontSize: 10.5, fontWeight: 600, color: "#475467", marginTop: 3 }}>{label}</div>
     </button>
   );
+  const srcBtn = (key, label, n) => (<button key={key} onClick={() => { setSrc(key); setSub("all"); }} style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 11px", borderRadius: 14, border: "1px solid " + (src === key ? "#175CD3" : "#D0D5DD"), color: src === key ? "#175CD3" : "#475467", background: src === key ? "#EFF4FF" : "#fff" }}>{label} <span style={{ color: "#98A2B3" }}>{n}</span></button>);
   return (
     <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
       <div className="mx-auto px-8 py-6" style={{ maxWidth: 1100 }}>
@@ -7294,12 +7311,19 @@ function GapAnalysisPanel({ rep }) {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", marginTop: 2 }}>Gap analysis</h1>
         <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>
           {rep.total === 0
-            ? "No structured requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on the Assistant), then come back."
-            : <>Scanned <b>{rep.total}</b> authored requirement{rep.total === 1 ? "" : "s"} for the classic gaps. Found <b>{rep.issues.length}</b> issue{rep.issues.length === 1 ? "" : "s"} on <b>{rep.flaggedN}</b> requirement{rep.flaggedN === 1 ? "" : "s"} — <b>{rep.errorN}</b> to fix. <b style={{ color: covColor(rep.score) }}>{rep.score}%</b> are gap-free. These are candidates — an engineer confirms each.</>}
+            ? "No requirements to analyse yet. Author some with “+ Add requirement” (or drop a spec on the Assistant), then come back."
+            : <>Scanned <b>{rep.total}</b> requirement{rep.total === 1 ? "" : "s"} (<b>{rep.bySource.authored}</b> authored + <b>{rep.bySource.curated}</b> curated). Found <b>{rep.issues.length}</b> issue{rep.issues.length === 1 ? "" : "s"} on <b>{rep.flaggedN}</b> requirement{rep.flaggedN === 1 ? "" : "s"} — <b>{rep.errorN}</b> to fix. <b style={{ color: covColor(rep.score) }}>{rep.score}%</b> are gap-free. These are candidates — an engineer confirms each. <span style={{ color: "#98A2B3" }}>Curated requirements were drafted from the feature set and have not been engineer-reviewed; fix a finding by editing the requirement (the analysis updates live).</span></>}
         </p>
         {rep.total > 0 && (
           <div className="flex gap-2 flex-wrap" style={{ marginTop: 14 }}>
             {GAP_ORDER.map((c) => tile(c, GAP_CAT[c].label, rep.counts[c], GAP_CAT[c].color))}
+          </div>
+        )}
+        {rep.total > 0 && (
+          <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 12 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4 }}>SOURCE</span>
+            {srcBtn("all", "All", rep.issues.length)}{srcBtn("authored", "Authored", rep.issues.filter((i) => i.source === "authored").length)}{srcBtn("curated", "Curated", rep.issues.filter((i) => i.source === "curated").length)}
+            {subs.length > 0 && src !== "authored" && (<select value={sub} onChange={(e) => setSub(e.target.value)} style={{ fontSize: 11.5, padding: "3px 8px", border: "1px solid #D0D5DD", borderRadius: 8 }}><option value="all">All subdomains</option>{subs.map((s) => <option key={s} value={s}>{s}</option>)}</select>)}
           </div>
         )}
         {cat !== "all" && (
@@ -7309,25 +7333,27 @@ function GapAnalysisPanel({ rep }) {
         )}
         {rep.issues.length > 0 && (
           <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+            <div style={{ padding: "5px 10px", background: "#F9FAFB", fontSize: 10.5, color: "#98A2B3", borderBottom: "1px solid #EAECF0" }}>{shown.length} finding{shown.length === 1 ? "" : "s"} shown</div>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
-              <thead><tr>{["", "Category", "Requirement", "Finding"].map((h, i) => <th key={i} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+              <thead><tr>{["", "Category", "Requirement", "Finding", ""].map((h, i) => <th key={i} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
               <tbody>
                 {shown.map((it, i) => { const cc = GAP_CAT[it.cat]; return (
                   <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
                     <td style={{ padding: "6px 10px" }}><span style={{ width: 7, height: 7, borderRadius: 4, background: cc.color, display: "inline-block" }} title={cc.sev} /></td>
                     <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}><span style={{ fontSize: 9.5, fontWeight: 800, color: cc.color, background: cc.color + "18", borderRadius: 4, padding: "1px 7px" }}>{cc.label}</span></td>
-                    <td style={{ padding: "6px 10px", minWidth: 220 }}><div style={{ fontWeight: 600, color: "#101828" }}>{it.title}</div><div style={{ fontFamily: "ui-monospace,monospace", fontSize: 10, color: "#98A2B3" }}>{it.id}</div></td>
+                    <td style={{ padding: "6px 10px", minWidth: 220 }}><div style={{ fontWeight: 600, color: "#101828" }}>{it.title}</div><div style={{ fontSize: 10, color: "#98A2B3" }}><span style={{ fontFamily: "ui-monospace,monospace" }}>{it.id}</span>{it.source === "curated" ? " · " + it.subdomain : ""}</div></td>
                     <td style={{ padding: "6px 10px", color: "#667085" }}>{it.msg}{it.detail ? <span style={{ color: "#98A2B3" }}> — {it.detail}</span> : null}</td>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>{it.source === "curated" && onOpen && <button onClick={() => onOpen(it)} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3" }}>Open ›</button>}</td>
                   </tr>
                 ); })}
-                {shown.length === 0 && <tr><td colSpan={4} style={{ padding: "10px", color: "#98A2B3" }}>No {cat === "all" ? "" : GAP_CAT[cat].label.toLowerCase() + " "}gaps.</td></tr>}
+                {shown.length === 0 && <tr><td colSpan={5} style={{ padding: "10px", color: "#98A2B3" }}>No {cat === "all" ? "" : GAP_CAT[cat].label.toLowerCase() + " "}gaps{src !== "all" ? " in " + src + " requirements" : ""}.</td></tr>}
               </tbody>
             </table>
           </div>
         )}
         {rep.total > 0 && rep.issues.length === 0 && (
           <div style={{ marginTop: 16, border: "1px solid #A6F4C5", background: "#ECFDF3", borderRadius: 8, padding: "14px 16px", color: "#067647", fontSize: 13, fontWeight: 600 }}>
-            ✓ No gaps found — every authored requirement is complete, testable, unique, consistent, current and traced.
+            ✓ No gaps found — every requirement is complete, testable, singular, correctly worded, current and traced.
           </div>
         )}
       </div>
@@ -7807,6 +7833,37 @@ export default function App() {
   const [selOps, setSelOps] = useState(null); // selected operational requirement { l0, id } for the tailored reader
   const [opsOv, setOpsOv] = useState(OPS_EMPTY_OV); // owner edits/additions/deletions layered over OPS_REQS (persisted with the workspace)
   const [opsEditId, setOpsEditId] = useState(null); // operational requirement currently open in the inline editor
+  /* Review lifecycle for curated requirements (rules: src/lib/reviewLifecycle.js). Status lives in reqStatus like every other reviewable item. */
+  const RL = typeof window !== "undefined" ? window.__sdvReview : null;
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const meName = () => (typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "";
+  const applyReviewQuiet = (id, to, who) => {
+    if (!RL) return { ok: false, reason: "The review-rules module isn't loaded in this runtime." };
+    const from = statusOf(reqStatus, id), res = RL.transition(reqStatus[id], to, todayStr(), who || {});
+    if (!res.ok) return res;
+    setReqStatus((p) => ({ ...p, [id]: res.rec }));
+    logAudit("Review status", id, from + " → " + to + (res.rec.reviewer ? " · reviewer " + res.rec.reviewer : "") + (res.rec.approver ? " · approver " + res.rec.approver : "") + (res.selfApproved ? " · SELF-APPROVED (reviewer = approver)" : ""));
+    return res;
+  };
+  const applyReview = (id, to, who) => { const res = applyReviewQuiet(id, to, who); if (!res.ok) notify(res.reason); return res.ok; };
+  const reviewCurated = (r, action) => {
+    const cur = statusOf(reqStatus, r.id), rec = reqStatus[r.id] || {};
+    if (action === "submit") { const reviewer = rec.reviewer || window.prompt("Who will review this requirement? (name or email)", meName()); if (!reviewer || !reviewer.trim()) return; applyReview(r.id, "In Review", { reviewer }); }
+    else if (action === "approve") {
+      const approver = window.prompt("Approver (name or email):", rec.approver || meName()); if (!approver || !approver.trim()) return;
+      if (approver.trim().toLowerCase() === String(rec.reviewer || "").trim().toLowerCase() && !window.confirm("The approver is the same person as the reviewer. A joint review (SUP.4) needs two people — this will be recorded as self-approved.\n\nApprove anyway?")) return;
+      applyReview(r.id, "Approved", { approver });
+    } else if (action === "reopen") applyReview(r.id, cur === "In Review" ? "Draft" : "In Review", {});
+  };
+  const advanceCurated = (id, dir) => {
+    const cur = statusOf(reqStatus, id), to = STATUS_ORDER[STATUS_ORDER.indexOf(cur) + dir]; if (!to) return;
+    if (dir > 0 && to === "In Review") reviewCurated({ id }, "submit"); else if (dir > 0 && to === "Approved") reviewCurated({ id }, "approve"); else applyReview(id, to, {});
+  };
+  const withdrawOnEdit = (id, why) => {
+    if (!RL) return; const v = RL.revokeOnEdit(reqStatus[id], todayStr()); if (!v.changed) return;
+    setReqStatus((p) => ({ ...p, [id]: v.rec })); logAudit("Review: approval withdrawn", id, why + " — " + v.from + " → In Review"); notify(id + " was " + v.from.toLowerCase() + " and has just been edited — it's back In Review.");
+  };
+  const openCuratedReq = (it) => { const l0 = Object.values(nodes).find((n) => n && /L0/.test(n.subtype || "") && n.label === it.subdomain); if (l0) { setSelOps({ l0: it.subdomain, id: it.id }); refocus(l0.id); setView("reader"); } };
   const opsSave = (l0, r, d) => {
     const fields = (r.func ? OPS_FIELDS_FN : OPS_FIELDS_OP).map(([k]) => k);
     const clean = Object.fromEntries(fields.map((k) => [k, (d[k] || "").trim()]));
@@ -7823,6 +7880,7 @@ export default function App() {
       return o;
     });
     if (changed.length || r._new) logAudit(r._new ? "Added requirement" : "Edited requirement", r.id, changed.join(", "));
+    if (changed.length && !r._new) withdrawOnEdit(r.id, "content changed after review");
     setOpsEditId(null);
   };
   const opsCancel = (l0, r) => {
@@ -7844,6 +7902,7 @@ export default function App() {
   const opsReset = (r) => {
     setOpsOv((p) => { const ed = { ...p.edits }; delete ed[r.id]; return { ...p, edits: ed }; });
     logAudit("Reset requirement", r.id, "restored curated default");
+    if (r._edited) withdrawOnEdit(r.id, "reset to the curated default after review");
   };
   const opsAdd = (l0) => {
     const base = OPS_REQS[l0] || []; if (!base.length) return;
@@ -8216,13 +8275,15 @@ export default function App() {
     reqStatus: clone(reqStatus),
     regEdits: clone(regEdits),
     behaviorModels: clone(behaviorModels), // builds start from the models frozen here
-  }), [nodes, reqStatus, regEdits, behaviorModels]);
+    opsOv: clone(opsOv), // the curated requirement text as it was when reviewed
+  }), [nodes, reqStatus, regEdits, behaviorModels, opsOv]);
   const applySnapshot = useCallback((snap) => {
     if (!snap) return;
     if (snap.km) KM_STORE.data = clone(snap.km);
     setReqStatus(clone(snap.reqStatus) || {});
     setRegEdits(clone(snap.regEdits) || {});
     if (snap.behaviorModels) setBehaviorModels(clone(snap.behaviorModels));
+    if (snap.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(snap.opsOv) });
     setNodes((prev) => {
       const nx = { ...prev }; const want = snap.nodeEdits || {};
       // revert edits made since the snapshot back to their generated baseline
@@ -8248,6 +8309,8 @@ export default function App() {
     new Set([...Object.keys(ae), ...Object.keys(be)]).forEach((id) => { const a = ae[id]?.statement, b = be[id]?.statement; if (a !== b) out.req.push(id); });
     const as = (base && base.reqStatus) || {}, bs = (cur && cur.reqStatus) || {};
     new Set([...Object.keys(as), ...Object.keys(bs)]).forEach((id) => { if (JSON.stringify(as[id]) !== JSON.stringify(bs[id])) out.status.push(id); });
+    const ao = (base && base.opsOv && base.opsOv.edits) || {}, bo = (cur && cur.opsOv && cur.opsOv.edits) || {};
+    new Set([...Object.keys(ao), ...Object.keys(bo)]).forEach((id) => { if (JSON.stringify(ao[id]) !== JSON.stringify(bo[id])) out.req.push(id); }); // curated requirement text edited since the baseline
     const ar = (base && base.regEdits) || {}, br = (cur && cur.regEdits) || {};
     new Set([...Object.keys(ar), ...Object.keys(br)]).forEach((id) => { if (JSON.stringify(ar[id]) !== JSON.stringify(br[id])) out.reg.push(id); });
     return out;
@@ -8315,22 +8378,38 @@ export default function App() {
     return added;
   }, [ecuTplV, sysReqV, swReqV]);
   const tracedIds = useMemo(() => new Set(Object.keys(CURATED_TC)), []);
-  const gapRep = useMemo(() => computeGapAnalysis(authoredReqs, { status: reqStatus, hasBaseline: baselines.length > 0, tracedIds }), [authoredReqs, reqStatus, baselines, tracedIds]);
+  /* Curated requirement sets (Vehicle Platform, Diagnostics, OTA, Security & Privacy, Engineering & Operations), with owner edits applied. */
+  const curatedReqs = useMemo(() => {
+    const RC = typeof window !== "undefined" ? window.__sdvReqChecks : null; if (!RC) return [];
+    const lists = {}; Object.keys(OPS_REQS).forEach((l) => { lists[l] = opsEffective(opsOv, l); }); return RC.curatedToGapReqs(lists);
+  }, [opsOv]);
+  const gapRep = useMemo(() => computeGapAnalysis(authoredReqs.concat(curatedReqs), { status: reqStatus, hasBaseline: baselines.length > 0, tracedIds }), [authoredReqs, curatedReqs, reqStatus, baselines, tracedIds]);
+  /* Review roll-up over EVERYTHING reviewable: graph requirements (L2/L3), curated requirements, and Behavior Models. */
+  const reviewAll = useMemo(() => {
+    const RLx = typeof window !== "undefined" ? window.__sdvReview : null, s = qualityRep.summary;
+    const mh = typeof window !== "undefined" && window.__sdvCodegen ? window.__sdvCodegen.modelHash : null;
+    const cur = curatedReqs.map((r) => statusOf(reqStatus, r.id));
+    const frozen = RLx && mh ? RLx.frozenModelHashes(baselines, mh) : new Set();
+    const mods = Object.values(behaviorModels).map((m) => (RLx ? RLx.modelReviewStatus(m, frozen, mh) : "Draft"));
+    const none = { total: 0, approved: 0, baselined: 0, approvedPct: 0 }, rc = RLx ? RLx.rollup(cur) : { ...none, total: cur.length }, rm = RLx ? RLx.rollup(mods) : { ...none, total: mods.length };
+    const total = s.reviewTotal + rc.total + rm.total, approved = s.reviewApproved + rc.approved + rm.approved, baselined = s.reviewBaselined + rc.baselined + rm.baselined;
+    return { total, approved, baselined, approvedPct: total ? Math.round(100 * approved / total) : 0, graph: { total: s.reviewTotal, approved: s.reviewApproved }, curated: rc, models: rm };
+  }, [qualityRep, curatedReqs, reqStatus, behaviorModels, baselines]);
   const extraCards = useMemo(() => {
-    const added = authoredReqs;
+    const added = authoredReqs.concat(curatedReqs), nAuth = authoredReqs.length, nCur = curatedReqs.length; // authored + curated
     let earsOk = 0, critOk = 0, vagueN = 0, passN = 0;
-    added.forEach((r) => { const q = reqQuality(r); if (q.shall) earsOk++; if (q.criterion) critOk++; if (q.vague.length) vagueN++; if (q.shall && q.criterion && !q.vague.length) passN++; });
+    added.forEach((r) => { const q = reqQuality(r); if (q.shall) earsOk++; if (q.criterion) critOk++; if (q.vague.length) vagueN++; if (q.shall && q.criterion && !q.vague.length && q.singular) passN++; }); // 29148: shall + verifiable + unambiguous + singular
     const tot = added.length;
     const conform = tot ? Math.round(100 * passN / tot) : 0;
     const rq = { key: "RQ", label: "Requirements Quality", master: "ISO/IEC/IEEE 29148", primary: tot, primaryLabel: "structured reqs", view: "consistency",
-      secondary: [["EARS", earsOk], ["w/ criterion", critOk], ["ambiguous", vagueN]], coverage: conform, coverageLabel: "29148 conformant",
-      status: tot === 0 ? "Not started" : (conform >= 90 ? "In review" : "Draft"),
-      flag: tot === 0 ? "No structured requirements authored yet — use “+ Add requirement”." : passN + " of " + tot + " pass EARS + verifiable + unambiguous" };
+      secondary: [["authored", nAuth], ["curated", nCur], ["w/ criterion", critOk], ["ambiguous", vagueN]], coverage: conform, coverageLabel: "29148 conformant",
+      status: tot === 0 ? "Not started" : ((nAuth > 0 || reviewAll.curated.approvedPct >= 90) && conform >= 90 ? "In review" : "Draft"), // curated requirements count as reviewed only once ≥90% of them are Approved
+      flag: tot === 0 ? "No structured requirements authored yet — use “+ Add requirement”." : passN + " of " + tot + " pass shall + verifiable + unambiguous + singular · " + nCur + " curated (not yet engineer-reviewed) + " + nAuth + " authored" };
     const s = qualityRep.summary, bl = baselines[0];
-    const proc = { key: "PROC", label: "Process & Approval", master: "SUP.4/8/10", primary: s.approvedPct, primaryLabel: "% approved+", view: "review",
-      secondary: [["Approved", s.reviewApproved], ["Baselined", s.reviewBaselined], ["Baselines", baselines.length]], coverage: s.approvedPct, coverageLabel: "reviewed & approved",
+    const proc = { key: "PROC", label: "Process & Approval", master: "SUP.4/8/10", primary: reviewAll.approvedPct, primaryLabel: "% approved+", view: "review",
+      secondary: [["Approved", reviewAll.approved], ["Baselined", reviewAll.baselined], ["Baselines", baselines.length]], coverage: reviewAll.approvedPct, coverageLabel: "reviewed & approved",
       status: s.errors === 0 ? "Gate PASS" : "Gate FAIL",
-      flag: "Consistency gate: " + (s.errors === 0 ? "PASS" : s.errors + " error" + (s.errors === 1 ? "" : "s")) + " · baseline: " + (bl ? bl.name : "none") };
+      flag: "Consistency gate: " + (s.errors === 0 ? "PASS" : s.errors + " error" + (s.errors === 1 ? "" : "s")) + " · baseline: " + (bl ? bl.name : "none") + " · approved: " + reviewAll.graph.approved + "/" + reviewAll.graph.total + " graph reqs, " + reviewAll.curated.approved + "/" + reviewAll.curated.total + " curated, " + reviewAll.models.approved + "/" + reviewAll.models.total + " models" };
     // Audit trail card — white-box change log (human vs AI).
     const aiN = auditLog.filter((e) => e.ai).length, humanN = auditLog.length - aiN;
     const audit = { key: "LOG", label: "Audit Trail", master: "white-box", primary: auditLog.length, primaryLabel: "changes logged", view: "audit",
@@ -8342,15 +8421,35 @@ export default function App() {
     const gapFlag = g.total === 0
       ? "No structured requirements authored yet — nothing to analyse."
       : g.issues.length === 0
-        ? "No gaps found — all " + g.total + " authored requirements are clean."
-        : g.issues.length + " issue" + (g.issues.length === 1 ? "" : "s") + " on " + g.flaggedN + " requirement" + (g.flaggedN === 1 ? "" : "s") + " · " + g.errorN + " to fix · open to review";
+        ? "No gaps found — all " + g.total + " requirements are clean."
+        : g.issues.length + " issue" + (g.issues.length === 1 ? "" : "s") + " on " + g.flaggedN + " requirement" + (g.flaggedN === 1 ? "" : "s") + " · " + g.errorN + " to fix · " + g.bySource.curated + " curated + " + g.bySource.authored + " authored · open to review";
     const gap = { key: "GAP", label: "Gap Analysis", master: "ISO 29148 · trace", primary: g.issues.length, primaryLabel: "gaps found", view: "gaps",
-      secondary: [["untraced", g.counts.untraced], ["non-testable", g.counts.nontestable], ["duplicate", g.counts.duplicate]],
+      secondary: [["untraced", g.counts.untraced], ["non-testable", g.counts.nontestable], ["EARS/wording", g.counts.ears], ["duplicate", g.counts.duplicate]],
       coverage: g.score, coverageLabel: "gap-free",
       status: g.total === 0 ? "Not started" : (g.issues.length === 0 ? "Clean" : (g.errorN > 0 ? "Action needed" : "Review")),
       flag: gapFlag };
     return [rq, gap, proc, audit];
-  }, [qualityRep, gapRep, baselines, ecuTplV, sysReqV, swReqV, auditLog]); // eslint-disable-line
+  }, [qualityRep, gapRep, baselines, ecuTplV, sysReqV, swReqV, auditLog, curatedReqs, authoredReqs, reviewAll]); // eslint-disable-line
+  /* Implementation (QM code) card — Behavior Models, generated tests and the latest imported build evidence. Placed after Test Cases. */
+  const dashDisciplines = useMemo(() => {
+    const CGx = typeof window !== "undefined" ? window.__sdvCodegen : null;
+    const models = Object.values(behaviorModels), total = models.length, approved = models.filter((m) => m.status === "approved").length;
+    const genT = models.reduce((a, m) => a + (m.generatedTests || []).length, 0);
+    const evs = Object.values(reqEvidence).sort((a, b) => b.ts - a.ts), latest = evs[0] || null;
+    const builds = new Set(evs.map((e) => e.buildId)).size;
+    const staleModels = new Set(); evs.forEach((e) => { const m = behaviorModels[e.bmId]; if (m && CGx && CGx.modelHash(m) !== e.modelHash) staleModels.add(e.bmId); });
+    const cov = latest && latest.coverage ? latest.coverage : null, an = latest && latest.analysis ? latest.analysis : null;
+    const buildOk = latest && latest.status === "passed" && (!an || an.status === "clean");
+    const status = total === 0 ? "Not started" : staleModels.size ? "Stale — rebuild needed" : latest ? (buildOk ? "Build passing" : "Build failing") : (approved === total ? "Approved, not built" : "Draft");
+    const flag = total === 0 ? "No Behavior Models yet — open Quality → Behavior Models to generate QM code and tests from a function."
+      : approved + " of " + total + " model" + (total === 1 ? "" : "s") + " approved · " + genT + " generated test" + (genT === 1 ? "" : "s")
+        + (latest ? " · latest " + latest.build + " " + latest.status + (cov ? " · lines " + cov.lines.pct + "% branches " + cov.branches.pct + "%" + (cov.conditions ? " MC/DC " + cov.conditions.pct + "%" : "") : "") + (an ? " · analysis " + (an.status === "clean" ? "clean" : an.total + " finding(s)") + ", MISRA not run" : "") : " · no build imported yet")
+        + (staleModels.size ? " · " + staleModels.size + " model(s) changed since their last build" : "");
+    const impl = { key: "IMPL", label: "Implementation (QM code)", master: "Behavior Models", primary: total, primaryLabel: "behavior models", view: "behavior",
+      secondary: [["Approved", approved + "/" + total], ["Builds", builds], ["Line cov.", cov && cov.lines.pct != null ? cov.lines.pct + "%" : "—"]],
+      coverage: total ? Math.round(100 * approved / total) : 0, coverageLabel: "models approved", status, flag };
+    const a = [...readiness.disciplines]; const i = a.findIndex((d) => d.key === "TC"); a.splice(i < 0 ? a.length : i + 1, 0, impl); return a;
+  }, [readiness, behaviorModels, reqEvidence]);
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
   /* Resolve an ECU-spec record for any selected id: a named module (NETWORK.ecus) or a smart-device node. */
@@ -10340,7 +10439,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
       {execOpen && (
         <div className="shrink-0" style={{ background: BRAND.ink, borderTop: "1px solid #1D2939" }}>
           <div className="flex overflow-x-auto">
-            {readiness.disciplines.map((d) => (
+            {dashDisciplines.map((d) => (
               <ExecCard key={d.key} d={d}
                 expanded={procOpen === d.key}
                 onToggle={toggleProc}
@@ -10368,7 +10467,9 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             <div className="flex-1 flex flex-col justify-center px-4" style={{ minWidth: 180 }}>
               <div style={{ fontSize: 10, color: "#98A2B3", lineHeight: 1.5 }}>
                 Computed live from {readiness.N.toLocaleString()} L1 requirements:
-                <span style={{ color: "#F97066" }}> no verification executed</span>,
+                {readiness.tc && readiness.tc.run > 0
+                  ? <span style={{ color: readiness.tc.fail ? "#F97066" : "#32D583" }}> {readiness.tc.pass} of {readiness.tc.run} executed test{readiness.tc.run === 1 ? "" : "s"} passed{readiness.tc.fail ? ", " + readiness.tc.fail + " failed" : ""} ({readiness.tc.total.toLocaleString()} defined)</span>
+                  : <span style={{ color: "#F97066" }}> no verification executed</span>},
                 <span style={{ color: "#FDB022" }}> safety coverage {readiness.safetyPct}%</span>,
                 cyber coverage {readiness.cyberPct}%. Downstream generated on demand.
               </div>
@@ -10914,7 +11015,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             </div>
           )}
 
-          {view === "gaps" && <GapAnalysisPanel rep={gapRep} />}
+          {view === "gaps" && <GapAnalysisPanel rep={gapRep} onOpen={openCuratedReq} />}
           {view === "behavior" && <BehaviorPanel models={behaviorModels} setModels={setBehaviorModels} sms={STATE_MACHINES} canWrite={canWrite} periodMs={MIRROR_TIMING.runnablePeriodMs} build={tcBuild.trim()}
             implFor={(smId) => { const pre = smId.replace(/-MODE$/, "-"); return Object.keys(REQ_STATEMENTS).filter((k) => k.startsWith(pre)); }}
             reqText={(id) => REQ_STATEMENTS[id] || ((getN(id) && getN(id).props && getN(id).props.statement) || "")}
@@ -11766,7 +11867,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             // Operational (ENGINEERING & OPERATIONS) subdomains use a tailored operational-requirement layout.
             if (rDoc && OPS_REQS[rDoc.label]) return <OpsReqDoc rDoc={rDoc} reqs={opsEffective(opsOv, rDoc.label)} sel={selOps && selOps.l0 === rDoc.label ? selOps.id : null} onPick={(id) => setSelOps({ l0: rDoc.label, id })}
               canWrite={canWrite} editId={opsEditId} onEdit={(id, r) => (id ? setOpsEditId(id) : opsCancel(rDoc.label, r))} onSave={(r, d) => opsSave(rDoc.label, r, d)} onDelete={(r) => opsDelete(rDoc.label, r)} onReset={opsReset}
-              onAdd={() => opsAdd(rDoc.label)} deletedCount={(OPS_REQS[rDoc.label] || []).filter((x) => opsOv.deleted[x.id]).length} onRestore={() => opsRestore(rDoc.label)} />;
+              onAdd={() => opsAdd(rDoc.label)} deletedCount={(OPS_REQS[rDoc.label] || []).filter((x) => opsOv.deleted[x.id]).length} onRestore={() => opsRestore(rDoc.label)} reviewOf={(id) => reqStatus[id]} onReview={reviewCurated} />;
             return (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
               <div className="sticky top-0 z-10 px-10 py-2 flex items-center gap-2" style={{ background: "rgba(255,255,255,0.97)", borderBottom: "1px solid #EAECF0" }}>
@@ -12178,7 +12279,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             const stamp = () => new Date().toISOString().slice(0, 10);
             const setStat = (id, st) => setReqStatus((p) => ({ ...p, [id]: { ...(p[id] || { status: "Draft" }), status: st, date: stamp() } }));
             const setWho = (id, k, v) => setReqStatus((p) => ({ ...p, [id]: { ...(p[id] || { status: "Draft" }), [k]: v, date: stamp() } }));
-            const step = (id, dir) => { const cur = statusOf(reqStatus, id); const i = STATUS_ORDER.indexOf(cur); const ni = Math.max(0, Math.min(STATUS_ORDER.length - 1, i + dir)); if (ni !== i) setStat(id, STATUS_ORDER[ni]); };
+            const step = (id, dir) => { const rw = rows.find((x) => x.id === id); if (rw && rw.kind === "Model") return; if (rw && rw.kind === "Curated") { advanceCurated(id, dir); return; } const cur = statusOf(reqStatus, id); const i = STATUS_ORDER.indexOf(cur); const ni = Math.max(0, Math.min(STATUS_ORDER.length - 1, i + dir)); if (ni !== i) setStat(id, STATUS_ORDER[ni]); };
             // Build the reviewable requirement list (L2 aspects + L3 SW/AR/HW) across every function.
             const rows = [];
             L0S.forEach((l0) => CHILDREN(l0.id).forEach((cid) => { const l1 = getN(cid); if (!l1 || !/L1/.test(l1.subtype || "")) return;
@@ -12187,21 +12288,28 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const SET = L3_SETS[l1.id];
               if (SET) [...SET.sw.map((r) => ({ ...r, k: "SW" })), ...(SET.arch || []).map((r) => ({ ...r, k: "AR" })), ...SET.hw.map((r) => ({ ...r, k: "HW" }))].forEach((r) => rows.push({ id: r.id, title: titleCase(r.title), fn: fnLabel, fnId: l1.id, ecu: ctrl, kind: "L3 " + r.k }));
             }));
+            // Curated requirements and Behavior Models join the same lifecycle.
+            // They are few and the most actionable, so they are listed FIRST (the table shows only the first 300 rows of thousands of generated requirements).
+            { const mh = typeof window !== "undefined" && window.__sdvCodegen ? window.__sdvCodegen.modelHash : null; const frozen = RL && mh ? RL.frozenModelHashes(baselines, mh) : new Set(); const first = [];
+              Object.values(behaviorModels).forEach((m) => first.push({ id: m.id, title: m.title + " — behavior model", fn: "Behavior Models", fnId: "BM", ecu: (m.target && m.target.ecu) || "", kind: "Model", model: m, mstatus: RL ? RL.modelReviewStatus(m, frozen, mh) : "Draft" }));
+              curatedReqs.forEach((r) => first.push({ id: r.id, title: r.title, fn: r.subdomain, fnId: "CUR:" + r.subdomain, ecu: r.owner || "", kind: "Curated", sub: r.subdomain }));
+              rows.unshift(...first); }
+            const stOf = (r) => (r.kind === "Model" ? r.mstatus : statusOf(reqStatus, r.id));
             const fnOpts = []; const seenFn = new Set(); rows.forEach((r) => { if (!seenFn.has(r.fnId)) { seenFn.add(r.fnId); fnOpts.push({ id: r.fnId, label: r.fn }); } });
             fnOpts.sort((a, b) => a.label.localeCompare(b.label));
             const counts = { "Draft": 0, "In Review": 0, "Approved": 0, "Baselined": 0 };
-            rows.forEach((r) => counts[statusOf(reqStatus, r.id)]++);
+            rows.forEach((r) => counts[stOf(r)]++);
             const total = rows.length, approved = counts["Approved"] + counts["Baselined"];
             const ql = revQ.trim().toLowerCase();
-            const shown = rows.filter((r) => revStF[statusOf(reqStatus, r.id)] && (revFnF === "ALL" || r.fnId === revFnF) && (!ql || (r.title + " " + r.fn + " " + r.id).toLowerCase().includes(ql)));
+            const shown = rows.filter((r) => revStF[stOf(r)] && (revFnF === "ALL" || r.fnId === revFnF) && (!ql || (r.title + " " + r.fn + " " + r.id).toLowerCase().includes(ql)));
             const shownIds = shown.map((r) => r.id);
             const allChecked = shownIds.length > 0 && shownIds.every((id) => revSel.has(id));
             const toggleAll = () => setRevSel((p) => { const s = new Set(p); if (allChecked) shownIds.forEach((id) => s.delete(id)); else shownIds.forEach((id) => s.add(id)); return s; });
             const toggleOne = (id) => setRevSel((p) => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; });
             const selIds = [...revSel].filter((id) => shownIds.includes(id));
-            const bulkStat = (st) => { selIds.forEach((id) => setStat(id, st)); };
+            const bulkStat = (st) => { let skipped = 0, why = ""; selIds.forEach((id) => { const rw = rows.find((x) => x.id === id); if (rw && rw.kind === "Model") return; if (rw && rw.kind === "Curated") { const res = applyReviewQuiet(id, st, {}); if (!res.ok) { skipped++; why = res.reason; } } else setStat(id, st); }); if (skipped) notify(skipped + " curated requirement" + (skipped === 1 ? "" : "s") + " not moved to " + st + ": " + why + " Set the reviewer/approver first (or use the buttons on the requirement)."); };
             const bulkWho = (k) => { const v = revWho[k].trim(); if (!v) return; selIds.forEach((id) => setWho(id, k, v)); };
-            const promoteBaseline = () => { rows.forEach((r) => { if (statusOf(reqStatus, r.id) === "Approved") setStat(r.id, "Baselined"); }); };
+            const promoteBaseline = () => { rows.forEach((r) => { if (r.kind !== "Model" && stOf(r) === "Approved") setStat(r.id, "Baselined"); }); };
             const th = { textAlign: "left", padding: "6px 8px", background: "#F2F4F7", color: "#475467", fontWeight: 700, fontSize: 10, borderBottom: "1px solid #E4E7EC", whiteSpace: "nowrap", position: "sticky", top: 0 };
             const td = { padding: "5px 8px", borderBottom: "1px solid #F2F4F7", fontSize: 11, color: "#344054", verticalAlign: "middle" };
             const stBadge = (st) => { const m = STATUS_META[st]; return <span style={{ fontSize: 9.5, fontWeight: 700, color: m.c, background: m.bg, border: "1px solid " + m.c + "44", borderRadius: 4, padding: "1px 6px", whiteSpace: "nowrap" }}>{st}</span>; };
@@ -12212,7 +12320,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 16px 48px" }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, color: "#0E7090", letterSpacing: 0.5 }}>REVIEW BOARD</div>
                   <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", margin: "2px 0 2px" }}>Requirement review &amp; approval</h1>
-                  <p style={{ fontSize: 12.5, color: "#475467", lineHeight: 1.55, margin: "0 0 12px" }}>Joint-review workspace (SUP.4) for every reviewable requirement — L2 system aspects and L3 SW/AR/HW. Advance the lifecycle Draft → In Review → Approved → Baselined, record reviewer/approver (auto-dated), and act in bulk on a selection. Status is shared with the reader, the Quality dashboard and captured baselines.{!canWrite && " Sign in as owner to edit — this is a read-only view."}</p>
+                  <p style={{ fontSize: 12.5, color: "#475467", lineHeight: 1.55, margin: "0 0 12px" }}>Joint-review workspace (SUP.4) for every reviewable requirement — L2 system aspects and L3 SW/AR/HW. Advance the lifecycle Draft → In Review → Approved → Baselined, record reviewer/approver (auto-dated), and act in bulk on a selection. Status is shared with the reader, the Quality dashboard and captured baselines. Curated requirements and Behavior Models are included: moving past Draft needs a named reviewer, approving needs an approver (self-approval is recorded), and editing an approved requirement sends it back to In Review. A Behavior Model is approved in Behavior Models (it also needs a QM classification) — here it shows its status.{!canWrite && " Sign in as owner to edit — this is a read-only view."}</p>
                   <div className="flex gap-2 flex-wrap" style={{ marginBottom: 12 }}>
                     {STATUS_ORDER.map((st) => { const m = STATUS_META[st]; return <div key={st} style={{ flex: 1, minWidth: 120, border: "1px solid " + m.c + "33", borderRadius: 8, padding: "8px 12px", background: m.bg }}><div style={{ fontSize: 20, fontWeight: 700, color: m.c }}>{counts[st]}</div><div style={{ fontSize: 10.5, color: m.c, fontWeight: 600 }}>{st}</div></div>; })}
                     <div style={{ flex: 1, minWidth: 120, border: "1px solid #E4E7EC", borderRadius: 8, padding: "8px 12px" }}><div style={{ fontSize: 20, fontWeight: 700, color: pctColor(total ? Math.round(100 * approved / total) : 0) }}>{total ? Math.round(100 * approved / total) : 0}%</div><div style={{ fontSize: 10.5, color: "#667085" }}>approved+ of {total}</div></div>
@@ -12247,17 +12355,17 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           {["Requirement", "Function", "Type", "Status", "Reviewer", "Approver", "Updated", ""].map((h, i) => <th key={i} style={th}>{h}</th>)}
                         </tr></thead>
                         <tbody>
-                          {shown.slice(0, 300).map((r) => { const rec = reqStatus[r.id] || {}; const st = rec.status || "Draft"; return (
+                          {shown.slice(0, 300).map((r) => { const isM = r.kind === "Model"; const rec = isM ? { reviewer: r.model.status === "approved" ? "(approved in Behavior Models)" : "", approver: r.model.approvedBy || "", date: r.model.approvedAt ? new Date(r.model.approvedAt).toISOString().slice(0, 10) : "" } : (reqStatus[r.id] || {}); const st = stOf(r); return (
                             <tr key={r.id} style={{ background: revSel.has(r.id) ? "#F5F8FF" : "#fff" }}>
-                              <td style={td}><input type="checkbox" checked={revSel.has(r.id)} onChange={() => toggleOne(r.id)} disabled={!canWrite} style={{ accentColor: "#175CD3" }} /></td>
-                              <td style={{ ...td }}><button onClick={() => { const l1 = originL1(r.id); if (l1) materialize(l1); refocus(r.id); pendingReaderScrollRef.current = r.id; setView("reader"); }} style={{ textAlign: "left", color: "#101828", fontWeight: 600 }}>{r.title}</button><div style={{ fontSize: 9, color: "#B6C0CC", fontFamily: "ui-monospace, monospace" }}>{r.id}</div></td>
+                              <td style={td}><input type="checkbox" checked={revSel.has(r.id)} onChange={() => toggleOne(r.id)} disabled={!canWrite || isM} style={{ accentColor: "#175CD3" }} /></td>
+                              <td style={{ ...td }}><button onClick={() => { if (r.kind === "Model") { setView("behavior"); return; } if (r.kind === "Curated") { openCuratedReq({ id: r.id, subdomain: r.sub }); return; } const l1 = originL1(r.id); if (l1) materialize(l1); refocus(r.id); pendingReaderScrollRef.current = r.id; setView("reader"); }} style={{ textAlign: "left", color: "#101828", fontWeight: 600 }}>{r.title}</button><div style={{ fontSize: 9, color: "#B6C0CC", fontFamily: "ui-monospace, monospace" }}>{r.id}</div></td>
                               <td style={{ ...td, color: "#667085" }}>{r.fn}<div style={{ fontSize: 9, color: "#98A2B3" }}>{r.ecu}</div></td>
-                              <td style={td}><span style={{ fontSize: 9, fontWeight: 700, color: r.kind === "L2" ? "#0E7090" : "#175CD3" }}>{r.kind}</span></td>
+                              <td style={td}><span style={{ fontSize: 9, fontWeight: 700, color: r.kind === "L2" ? "#0E7090" : r.kind === "Curated" ? "#0E9384" : r.kind === "Model" ? "#7A5AF8" : "#175CD3" }}>{r.kind}</span></td>
                               <td style={td}>{stBadge(st)}</td>
                               <td style={{ ...td, color: rec.reviewer ? "#344054" : "#C4CBD4" }}>{rec.reviewer || "—"}</td>
                               <td style={{ ...td, color: rec.approver ? "#344054" : "#C4CBD4" }}>{rec.approver || "—"}</td>
                               <td style={{ ...td, color: "#98A2B3", fontSize: 10, fontFamily: "ui-monospace, monospace" }}>{rec.date || "—"}</td>
-                              <td style={{ ...td, whiteSpace: "nowrap" }}>{canWrite && <span className="flex items-center gap-1"><button onClick={() => step(r.id, -1)} title="Back a stage" style={{ fontSize: 12, fontWeight: 700, color: "#667085", border: "1px solid #E4E7EC", borderRadius: 5, width: 20, height: 20, background: "#fff", cursor: "pointer" }}>‹</button><button onClick={() => step(r.id, 1)} title="Advance a stage" style={{ fontSize: 12, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 5, width: 20, height: 20, background: "#fff", cursor: "pointer" }}>›</button></span>}</td>
+                              <td style={{ ...td, whiteSpace: "nowrap" }}>{isM && <button onClick={() => setView("behavior")} style={{ fontSize: 10.5, fontWeight: 700, color: "#7A5AF8" }}>Open ›</button>}{canWrite && !isM && <span className="flex items-center gap-1"><button onClick={() => step(r.id, -1)} title="Back a stage" style={{ fontSize: 12, fontWeight: 700, color: "#667085", border: "1px solid #E4E7EC", borderRadius: 5, width: 20, height: 20, background: "#fff", cursor: "pointer" }}>‹</button><button onClick={() => step(r.id, 1)} title="Advance a stage" style={{ fontSize: 12, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 5, width: 20, height: 20, background: "#fff", cursor: "pointer" }}>›</button></span>}</td>
                             </tr>
                           ); })}
                           {shown.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#98A2B3", padding: 18 }}>No requirements match the current filters.</td></tr>}
@@ -12295,7 +12403,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               })(),
               { proc: "ISO 26262", label: "Functional Safety", metric: "Safety coverage " + readiness.safetyPct + "% · HARA open", status: "Partial", note: "ASIL classification and FMEA present; HARA and FSR/TSR not complete.", view: "consistency" },
               { proc: "ISO/SAE 21434", label: "Cybersecurity", metric: "TARA " + readiness.cyberPct + "% · high-risk open", status: "Partial", note: "TARA threat scenarios present; high-risk items not yet treated/closed.", view: "consistency" },
-              { proc: "SUP.4/8/10", label: "Review & Configuration Mgmt", metric: sm.approvedPct + "% approved · " + baselines.length + " baselines", status: (sm.approvedPct >= 80 && baselines.length) ? "Ready" : "Partial", note: "Review board and baselines available; drive requirements to Approved / Baselined.", view: "review" },
+              { proc: "SUP.4/8/10", label: "Review & Configuration Mgmt", metric: reviewAll.approvedPct + "% approved · " + baselines.length + " baselines", status: (reviewAll.approvedPct >= 80 && baselines.length) ? "Ready" : "Partial", note: "Review board and baselines available; drive requirements, curated requirements and Behavior Models to Approved / Baselined.", view: "review" },
               { proc: "ISO/IEC/IEEE 29148", label: "Requirement Quality Gate", metric: (sm.errors === 0 ? "PASS" : sm.errors + " errors") + " · trace " + traceAvg + "%", status: sm.errors === 0 ? "Ready" : "Gap", note: "EARS + verifiability + unambiguity checks on authored requirements.", view: "consistency" },
               { proc: "Standards", label: "Standards & Compliance", metric: stdCert + " certified/assessed · " + stdSup + " supported/in-progress", status: stdCert > 0 ? "Ready" : "Partial", note: "Register of tool conformance, process compliance and organizational certifications.", view: "compliance" },
             ];
