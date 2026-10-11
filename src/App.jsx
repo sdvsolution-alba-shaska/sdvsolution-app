@@ -6559,6 +6559,37 @@ function genericTC(title) {
 }
 /* ASPICE verification: return the LOW-LEVEL test cases that verify a requirement (1-to-many), at the V-model
    stage for its level (SYS.2 → SYS.4/5 · SWE.1 → SWE.6 · SWE.2 → SWE.5 · SWE.3 → SWE.4 · HWE.1 → HWE.4 · HW design → HWE.3). */
+/* JUnit-XML results parser — Simulink Test, GoogleTest, pytest, Ceedling, Jenkins etc. all export this format.
+   Returns suite-level <property> values (build / commit / coverage / tool) and one record per <testcase>. */
+function parseJUnit(text) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) throw new Error("not valid XML");
+  const props = {}, cases = [];
+  const kv = (p) => [String(p.getAttribute("name") || "").trim().toLowerCase(), String(p.getAttribute("value") != null ? p.getAttribute("value") : (p.textContent || "")).trim()];
+  const inCase = (el) => { for (let n = el.parentNode; n; n = n.parentNode) if (n.nodeName === "testcase") return true; return false; };
+  Array.from(doc.getElementsByTagName("property")).forEach((p) => { if (!inCase(p)) { const [k, v] = kv(p); if (k) props[k] = v; } });
+  Array.from(doc.getElementsByTagName("testcase")).forEach((tc) => {
+    const cp = {}; Array.from(tc.getElementsByTagName("property")).forEach((p) => { const [k, v] = kv(p); if (k) cp[k] = v; });
+    const child = (nm) => Array.from(tc.childNodes).find((c) => c.nodeName === nm);
+    const f = child("failure") || child("error"), s = child("skipped"), x = f || s;
+    cases.push({ name: tc.getAttribute("name") || "", classname: tc.getAttribute("classname") || "", time: parseFloat(tc.getAttribute("time")) || 0, status: f ? "fail" : s ? "blocked" : "pass", note: x ? String(x.getAttribute("message") || x.textContent || "").trim().slice(0, 240) : "", props: cp });
+  });
+  return { props, cases };
+}
+/* Map a JUnit testcase to one of our test-case IDs: an explicit property, the name/classname, or an ID embedded in them
+   (must end on a boundary so TC-…-1 never matches TC-…-12). */
+function matchTcId(c, known) {
+  const cand = [c.props["tc_id"], c.props["testcase_id"], c.props["id"], c.name, c.classname + "." + c.name, c.classname].filter(Boolean);
+  for (const d of cand) if (known.has(d)) return d;
+  let best = "";
+  for (const d of cand) for (const id of known) {
+    if (id.length <= best.length) continue;
+    const i = d.indexOf(id); if (i < 0) continue;
+    const before = i === 0 ? "" : d[i - 1], after = d[i + id.length] || "";
+    if (!/[\w-]/.test(after) && !/[\w-]/.test(before)) best = id;
+  }
+  return best || null;
+}
 function aspiceTests(reqId, group, isL3, title) {
   const isArch = group === "SYS" && ["ARCH", "BND"].includes(String(reqId).split("-").pop());
   const map = { SYS: isArch ? ["SYS.4", "System integration test"] : ["SYS.5", "System qualification test"], SW: isL3 ? ["SWE.6", "Software qualification"] : ["SWE.4", "Software unit verification"], AR: isL3 ? ["SWE.5", "Software integration"] : ["SWE.4", "Software unit verification"], HW: isL3 ? ["HWE.4", "Hardware qualification"] : ["HWE.3", "Hardware integration"] };
@@ -7416,12 +7447,14 @@ export default function App() {
   const pendingReaderScrollRef = useRef(null); // requirement id to scroll to once the reader shows it (set by cross-view links)
   const [flashReq, setFlashReq] = useState(null); // requirement briefly highlighted after a cross-view jump (auto-clears)
   const [reqStatus, setReqStatus] = useState({}); // requirement lifecycle: id -> { status, reviewer, approver, date }
-  const [tcExec, setTcExec] = useState({}); // test-case execution: tcId -> { status: pass|fail|blocked, date, evidence }
+  const [tcExec, setTcExec] = useState({}); // test-case execution: tcId -> { status: pass|fail|blocked, date, evidence, build, tool, coverage, durationSec, source }
+  const [tcBuild, setTcBuild] = useState(""); // build / commit the next results belong to (stamped on results + audit entries)
+  const [tcRuns, setTcRuns] = useState([]); // imported result sets: [{ id, ts, file, source, build, matched, unmatched, pass, fail, blocked, covAvg }]
   const [auditLog, setAuditLog] = useState([]); // white-box change log: [{ ts, actor, action, target, detail, ai }]
   // White-box audit trail — records who changed what (human vs AI). Kept to the last 800 entries.
-  const logAudit = useCallback((action, target, detail, ai) => {
+  const logAudit = useCallback((action, target, detail, ai, build) => {
     const actor = ai ? "AI Assistant" : ((typeof window !== "undefined" && window.__sdvAuth && window.__sdvAuth.email) || "you");
-    setAuditLog((L) => [{ ts: Date.now(), actor, action, target: target || "", detail: detail || "", ai: !!ai }, ...L].slice(0, 800));
+    setAuditLog((L) => [{ ts: Date.now(), actor, action, target: target || "", detail: detail || "", ai: !!ai, ...(build ? { build } : {}) }, ...L].slice(0, 800));
   }, []);
   // Guided assistant flow — spec → requirements → architecture → test cases, one approved step at a time.
   const [guidedStep, setGuidedStep] = useState(0); // 0 idle · 1 reqs · 2 architecture · 3 tests
@@ -7805,8 +7838,8 @@ export default function App() {
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
-    reqStatus, regEdits, baselines, tcExec, auditLog, userEcus, opsOv,
-  }), [nodes, reqStatus, regEdits, baselines, tcExec, auditLog, userEcus, opsOv]);
+    reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
@@ -7814,6 +7847,7 @@ export default function App() {
     if (d.regEdits) setRegEdits(clone(d.regEdits));
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
     if (d.tcExec) setTcExec(clone(d.tcExec));
+    if (Array.isArray(d.tcRuns)) setTcRuns(clone(d.tcRuns));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
     if (d.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(d.opsOv) });
@@ -10424,21 +10458,46 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             const run = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status).length;
             const passed = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status === "pass").length;
             const failed = rows.filter((r) => tcExec[r.tcId] && tcExec[r.tcId].status === "fail").length;
-            const setExec = (tcId, patch) => { if (!canWrite) return; setTcExec((p) => ({ ...p, [tcId]: { ...(p[tcId] || {}), ...patch } })); if (patch.status) logAudit("Test result " + ((STAT[patch.status] || [patch.status])[0]), tcId, ""); };
+            const bld = tcBuild.trim();
+            const setExec = (tcId, patch) => { if (!canWrite) return; const p2 = patch.status && bld ? { ...patch, build: bld } : patch; setTcExec((p) => ({ ...p, [tcId]: { ...(p[tcId] || {}), ...p2 } })); if (patch.status) logAudit("Test result " + ((STAT[patch.status] || [patch.status])[0]), tcId, "", false, bld); };
             const onResults = async (file) => {
               try {
-                const aoa = csvToAoa(await file.text()); if (!aoa.length) return;
-                const H = aoa[0].map((h) => String(h).trim().toLowerCase());
-                const idi = H.findIndex((h) => /test case|tc id|^id$|case id/.test(h));
-                const sti = H.findIndex((h) => /status|result/.test(h));
-                const evi = H.findIndex((h) => /evidence|link|note/.test(h));
-                if (idi < 0 || sti < 0) { notify("CSV needs a Test Case ID column and a Status column."); return; }
-                const patch = {}; let n = 0;
-                for (let k = 1; k < aoa.length; k++) { const row = aoa[k] || []; const id = String(row[idi] || "").trim(); const raw = String(row[sti] || "").trim().toLowerCase(); if (!id || !raw) continue; const st = /pass|ok|green/.test(raw) ? "pass" : /fail|ng|red/.test(raw) ? "fail" : /block/.test(raw) ? "blocked" : null; if (!st) continue; patch[id] = { status: st, date: new Date().toISOString().slice(0, 10), evidence: evi >= 0 ? String(row[evi] || "").trim() : "" }; n++; }
-                setTcExec((p) => ({ ...p, ...patch })); logAudit("Imported test results", file.name, n + " updated"); notify("Imported results for " + n + " test case(s).");
+                const text = await file.text(); const known = new Set(rows.map((r) => r.tcId)); const today = new Date().toISOString().slice(0, 10);
+                const patch = {}; let n = 0, miss = 0, source = "CSV", build = bld;
+                if (/\.xml$/i.test(file.name) || /^\s*(<\?xml|<testsuite)/i.test(text)) {
+                  const { props, cases } = parseJUnit(text);
+                  source = props.tool || props.framework || "JUnit XML";
+                  build = bld || props.build || props.build_id || props.commit || props.git_commit || "";
+                  const suiteCov = parseFloat(props.coverage);
+                  cases.forEach((c) => {
+                    const id = matchTcId(c, known); if (!id) { miss++; return; }
+                    const cv = c.props.coverage != null ? parseFloat(c.props.coverage) : suiteCov;
+                    patch[id] = { status: c.status, date: today, evidence: c.note || c.props.evidence || "", build, tool: source, source: file.name, ...(isFinite(cv) ? { coverage: cv } : {}), ...(c.time ? { durationSec: c.time } : {}) }; n++;
+                  });
+                } else {
+                  const aoa = csvToAoa(text); if (!aoa.length) return;
+                  const H = aoa[0].map((h) => String(h).trim().toLowerCase());
+                  const idi = H.findIndex((h) => /test case|tc id|^id$|case id/.test(h));
+                  const sti = H.findIndex((h) => /status|result/.test(h));
+                  const evi = H.findIndex((h) => /evidence|link|note/.test(h));
+                  const bi = H.findIndex((h) => /build|commit/.test(h)), ci = H.findIndex((h) => /coverage/.test(h));
+                  if (idi < 0 || sti < 0) { notify("CSV needs a Test Case ID column and a Status column."); return; }
+                  for (let k = 1; k < aoa.length; k++) {
+                    const row = aoa[k] || []; const id = String(row[idi] || "").trim(); const raw = String(row[sti] || "").trim().toLowerCase(); if (!id || !raw) continue;
+                    const st = /pass|ok|green/.test(raw) ? "pass" : /fail|ng|red/.test(raw) ? "fail" : /block|skip/.test(raw) ? "blocked" : null; if (!st) continue;
+                    if (!known.has(id)) { miss++; continue; }
+                    const cv = ci >= 0 ? parseFloat(row[ci]) : NaN;
+                    patch[id] = { status: st, date: today, evidence: evi >= 0 ? String(row[evi] || "").trim() : "", build: (bi >= 0 && String(row[bi] || "").trim()) || build, tool: "CSV", source: file.name, ...(isFinite(cv) ? { coverage: cv } : {}) }; n++;
+                  }
+                }
+                if (!n) { notify(miss ? "No results matched a known test case ID (" + miss + " unmatched) — nothing imported." : "No usable results found in " + file.name + "."); return; }
+                const vals = Object.values(patch), cnt = (s) => vals.filter((v) => v.status === s).length, cvs = vals.filter((v) => v.coverage != null).map((v) => v.coverage);
+                const run = { id: "RUN-" + Date.now(), ts: Date.now(), file: file.name, source, build, matched: n, unmatched: miss, pass: cnt("pass"), fail: cnt("fail"), blocked: cnt("blocked"), covAvg: cvs.length ? Math.round(cvs.reduce((a, b) => a + b, 0) / cvs.length * 10) / 10 : null };
+                setTcExec((p) => ({ ...p, ...patch })); setTcRuns((r) => [run, ...r].slice(0, 100));
+                logAudit("Imported test results", file.name, n + " matched · " + run.pass + " pass / " + run.fail + " fail / " + run.blocked + " blocked" + (miss ? " · " + miss + " unmatched" : "") + " · " + source, false, build);
+                notify("Imported results for " + n + " test case(s)" + (miss ? " (" + miss + " unmatched)" : "") + ".");
               } catch (e) { notify("Results import failed: " + (e && e.message ? e.message : e)); }
-            };
-            return (
+            };            return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
                 <div className="mx-auto px-8 py-6" style={{ maxWidth: 1240 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>ASPICE V-MODEL · VERIFICATION</div>
@@ -10448,11 +10507,32 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                     <span style={{ fontSize: 12.5, fontWeight: 700, color: "#101828" }}>{reqCount} requirements · {rows.length} test cases</span>
                     <span style={{ fontSize: 12, color: "#667085" }}>{run} run · <b style={{ color: "#067647" }}>{passed} passed</b> · <b style={{ color: "#B42318" }}>{failed} failed</b></span>
                     <div style={{ flex: 1, minWidth: 120, height: 6, borderRadius: 4, background: "#EAECF0", overflow: "hidden", maxWidth: 260 }}><div style={{ width: (rows.length ? Math.round(100 * passed / rows.length) : 0) + "%", height: "100%", background: "#12B76A" }} /></div>
-                    {canWrite && <label style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", background: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }} title="CSV with columns: Test Case ID, Status (pass/fail/blocked), optional Evidence">Import results (CSV)<input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onResults(f); e.target.value = ""; }} /></label>}
+                    {canWrite && <input value={tcBuild} onChange={(e) => setTcBuild(e.target.value)} placeholder="Build / commit (optional)" title="Stamped on results you record or import, and on their audit entries" style={{ fontSize: 12, width: 190, border: "1px solid #D0D5DD", borderRadius: 8, padding: "6px 10px", outline: "none" }} />}
+                    {canWrite && <label style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", background: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }} title="JUnit XML (Simulink Test, GoogleTest, pytest, Jenkins…) or CSV with columns: Test Case ID, Status (pass/fail/blocked), optional Evidence, Build, Coverage">Import results (JUnit XML / CSV)<input type="file" accept=".csv,.xml" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onResults(f); e.target.value = ""; }} /></label>}
                   </div>
+                  {tcRuns.length > 0 && (
+                    <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 12 }}>
+                      <div style={{ padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, fontSize: 11 }}>RECENT IMPORTS ({tcRuns.length})</div>
+                      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11 }}>
+                        <thead><tr>{["When", "File", "Source", "Build", "Matched", "Pass", "Fail", "Blocked", "Avg cov."].map((h) => <th key={h} style={{ textAlign: "left", padding: "4px 10px", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                        <tbody>{tcRuns.slice(0, 5).map((u) => (
+                          <tr key={u.id} style={{ borderTop: "1px solid #F2F4F7" }}>
+                            <td style={{ padding: "4px 10px", color: "#98A2B3", whiteSpace: "nowrap" }}>{new Date(u.ts).toLocaleString()}</td>
+                            <td style={{ padding: "4px 10px", color: "#344054" }}>{u.file}</td>
+                            <td style={{ padding: "4px 10px", color: "#667085" }}>{u.source}</td>
+                            <td style={{ padding: "4px 10px", fontFamily: "ui-monospace,monospace", color: "#344054" }}>{u.build || "—"}</td>
+                            <td style={{ padding: "4px 10px" }}>{u.matched}{u.unmatched ? <span style={{ color: "#B54708" }}> (+{u.unmatched} unmatched)</span> : null}</td>
+                            <td style={{ padding: "4px 10px", color: "#067647", fontWeight: 700 }}>{u.pass}</td>
+                            <td style={{ padding: "4px 10px", color: "#B42318", fontWeight: 700 }}>{u.fail}</td>
+                            <td style={{ padding: "4px 10px", color: "#B54708", fontWeight: 700 }}>{u.blocked}</td>
+                            <td style={{ padding: "4px 10px", color: "#344054" }}>{u.covAvg != null ? u.covAvg + "%" : "—"}</td>
+                          </tr>))}</tbody>
+                      </table>
+                    </div>
+                  )}
                   <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
                     <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
-                      <thead><tr>{["Requirement", "Feature", "Stage", "Test Case", "Title", "Result", "Evidence"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                      <thead><tr>{["Requirement", "Feature", "Stage", "Test Case", "Title", "Result", "Evidence", "Build", "Cov."].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
                       <tbody>
                         {rows.map((r, i) => { const ex = tcExec[r.tcId] || {}; const meta = STAT[ex.status]; return (
                           <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
@@ -10469,9 +10549,11 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                               {ex.date && <span style={{ fontSize: 9, color: "#98A2B3", marginLeft: 6 }}>{ex.date}</span>}
                             </td>
                             <td style={{ padding: "5px 10px" }}><input value={ex.evidence || ""} disabled={!canWrite} onChange={(e) => setExec(r.tcId, { evidence: e.target.value })} placeholder={canWrite ? "link / note" : ""} style={{ width: "100%", minWidth: 120, fontSize: 11, border: "1px solid #E4E7EC", borderRadius: 5, padding: "2px 6px", background: canWrite ? "#fff" : "#F9FAFB", color: "#344054" }} /></td>
+                            <td style={{ padding: "5px 10px", fontFamily: "ui-monospace,monospace", fontSize: 10, color: "#667085", whiteSpace: "nowrap" }} title={ex.tool ? "via " + ex.tool + (ex.source ? " · " + ex.source : "") : ""}>{ex.build || ""}</td>
+                            <td style={{ padding: "5px 10px", fontSize: 10.5, color: "#344054", whiteSpace: "nowrap" }}>{ex.coverage != null ? ex.coverage + "%" : ""}</td>
                           </tr>
                         ); })}
-                        {rows.length === 0 && <tr><td colSpan={7} style={{ padding: "10px", color: "#98A2B3" }}>No authored test cases yet.</td></tr>}
+                        {rows.length === 0 && <tr><td colSpan={9} style={{ padding: "10px", color: "#98A2B3" }}>No authored test cases yet.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -10489,7 +10571,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 <p style={{ fontSize: 13, color: "#667085", marginTop: 6, lineHeight: 1.5 }}>Every change is recorded — who, what, when — and each entry is flagged <b>human</b> or <b>AI</b>. {auditLog.length} entr{auditLog.length === 1 ? "y" : "ies"} (most recent 800 kept). {canWrite && auditLog.length > 0 && <button onClick={() => { if (window.confirm("Clear the audit log? This can't be undone.")) { setAuditLog([]); } }} style={{ color: "#B42318", fontWeight: 600 }}>Clear log</button>}</p>
                 <div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
                   <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
-                    <thead><tr>{["When", "By", "Action", "Target", "Detail"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["When", "By", "Action", "Target", "Detail", "Build"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#F9FAFB", color: "#98A2B3", fontWeight: 700, borderBottom: "1px solid #EAECF0", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {auditLog.map((e, i) => (
                         <tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
@@ -10498,9 +10580,10 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                           <td style={{ padding: "5px 10px", color: "#101828", fontWeight: 600, whiteSpace: "nowrap" }}>{e.action}</td>
                           <td style={{ padding: "5px 10px", color: "#667085", fontFamily: "ui-monospace,monospace", fontSize: 10.5 }}>{e.target}</td>
                           <td style={{ padding: "5px 10px", color: "#667085" }}>{e.detail}</td>
+                          <td style={{ padding: "5px 10px", color: "#667085", fontFamily: "ui-monospace,monospace", fontSize: 10.5, whiteSpace: "nowrap" }}>{e.build || ""}</td>
                         </tr>
                       ))}
-                      {auditLog.length === 0 && <tr><td colSpan={5} style={{ padding: "10px", color: "#98A2B3" }}>No changes logged yet. Edit a requirement or let the Assistant apply an action, and it will appear here.</td></tr>}
+                      {auditLog.length === 0 && <tr><td colSpan={6} style={{ padding: "10px", color: "#98A2B3" }}>No changes logged yet. Edit a requirement or let the Assistant apply an action, and it will appear here.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -11858,7 +11941,13 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               { proc: "SYS.3", label: "System Architecture", metric: "Functional models · K-Matrix · ARXML/DBC/LDF", status: "Ready", note: "Architecture, communication matrix and exports available for the authored functions.", view: "blocks" },
               { proc: "SWE.1–6", label: "Software Engineering", metric: built.length + " functions · L3+L4 · L4 " + l4Avg + "%", status: "Ready", note: "Software requirements, architecture and detailed design with state machines.", view: "reader" },
               { proc: "HWE.1–4", label: "Hardware Engineering", metric: "L3 HW + ICD pin-outs", status: "Ready", note: "Hardware requirements and connector ICDs for the DCM / FZM functions.", view: "ecureq" },
-              { proc: "SYS.4/5 · SWE.4–6 · HWE.3/4", label: "Verification & Validation", metric: "Curated tests " + curAvg + "% · 0% executed", status: "Gap", note: "Test cases are authored but no execution results are tracked — no verification evidence yet.", view: "dashboard" },
+              (() => {
+                const tcCard = (readiness.disciplines || []).find((d) => d.key === "TC") || {}; const ran = Object.values(tcExec).filter((x) => x && x.status).length, failed = Object.values(tcExec).filter((x) => x && x.status === "fail").length, tot = tcCard.primary || 0;
+                const execPct = tot ? Math.round(100 * ran / tot) : 0;
+                return { proc: "SYS.4/5 · SWE.4–6 · HWE.3/4", label: "Verification & Validation", metric: "Curated tests " + curAvg + "% · " + execPct + "% executed" + (ran ? " · " + (tcCard.coverage || 0) + "% passed" : ""),
+                  status: ran === 0 ? "Gap" : (failed === 0 && execPct >= 80 ? "Ready" : "Partial"),
+                  note: ran === 0 ? "Test cases are authored but no execution results are tracked — no verification evidence yet. Import JUnit XML / CSV results from the Test Cases view." : ran + " of " + tot.toLocaleString() + " test cases have recorded results" + (failed ? " (" + failed + " failing)" : "") + (tcRuns.length ? " · last import " + new Date(tcRuns[0].ts).toLocaleDateString() + (tcRuns[0].build ? " · build " + tcRuns[0].build : "") : "") + ".", view: "tctrace" };
+              })(),
               { proc: "ISO 26262", label: "Functional Safety", metric: "Safety coverage " + readiness.safetyPct + "% · HARA open", status: "Partial", note: "ASIL classification and FMEA present; HARA and FSR/TSR not complete.", view: "consistency" },
               { proc: "ISO/SAE 21434", label: "Cybersecurity", metric: "TARA " + readiness.cyberPct + "% · high-risk open", status: "Partial", note: "TARA threat scenarios present; high-risk items not yet treated/closed.", view: "consistency" },
               { proc: "SUP.4/8/10", label: "Review & Configuration Mgmt", metric: sm.approvedPct + "% approved · " + baselines.length + " baselines", status: (sm.approvedPct >= 80 && baselines.length) ? "Ready" : "Partial", note: "Review board and baselines available; drive requirements to Approved / Baselined.", view: "review" },
