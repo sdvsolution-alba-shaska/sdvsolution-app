@@ -1511,7 +1511,7 @@ const isSmartDevice = (n) => !!n && n.type === "ECUSmartNode" && /I\/O list$/.te
 const isCanDevice = (n) => /CAN/.test(String((n && n.props && n.props.protocol) || (n && n.subtype) || "").toUpperCase());
 /* A named ECU module that is LIN-controlled (and not on CAN) is treated as a Smart Device. */
 const isLinModule = (e) => { const t = (((e && e.scope) || "") + " " + ((e && e.deviceClass) || "")).toUpperCase(); return t.includes("LIN") && !t.includes("CAN"); };
-function computeReadiness(nodeMap, tcExec = {}) {
+function computeReadiness(nodeMap, tcExec = {}, genTests = []) {
   const all = Object.values(nodeMap);
   /* Hardware counts for the HWE dashboard. ECUs = compute-ECU nodes (Primary/Secondary) PLUS the
      smart bus DEVICES (LIN/CAN lamps, antennas, mirrors...) that classify as Secondary ECU. Mechatronics
@@ -1558,6 +1558,7 @@ function computeReadiness(nodeMap, tcExec = {}) {
       const ex = tcExec[c.id]; if (ex && ex.status) { tcRun++; if (ex.status === "pass") tcPass++; else if (ex.status === "fail") tcFail++; }
     });
   });
+  genTests.forEach((c) => { tcTotal++; tcStg[c.stage] = (tcStg[c.stage] || 0) + 1; const ex = tcExec[c.id]; if (ex && ex.status) { tcRun++; if (ex.status === "pass") tcPass++; else if (ex.status === "fail") tcFail++; } }); // generated unit tests count as defined test cases
   const tcReqs = Object.keys(CURATED_TC).length, tcSys4 = tcStg["SYS.4"] || 0, tcSys5 = tcStg["SYS.5"] || 0, tcSwHw = tcTotal - tcSys4 - tcSys5;
   const tcPassPct = tcTotal ? Math.round(100 * tcPass / tcTotal) : 0;
   const tcStatus = tcRun === 0 ? "Not executed" : (tcFail > 0 ? "Failing" : (tcPass === tcTotal ? "Passed" : "In progress"));
@@ -6995,6 +6996,272 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, 
     </div>
   );
 }
+/* Behavior Models (Phase 1) — typed signals, calibrations, guarded state machine and Moore outputs per function.
+   The deterministic generator (src/lib/codegen.js, registered as window.__sdvCodegen) turns an approved model into C + tests.
+   AI may PROPOSE model content here; a human reviews and approves it — the generator never sees unreviewed AI output as approved. */
+function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, audit, notify, build, periodMs, baselines = [], tcRuns = [], onImportResults, onCaptureBaseline }) {
+  const CG = typeof window !== "undefined" ? window.__sdvCodegen : null;
+  const [sel, setSel] = useState(null); const [draft, setDraft] = useState(null); const [dirty, setDirty] = useState(false);
+  const [gen, setGen] = useState(null); const [fileSel, setFileSel] = useState(null); const [busy, setBusy] = useState("");
+  const [bl, setBl] = useState(""); const [builds, setBuilds] = useState([]); const [bSel, setBSel] = useState(null); const [bFiles, setBFiles] = useState(null);
+  const [bMsg, setBMsg] = useState(""); const [bBusy, setBBusy] = useState(false); const [runners, setRunners] = useState(null); const [rName, setRName] = useState(""); const [rToken, setRToken] = useState(null);
+  const BA = typeof window !== "undefined" ? window.__sdvBuildApi : null;
+  const authRole = typeof window !== "undefined" && window.__sdvAuth ? window.__sdvAuth.role : null; const isAdm = authRole === "owner" || authRole === "admin";
+  const buildsRef = useRef([]); buildsRef.current = builds;
+  const draftId = draft ? draft.id : null;
+  useEffect(() => { // load this function's builds; poll while any is queued/running
+    if (!BA || !draftId) { setBuilds([]); return undefined; }
+    let alive = true;
+    const load = async () => { try { const r = await BA.list(draftId); if (alive) setBuilds(r.builds || []); } catch (e) { if (alive) setBMsg("Builds unavailable: " + e.message); } };
+    load(); const t = setInterval(() => { if (buildsRef.current.some((b) => b.status === "queued" || b.status === "running")) load(); }, 4000);
+    return () => { alive = false; clearInterval(t); };
+  }, [draftId]); // eslint-disable-line
+  const sbStatus = (builds.find((b) => b.id === bSel) || {}).status;
+  useEffect(() => { // when the selected build leaves 'queued', fetch its full record (log) and files
+    if (!BA || !bSel || !sbStatus || sbStatus === "queued") return;
+    BA.get(bSel, true).then((r) => { setBFiles(r.files || []); setBuilds((p) => p.map((b) => (b.id === bSel ? r.build : b))); }).catch(() => {});
+  }, [bSel, sbStatus]); // eslint-disable-line
+  const bmId = (smId) => "BM-" + smId.replace(/-MODE$/, "");
+  const cl = (o) => JSON.parse(JSON.stringify(o));
+  const val = useMemo(() => (CG && draft ? CG.validateModel(draft) : null), [draft]); // eslint-disable-line
+  const open = (smId) => { if (dirty && !window.confirm("Discard unsaved changes?")) return; setSel(smId); setDraft(models[bmId(smId)] ? cl(models[bmId(smId)]) : null); setDirty(false); setGen(null); setFileSel(null); };
+  const edit = (fn) => { setDraft((d) => { const m = cl(d); fn(m); return m; }); setDirty(true); };
+  const save = () => {
+    if (!draft) return null; const prev = models[draft.id]; const m = cl(draft); m.rev = (prev ? prev.rev || 1 : 0) + 1;
+    const wasApproved = m.status === "approved"; if (wasApproved) { m.status = "proposed"; delete m.approvedBy; delete m.approvedAt; }
+    setModels((p) => ({ ...p, [m.id]: m })); setDraft(m); setDirty(false);
+    audit("Edited behavior model", m.id, "rev " + m.rev + (wasApproved ? " — approval revoked (content changed)" : ""), false); return m;
+  };
+  const create = () => {
+    const smId = sel; const tpl = CG.pilots && CG.pilots[smId]; let m = tpl ? cl(tpl) : CG.seedFromStateMachine(smId, sms[smId], { implements: implFor(smId), periodMs });
+    m.rev = 1; setModels((p) => ({ ...p, [m.id]: m })); setDraft(cl(m)); setDirty(false);
+    audit("Created behavior model", m.id, tpl ? "from pilot template (proposed values — review before approving)" : "skeleton from the state machine (types, guards and outputs still to define)", false);
+  };
+  const setStatus = (st) => {
+    if (st === "approved") { if (dirty) { notify("Save your changes before approving."); return; } if (!val || !val.ready) { notify("Fix the blocking issues before approving."); return; }
+      if (!models[draft.id] || !models[draft.id].qmConfirmed) { notify("Confirm the QM classification first — Phase 1 generates QM software only."); return; }
+      if (!window.confirm("Approve this Behavior Model? Approved models are the only ones that produce releasable builds. Any later edit revokes approval.")) return; }
+    const m = cl(models[draft.id]); m.status = st; if (st === "approved") { m.approvedBy = (window.__sdvAuth && window.__sdvAuth.email) || "you"; m.approvedAt = Date.now(); } else { delete m.approvedBy; delete m.approvedAt; }
+    setModels((p) => ({ ...p, [m.id]: m })); setDraft(cl(m)); audit(st === "approved" ? "Approved behavior model" : "Set behavior model status", m.id, st + " (rev " + (m.rev || 1) + ")", false);
+  };
+  const confirmQm = () => {
+    if (!window.confirm("Confirm that this function is classified QM (no ASIL) in the safety assessment?\n\nPhase 1 generates QM software only. A safety engineer should make this call from the HARA / classification, not from this tool\u0027s proposed values.")) return;
+    const q = { by: (window.__sdvAuth && window.__sdvAuth.email) || "you", at: Date.now() };
+    setModels((p) => ({ ...p, [draft.id]: { ...p[draft.id], qmConfirmed: q } })); setDraft((d) => ({ ...d, qmConfirmed: q })); audit("Confirmed QM classification", draft.id, "QM (no ASIL) confirmed for Phase 1 code generation", false);
+  };
+  const inScope = (id) => /^L2-BODY-/.test(id); // Phase 1: body-domain functions on the CZM only
+  const remove = () => { if (!window.confirm("Delete this Behavior Model? Generated test case IDs for it will no longer be listed.")) return; setModels((p) => { const n = { ...p }; delete n[draft.id]; return n; }); audit("Deleted behavior model", draft.id, "", false); setDraft(null); setDirty(false); setGen(null); };
+  const generate = async () => {
+    let m = draft; if (dirty) m = save(); if (!m) return; setBusy("gen");
+    try {
+      const r = await CG.generate(m, { build }); setGen(r); setFileSel(r.ok && r.files.length ? r.files[0].name : null);
+      if (r.ok) { setModels((p) => ({ ...p, [m.id]: { ...p[m.id], testIds: r.testIds, generatedTests: r.tests, lastGen: { at: Date.now(), hash: r.manifest.model.hash, files: r.files.length, tests: r.tests.length, gaps: r.gaps.length, approved: r.manifest.model.approved } } })); setDraft((d) => ({ ...d, testIds: r.testIds, generatedTests: r.tests }));
+        audit("Generated code", m.id, r.files.length + " files · " + r.tests.length + " tests · model " + r.manifest.model.hash + (r.manifest.model.approved ? "" : " · NOT approved"), false, build); }
+    } catch (e) { notify("Generation failed: " + (e && e.message ? e.message : e)); } finally { setBusy(""); }
+  };
+  const download = () => { try { const bytes = CG.zipStore(gen.files); const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" })); const a = document.createElement("a"); a.href = url; a.download = CG.swcName(draft) + "_rev" + (draft.rev || 1) + "_" + gen.manifest.model.hash + ".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500); } catch (e) { notify("Download failed."); } };
+  const propose = async () => {
+    if (!window.confirm("Ask the Assistant to PROPOSE signals, thresholds, guards and outputs for this function? It overwrites the items it returns; the model is marked 'proposed' and must still be reviewed and approved by a person.")) return;
+    setBusy("ai");
+    try {
+      const reqs = (draft.implements || []).map((id) => id + ": " + (reqText(id) || "")).join("\n");
+      const sm = draft.stateMachine; const prompt =
+        "You are helping an automotive software engineer define a Behavior Model for ONE function so deterministic C code can be generated for a body-domain ECU (QM only).\n\nFUNCTION: " + draft.title + " (" + draft.function + ")\nREQUIREMENTS:\n" + reqs +
+        "\n\nSTATES: " + sm.states.map((s) => s.id + " (" + s.label + ")").join(", ") + "\nINITIAL: " + sm.init + "\nTRANSITIONS (in current priority order):\n" + sm.transitions.map((t, i) => (i + 1) + ". " + t.from + " -> " + t.to + ' : "' + t.label + '"' + (t.guard ? "  [current guard: " + t.guard + "]" : "")).join("\n") +
+        "\n\nEXPRESSION LANGUAGE for guards and output values: integers, true/false, signal and CAL_ names, state_time_ms (ms already spent in the current state), operators ! - * + - < <= > >= == != && ||. NO division, functions, loops or decimals: use integer units (e.g. 0.1 degC -> 'dC', mA, ms). Inputs may be read in guards; outputs only receive values. Guard order is priority (first true wins), so list protective transitions before normal release.\nTYPES: uint8 uint16 uint32 sint8 sint16 sint32 boolean. Calibrations are named CAL_UPPER_SNAKE with an integer value.\nEvery state must define a value for EVERY output signal.\n\nReturn ONLY JSON (no prose):\n" +
+        '{"signals":[{"name":"snake_case","dir":"in|out","baseType":"...","min":0,"max":1,"unit":"","init":0,"invalid":"","note":""}],"calibrations":[{"name":"CAL_X","baseType":"...","value":0,"unit":"","source":"Proposed - confirm with datasheet"}],"guards":[{"from":"STATE","to":"STATE","guard":"expression"}],"outputs":{"STATE":{"output_signal":"expression"}}}\nUse realistic values and mark every calibration source as a proposal to confirm.';
+      const resp = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 4096, system: "You output strict JSON only.", messages: [{ role: "user", content: prompt }] }) });
+      const data = await resp.json(); if (data && data.error) throw new Error(typeof data.error === "string" ? data.error : (data.error.message || "assistant error"));
+      const txt = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).join(""); const mm = txt.match(/\{[\s\S]*\}/); if (!mm) throw new Error("no JSON in the reply"); const j = JSON.parse(mm[0]);
+      let ns = 0, nc = 0, ng = 0, no = 0;
+      edit((m) => {
+        (j.signals || []).forEach((s) => { if (!s || !s.name) return; const e = { name: String(s.name), dir: s.dir === "out" ? "out" : "in", baseType: s.baseType, min: s.min, max: s.max, unit: s.unit || "", resolution: "", init: s.init, invalid: s.invalid == null ? "" : s.invalid, note: s.note || "" }; const i = m.signals.findIndex((x) => x.name === e.name); if (i >= 0) m.signals[i] = e; else m.signals.push(e); ns++; });
+        (j.calibrations || []).forEach((c) => { if (!c || !c.name) return; const e = { name: String(c.name), baseType: c.baseType, value: c.value, unit: c.unit || "", source: c.source || "Proposed - confirm" }; const i = m.calibrations.findIndex((x) => x.name === e.name); if (i >= 0) m.calibrations[i] = e; else m.calibrations.push(e); nc++; });
+        (j.guards || []).forEach((g) => { const t = m.stateMachine.transitions.find((x) => x.from === g.from && x.to === g.to && !(x._ai)); if (t && g.guard) { t.guard = String(g.guard); t._ai = true; ng++; } });
+        m.stateMachine.transitions.forEach((t) => delete t._ai);
+        Object.keys(j.outputs || {}).forEach((sid) => { const st = m.stateMachine.states.find((x) => x.id === sid); if (st) Object.keys(j.outputs[sid] || {}).forEach((o) => { st.outputs[o] = String(j.outputs[sid][o]); no++; }); });
+        if (m.status === "approved") m.status = "proposed"; else if (m.status === "draft") m.status = "proposed";
+      });
+      audit("AI proposed behavior model content", draft.id, ns + " signals · " + nc + " calibrations · " + ng + " guards · " + no + " outputs (unreviewed)", true);
+      notify("Assistant proposal applied to the editor: " + ns + " signals, " + nc + " calibrations, " + ng + " guards, " + no + " outputs. Review it, then Save.");
+    } catch (e) { notify("Proposal failed: " + (e && e.message ? e.message : e)); } finally { setBusy(""); }
+  };
+  const refreshBuilds = async () => { try { const r = await BA.list(draft.id); setBuilds(r.builds || []); } catch (e) { setBMsg(e.message); } };
+  const blObj = baselines.find((b) => b.id === bl) || null;
+  const blModel = blObj && blObj.snap && blObj.snap.behaviorModels ? blObj.snap.behaviorModels[draft ? draft.id : ""] : null;
+  const blGate = CG ? CG.checkBuildable(blModel, blObj) : { ok: false, reasons: [] };
+  const captureNow = () => { if (dirty) { notify("Save your changes first — the baseline captures saved models."); return; } const id = onCaptureBaseline("Build baseline · " + draft.title + " · rev " + (draft.rev || 1)); if (id) { setBl(id); setBMsg("Baseline captured and selected."); } };
+  const requestBuild = async () => {
+    setBBusy(true); setBMsg("");
+    try {
+      let r;
+      for (let attempt = 0; attempt < 2; attempt++) { try { r = await BA.request(draft.id, bl); break; } catch (e) { if (attempt === 0 && /saved workspace/.test(e.message)) { setBMsg("Waiting for your workspace to finish saving…"); await new Promise((x) => setTimeout(x, 3500)); continue; } throw e; } }
+      setBMsg("Queued " + r.build.label + "."); audit("Requested build", r.build.label, draft.title + " from baseline " + (blObj ? blObj.name : bl), false, r.build.label); await refreshBuilds(); setBSel(r.build.id); setBFiles(null);
+    } catch (e) { setBMsg(e.message); } finally { setBBusy(false); }
+  };
+  const cancelBuildReq = async (id) => { try { await BA.cancel(id); await refreshBuilds(); } catch (e) { setBMsg(e.message); } };
+  const downloadBuildZip = (b) => { try { const bytes = CG.zipStore(bFiles.map((f) => ({ name: f.name, text: f.content }))); const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" })); const a = document.createElement("a"); a.href = url; a.download = b.label + "_" + (b.functionId || "build") + ".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500); } catch (e) { notify("Download failed."); } };
+  const loadRunners = async () => { try { const r = await BA.runnerList(); setRunners(r.runners || []); } catch (e) { setRunners([]); setBMsg(e.message); } };
+  const makeRunner = async () => { try { const r = await BA.runnerCreate(rName.trim() || "runner"); setRToken(r.token); setRName(""); audit("Registered build runner", r.runner.name, "token issued (shown once)", false); await loadRunners(); } catch (e) { setBMsg(e.message); } };
+  const dropRunner = async (id) => { if (!window.confirm("Revoke this runner? Its token stops working immediately.")) return; try { await BA.runnerRevoke(id); audit("Revoked build runner", id, "", false); await loadRunners(); } catch (e) { setBMsg(e.message); } };
+  const BST = { queued: ["Queued", "#667085", "#F2F4F7"], running: ["Running", "#175CD3", "#EFF8FF"], passed: ["Passed", "#067647", "#ECFDF3"], failed: ["Failed", "#B42318", "#FEF3F2"], errored: ["Errored", "#B54708", "#FEF6EE"], canceled: ["Canceled", "#667085", "#F2F4F7"] };
+  const bchip = (s) => { const x = BST[s] || BST.queued; return <span style={{ fontSize: 9, fontWeight: 800, color: x[1], background: x[2], borderRadius: 4, padding: "1px 7px" }}>{x[0].toUpperCase()}</span>; };
+  const dur = (b) => (b.startedAt && b.finishedAt ? Math.max(0, Math.round((Date.parse(b.finishedAt) - Date.parse(b.startedAt)) / 1000)) + " s" : "");
+  const C = { st: { draft: ["Draft", "#667085", "#F2F4F7"], proposed: ["Proposed", "#B54708", "#FEF6EE"], approved: ["Approved", "#067647", "#ECFDF3"] } };
+  const chip = (st) => { const x = C.st[st]; return x ? <span style={{ fontSize: 9, fontWeight: 800, color: x[1], background: x[2], borderRadius: 4, padding: "1px 7px" }}>{x[0].toUpperCase()}</span> : null; };
+  const th = { textAlign: "left", padding: "4px 6px", fontSize: 10, color: "#98A2B3", fontWeight: 700, whiteSpace: "nowrap", background: "#F9FAFB", borderBottom: "1px solid #EAECF0" };
+  const inp = (v, on, w, mono) => <input value={v == null ? "" : v} disabled={!canWrite} onChange={(e) => on(e.target.value)} style={{ width: w || "100%", fontSize: 11, padding: "2px 5px", border: "1px solid #E4E7EC", borderRadius: 5, fontFamily: mono ? "ui-monospace,monospace" : "inherit", background: canWrite ? "#fff" : "#F9FAFB" }} />;
+  const selBox = (v, on, opts, w) => <select value={v || ""} disabled={!canWrite} onChange={(e) => on(e.target.value)} style={{ width: w || "100%", fontSize: 11, padding: "2px 3px", border: "1px solid #E4E7EC", borderRadius: 5 }}>{!v && <option value="">—</option>}{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
+  const sec = (title, sub, body) => (<div style={{ marginTop: 18 }}><div style={{ fontSize: 11, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>{title}</div>{sub && <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 6 }}>{sub}</div>}<div style={{ border: "1px solid #EAECF0", borderRadius: 8, overflow: "auto" }}>{body}</div></div>);
+  const errAt = (p) => (val ? val.errors.filter((e) => e.path === p || e.path.startsWith(p + ".")) : []);
+  const mark = (p) => { const e = errAt(p); return e.length ? <div title={e.map((x) => x.msg).join("\n")} style={{ color: "#B42318", fontSize: 10, cursor: "help" }}>⚠ {e[0].msg.slice(0, 60)}</div> : null; };
+  if (!CG) return <div className="flex-1 p-8" style={{ color: "#667085", fontSize: 13 }}>The code-generation module isn't loaded in this runtime (standalone preview). Open the app from the main site to use Behavior Models.</div>;
+  const outs = draft ? draft.signals.filter((s) => s.dir === "out") : [];
+  const T = ["uint8", "uint16", "uint32", "sint8", "sint16", "sint32", "boolean"];
+  return (
+    <div className="flex-1 flex" style={{ background: "#fff", minHeight: 0 }}>
+      <div style={{ width: 270, borderRight: "1px solid #EAECF0", overflow: "auto", flexShrink: 0 }}>
+        <div style={{ padding: "12px 12px 6px", fontSize: 11, fontWeight: 800, color: "#12B76A", letterSpacing: 0.5 }}>PHASE 1 · QM CODE</div>
+        <div style={{ padding: "0 12px 8px", fontSize: 11, color: "#667085", lineHeight: 1.4 }}>Functions with a state machine. Define a Behavior Model, get it approved, then generate code and tests.</div>
+        {Object.keys(sms).filter((id) => inScope(id)).map((id) => { const m = models[bmId(id)]; const v = m ? CG.validateModel(m) : null; return (
+          <button key={id} onClick={() => open(id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", borderTop: "1px solid #F2F4F7", background: sel === id ? "#F5F8FC" : "#fff" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#101828" }}>{sms[id].title}</div>
+            <div className="flex items-center gap-2" style={{ marginTop: 2 }}><span style={{ fontSize: 9.5, color: "#98A2B3", fontFamily: "ui-monospace,monospace" }}>{id.replace("-MODE", "")}</span>{m ? chip(m.status) : <span style={{ fontSize: 9, color: "#B6C0CC" }}>no model</span>}{m && v && !v.ready && <span style={{ fontSize: 9, color: "#B42318" }}>{v.errors.length} to fix</span>}{m && m.lastGen && <span style={{ fontSize: 9, color: "#067647" }}>{m.generatedTests ? m.generatedTests.length : 0} tests</span>}</div>
+          </button>); })}
+        <div style={{ padding: "8px 12px", fontSize: 10.5, color: "#98A2B3", borderTop: "1px solid #F2F4F7", lineHeight: 1.4 }}>Platform state machines (power mode, DTC, SecOC) are outside Phase 1 scope. Wiper functions may carry safety relevance — classification must be confirmed first.</div>
+      </div>
+      <div className="flex-1 overflow-auto" style={{ padding: "18px 24px" }}>
+        {!sel && <div style={{ color: "#667085", fontSize: 13, maxWidth: 560, lineHeight: 1.55 }}><b style={{ color: "#101828" }}>Behavior Models</b> close the gap between the architecture (structure) and generated code (behavior): typed signals, named calibrations, a guarded state machine and the outputs of each state. The generator is deterministic — same approved model, same code. AI can propose content; a person approves it. Pick a function on the left. Start with <b>Heating Exterior Mirrors</b> (pilot).</div>}
+        {sel && !draft && (<div><h2 style={{ fontSize: 18, fontWeight: 700, color: "#101828" }}>{sms[sel].title}</h2><div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>{sms[sel].states.length} states · {sms[sel].trans.length} transitions in the architecture model. No Behavior Model yet.</div>
+          {canWrite && <button onClick={create} style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", borderRadius: 8, padding: "7px 14px" }}>{CG.pilots && CG.pilots[sel] ? "Create from pilot template (proposed values)" : "Create from state machine (skeleton)"}</button>}
+          <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8, maxWidth: 520 }}>{CG.pilots && CG.pilots[sel] ? "The template carries proposed types, thresholds, guards and outputs — starting points for the function owner to confirm, not approved values." : "The skeleton copies states and transitions. Signals, guards and outputs must then be defined (or proposed by the Assistant) and reviewed."}</div></div>)}
+        {sel && draft && (<div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#101828" }}>{draft.title}</h2>{chip(draft.status)}<span style={{ fontSize: 11, color: "#98A2B3" }}>rev {draft.rev || 1}{dirty ? " · unsaved changes" : ""}</span>
+            {draft.status === "approved" && <span style={{ fontSize: 10.5, color: "#667085" }}>by {draft.approvedBy} · {new Date(draft.approvedAt).toLocaleDateString()}</span>}
+            {draft.qmConfirmed ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#067647" }}>QM confirmed · {draft.qmConfirmed.by} · {new Date(draft.qmConfirmed.at).toLocaleDateString()}</span> : (canWrite && models[draft.id] ? <button onClick={confirmQm} style={{ fontSize: 10.5, fontWeight: 700, color: "#B54708", border: "1px solid #FEC84B", borderRadius: 6, padding: "1px 8px" }}>QM classification: not confirmed — confirm…</button> : <span style={{ fontSize: 10.5, color: "#B54708" }}>QM classification not confirmed</span>)}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 10 }}>
+            {canWrite && <button disabled={!dirty} onClick={save} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: dirty ? "#175CD3" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>Save</button>}
+            {canWrite && dirty && <button onClick={() => { setDraft(cl(models[draft.id])); setDirty(false); }} style={{ fontSize: 12, color: "#475467", border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 12px" }}>Discard</button>}
+            {canWrite && <button onClick={propose} disabled={!!busy} style={{ fontSize: 12, fontWeight: 600, color: "#7A5AF8", border: "1px solid #D9D6FE", borderRadius: 7, padding: "5px 12px" }}>{busy === "ai" ? "Asking…" : "✨ Propose with Assistant"}</button>}
+            <button onClick={generate} disabled={!!busy || !(val && val.ready)} title={val && !val.ready ? "Fix the blocking issues first" : "Generate C code and unit tests"} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: val && val.ready ? "#12B76A" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>{busy === "gen" ? "Generating…" : "Generate code + tests"}</button>
+            {canWrite && draft.status !== "approved" && <button onClick={() => setStatus("approved")} style={{ fontSize: 12, fontWeight: 600, color: "#067647", border: "1px solid #ABEFC6", borderRadius: 7, padding: "5px 12px" }}>Approve…</button>}
+            {canWrite && draft.status === "approved" && <button onClick={() => setStatus("proposed")} style={{ fontSize: 12, color: "#B54708", border: "1px solid #FEC84B", borderRadius: 7, padding: "5px 12px" }}>Revoke approval</button>}
+            {canWrite && draft.status === "draft" && <button onClick={() => setStatus("proposed")} style={{ fontSize: 12, color: "#B54708", border: "1px solid #FEC84B", borderRadius: 7, padding: "5px 12px" }}>Mark proposed</button>}
+            {canWrite && <button onClick={remove} style={{ fontSize: 12, color: "#B42318", marginLeft: "auto" }}>Delete model</button>}
+          </div>
+          {val && (<div style={{ marginTop: 12, border: "1px solid " + (val.ready ? "#ABEFC6" : "#FECDCA"), background: val.ready ? "#F6FEF9" : "#FFFBFA", borderRadius: 8, padding: "8px 12px", fontSize: 11.5 }}>
+            <b style={{ color: val.ready ? "#067647" : "#B42318" }}>{val.ready ? "Complete — ready to generate" : val.errors.length + " blocking issue" + (val.errors.length === 1 ? "" : "s")}</b>{val.warnings.length > 0 && <span style={{ color: "#B54708" }}> · {val.warnings.length} warning{val.warnings.length === 1 ? "" : "s"}</span>}
+            {val.errors.slice(0, 8).map((e, i) => <div key={i} style={{ color: "#B42318", marginTop: 2 }}>• {e.msg}</div>)}{val.errors.length > 8 && <div style={{ color: "#98A2B3" }}>…and {val.errors.length - 8} more</div>}
+            {val.warnings.slice(0, 4).map((e, i) => <div key={i} style={{ color: "#B54708", marginTop: 2 }}>• {e.msg}</div>)}</div>)}
+          {sec("FUNCTION", null, (<div style={{ padding: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10, fontSize: 11 }}>
+            <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>IMPLEMENTS (requirement IDs, comma-separated)</div>{inp((draft.implements || []).join(", "), (v) => edit((m) => { m.implements = v.split(",").map((x) => x.trim()).filter(Boolean); }))}{mark("implements")}</div>
+            <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>COMPONENT NAME (C identifier)</div>{inp(draft.target && draft.target.swc, (v) => edit((m) => { m.target = { ...(m.target || {}), swc: v }; }), null, true)}{mark("target.swc")}</div>
+            <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>TARGET ECU</div>{inp(draft.target && draft.target.ecu, (v) => edit((m) => { m.target = { ...(m.target || {}), ecu: v }; }))}</div>
+            <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>RUNNABLE PERIOD (ms)</div>{inp(draft.runnable && draft.runnable.periodMs, (v) => edit((m) => { m.runnable = { ...(m.runnable || { name: "Run" }), periodMs: v }; }), 90)}{mark("runnable.periodMs")}</div>
+          </div>))}
+          {sec("SIGNALS", "Typed inputs and outputs. Ranges bound the generated tests; the initial value is also the fallback when a read fails (or the invalid-substitute, if set).", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "Dir", "Type", "Min", "Max", "Unit", "Init", "Invalid →", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+            {draft.signals.map((s, i) => (<tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+              <td style={{ padding: 3, minWidth: 130 }}>{inp(s.name, (v) => edit((m) => { m.signals[i].name = v; }), null, true)}{mark("signals[" + i + "].name")}</td>
+              <td style={{ padding: 3, width: 62 }}>{selBox(s.dir, (v) => edit((m) => { m.signals[i].dir = v; }), ["in", "out"])}</td>
+              <td style={{ padding: 3, width: 84 }}>{selBox(s.baseType, (v) => edit((m) => { m.signals[i].baseType = v; }), T)}{mark("signals[" + i + "].baseType")}</td>
+              <td style={{ padding: 3, width: 70 }}>{inp(s.min, (v) => edit((m) => { m.signals[i].min = v; }))}</td><td style={{ padding: 3, width: 70 }}>{inp(s.max, (v) => edit((m) => { m.signals[i].max = v; }))}{mark("signals[" + i + "].range")}</td>
+              <td style={{ padding: 3, width: 80 }}>{inp(s.unit, (v) => edit((m) => { m.signals[i].unit = v; }))}</td><td style={{ padding: 3, width: 64 }}>{inp(s.init, (v) => edit((m) => { m.signals[i].init = v; }))}{mark("signals[" + i + "].init")}</td>
+              <td style={{ padding: 3, width: 64 }}>{s.dir === "in" ? inp(s.invalid, (v) => edit((m) => { m.signals[i].invalid = v; })) : null}</td>
+              <td style={{ padding: 3 }}>{canWrite && <button onClick={() => edit((m) => { m.signals.splice(i, 1); })} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td></tr>))}
+            {draft.signals.length === 0 && <tr><td colSpan={9} style={{ padding: 10, color: "#98A2B3", fontSize: 11 }}>No signals yet — add them, or ask the Assistant to propose them.</td></tr>}
+            {canWrite && <tr><td colSpan={9} style={{ padding: 6 }}><button onClick={() => edit((m) => { m.signals.push({ name: "", dir: "in", baseType: "", min: "", max: "", unit: "", init: "", invalid: "" }); })} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3" }}>+ Add signal</button></td></tr>}</tbody></table>))}
+          {sec("CALIBRATIONS", "Every threshold and timeout is a named parameter (one definition, with its unit and source) — never a literal inside a guard.", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "Type", "Value", "Unit", "Source / justification", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+            {draft.calibrations.map((c, i) => (<tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+              <td style={{ padding: 3, minWidth: 170 }}>{inp(c.name, (v) => edit((m) => { m.calibrations[i].name = v; }), null, true)}{mark("calibrations[" + i + "].name")}</td>
+              <td style={{ padding: 3, width: 84 }}>{selBox(c.baseType, (v) => edit((m) => { m.calibrations[i].baseType = v; }), T)}</td>
+              <td style={{ padding: 3, width: 90 }}>{inp(c.value, (v) => edit((m) => { m.calibrations[i].value = v; }))}{mark("calibrations[" + i + "].value")}</td><td style={{ padding: 3, width: 80 }}>{inp(c.unit, (v) => edit((m) => { m.calibrations[i].unit = v; }))}</td>
+              <td style={{ padding: 3 }}>{inp(c.source, (v) => edit((m) => { m.calibrations[i].source = v; }))}</td>
+              <td style={{ padding: 3 }}>{canWrite && <button onClick={() => edit((m) => { m.calibrations.splice(i, 1); })} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td></tr>))}
+            {canWrite && <tr><td colSpan={6} style={{ padding: 6 }}><button onClick={() => edit((m) => { m.calibrations.push({ name: "CAL_", baseType: "", value: "", unit: "", source: "" }); })} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3" }}>+ Add calibration</button></td></tr>}</tbody></table>))}
+          {sec("STATES — OUTPUTS", "Moore outputs: what each output is while the machine is in that state (an expression, evaluated every cycle). Every state must define every output.", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr><th style={th}>State</th><th style={th}>Label</th>{outs.map((o) => <th key={o.name} style={th}>{o.name || "(output)"}</th>)}</tr></thead><tbody>
+            {draft.stateMachine.states.map((st, i) => (<tr key={st.id} style={{ borderTop: "1px solid #F2F4F7" }}>
+              <td style={{ padding: "3px 6px", fontFamily: "ui-monospace,monospace", fontSize: 11, fontWeight: 700, color: draft.stateMachine.init === st.id ? "#175CD3" : "#344054" }}>{st.id}{draft.stateMachine.init === st.id ? " ●" : ""}</td><td style={{ padding: "3px 6px", fontSize: 11, color: "#667085" }}>{st.label}</td>
+              {outs.map((o) => <td key={o.name} style={{ padding: 3, minWidth: 120 }}>{inp(st.outputs && st.outputs[o.name], (v) => edit((m) => { m.stateMachine.states[i].outputs = m.stateMachine.states[i].outputs || {}; m.stateMachine.states[i].outputs[o.name] = v; }), null, true)}{mark("stateMachine.states[" + i + "].outputs." + o.name)}</td>)}</tr>))}
+            {outs.length === 0 && <tr><td colSpan={2} style={{ padding: 10, color: "#98A2B3", fontSize: 11 }}>Define at least one output signal above.</td></tr>}</tbody></table>))}
+          {sec("TRANSITIONS — GUARDS", "Listed order is priority: the first transition whose guard is true fires. Use state_time_ms for timeouts (e.g. state_time_ms >= CAL_HEAT_MAX_MS).", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["#", "From", "To", "Meaning", "Guard", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+            {draft.stateMachine.transitions.map((t, i) => (<tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
+              <td style={{ padding: "3px 6px", fontSize: 10, color: "#98A2B3" }}>{i + 1}</td>
+              <td style={{ padding: "3px 6px", fontFamily: "ui-monospace,monospace", fontSize: 11 }}>{t.from}</td><td style={{ padding: "3px 6px", fontFamily: "ui-monospace,monospace", fontSize: 11 }}>→ {t.to}</td>
+              <td style={{ padding: "3px 6px", fontSize: 10.5, color: "#667085", minWidth: 120 }}>{t.label}</td>
+              <td style={{ padding: 3, minWidth: 340 }}>{inp(t.guard, (v) => edit((m) => { m.stateMachine.transitions[i].guard = v; }), null, true)}{mark("stateMachine.transitions[" + i + "].guard")}</td>
+              <td style={{ padding: 3, whiteSpace: "nowrap" }}>{canWrite && <><button title="Higher priority" onClick={() => i > 0 && edit((m) => { const a = m.stateMachine.transitions; [a[i - 1], a[i]] = [a[i], a[i - 1]]; })} style={{ fontSize: 11, color: "#475467", padding: "0 3px" }}>↑</button><button title="Lower priority" onClick={() => i < draft.stateMachine.transitions.length - 1 && edit((m) => { const a = m.stateMachine.transitions; [a[i + 1], a[i]] = [a[i], a[i + 1]]; })} style={{ fontSize: 11, color: "#475467", padding: "0 3px" }}>↓</button></>}</td></tr>))}
+          </tbody></table>))}
+          {BA && (<div style={{ marginTop: 22 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>BUILDS</div>
+            <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 6 }}>A build always starts from a <b>baseline</b> that holds an <b>approved, QM-confirmed</b> model. A runner regenerates the code, compiles it with strict warnings, runs the generated tests and reports back. Static analysis and coverage are not run yet and are shown as such.</div>
+            <div style={{ border: "1px solid #EAECF0", borderRadius: 8, padding: 12 }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select value={bl} onChange={(e) => setBl(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", border: "1px solid #D0D5DD", borderRadius: 7, maxWidth: 360 }}>
+                  <option value="">— choose a baseline —</option>
+                  {baselines.map((b) => { const m = b.snap && b.snap.behaviorModels && b.snap.behaviorModels[draft.id]; return <option key={b.id} value={b.id}>{b.name} · {m ? (m.status === "approved" && m.qmConfirmed ? "approved ✓" : m.status) : "model not in baseline"}</option>; })}
+                </select>
+                {canWrite && <button onClick={captureNow} style={{ fontSize: 11.5, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 7, padding: "4px 10px" }}>Capture baseline now</button>}
+                {canWrite && <button onClick={requestBuild} disabled={bBusy || !blGate.ok} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: blGate.ok && !bBusy ? "#12B76A" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>{bBusy ? "Requesting…" : "Request build"}</button>}
+                {bMsg && <span style={{ fontSize: 11.5, color: /^Queued|captured|Waiting/.test(bMsg) ? "#067647" : "#B42318" }}>{bMsg}</span>}
+              </div>
+              {bl && !blGate.ok && <div style={{ marginTop: 8, fontSize: 11.5, color: "#B54708" }}>{blGate.reasons.map((r, i) => <div key={i}>• {r}</div>)}</div>}
+              {!bl && <div style={{ marginTop: 8, fontSize: 11, color: "#98A2B3" }}>Approve the model, then <b>Capture baseline now</b> (or pick an existing baseline) to enable a build.</div>}
+              {builds.length > 0 && (<table style={{ borderCollapse: "collapse", width: "100%", marginTop: 12 }}><thead><tr>{["Build", "Status", "Baseline", "Tests", "Where", "When", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+                {builds.map((b) => (<tr key={b.id} onClick={() => { if (bSel !== b.id) { setBSel(b.id); setBFiles(null); } }} style={{ borderTop: "1px solid #F2F4F7", cursor: "pointer", background: bSel === b.id ? "#F5F8FC" : "#fff" }}>
+                  <td style={{ padding: "4px 8px", fontFamily: "ui-monospace,monospace", fontSize: 11, fontWeight: 700, color: "#175CD3" }}>{b.label}</td><td style={{ padding: "4px 8px" }}>{bchip(b.status)}</td>
+                  <td style={{ padding: "4px 8px", fontSize: 11, color: "#475467" }}>{b.baselineName || b.baselineId}</td>
+                  <td style={{ padding: "4px 8px", fontSize: 11, color: "#344054" }}>{b.result && b.result.tests ? b.result.tests.passed + "/" + b.result.tests.run : "—"}</td>
+                  <td style={{ padding: "4px 8px", fontSize: 10.5, color: "#98A2B3" }}>{b.pool === "customer" ? "your runner" : "managed"}</td>
+                  <td style={{ padding: "4px 8px", fontSize: 10.5, color: "#98A2B3", whiteSpace: "nowrap" }}>{new Date(b.createdAt).toLocaleString()} {dur(b)}</td>
+                  <td style={{ padding: "4px 8px" }}>{canWrite && (b.status === "queued" || b.status === "running") && <button onClick={(e) => { e.stopPropagation(); cancelBuildReq(b.id); }} style={{ fontSize: 10.5, color: "#B42318" }}>Cancel</button>}</td></tr>))}
+              </tbody></table>)}
+              {builds.length === 0 && <div style={{ marginTop: 10, fontSize: 11.5, color: "#98A2B3" }}>No builds yet for this function.</div>}
+              {(() => { const sb = builds.find((b) => b.id === bSel); if (!sb) return null; const done = sb.status === "passed" || sb.status === "failed"; const hasRes = bFiles && bFiles.some((f) => f.name === "results.xml"); const imported = tcRuns.some((r) => r.buildId === sb.id); return (
+                <div style={{ marginTop: 12, borderTop: "1px solid #EAECF0", paddingTop: 10 }}>
+                  <div className="flex items-center gap-2 flex-wrap"><b style={{ fontFamily: "ui-monospace,monospace", fontSize: 13 }}>{sb.label}</b>{bchip(sb.status)}<span style={{ fontSize: 11, color: "#667085" }}>model {sb.modelHash} · generator {sb.generatorVersion} · by {sb.requestedBy}{sb.attempts > 1 ? " · attempt " + sb.attempts : ""}</span></div>
+                  {sb.result && sb.result.error && <div style={{ marginTop: 6, fontSize: 12, color: "#B42318" }}>{sb.result.error}</div>}
+                  {sb.result && sb.result.steps && (<table style={{ borderCollapse: "collapse", width: "100%", marginTop: 8 }}><tbody>{sb.result.steps.map((s) => (
+                    <tr key={s.name} style={{ borderTop: "1px solid #F2F4F7" }}><td style={{ padding: "3px 8px", width: 24, color: s.status === "passed" ? "#067647" : s.status === "failed" ? "#B42318" : s.status === "errored" ? "#B54708" : "#98A2B3" }}>{s.status === "passed" ? "✔" : s.status === "failed" ? "✘" : s.status === "errored" ? "⚠" : "–"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 11.5, fontWeight: 600, color: "#344054", whiteSpace: "nowrap" }}>{s.name}</td><td style={{ padding: "3px 8px", fontSize: 11, color: s.status === "not-run" ? "#98A2B3" : "#667085", whiteSpace: "pre-wrap" }}>{s.status === "not-run" ? "NOT RUN — " + s.detail : s.detail}</td><td style={{ padding: "3px 8px", fontSize: 10, color: "#98A2B3", whiteSpace: "nowrap" }}>{s.ms ? s.ms + " ms" : ""}</td></tr>))}</tbody></table>)}
+                  {sb.result && sb.result.compiler && <div style={{ marginTop: 6, fontSize: 10.5, color: "#98A2B3" }}>{sb.result.compiler} · runner {sb.result.runner && sb.result.runner.version} · {sb.result.runner && sb.result.runner.platform}</div>}
+                  <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
+                    {bFiles && bFiles.length > 0 && <button onClick={() => downloadBuildZip(sb)} style={{ fontSize: 11.5, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 7, padding: "3px 10px" }}>Download files (.zip)</button>}
+                    {canWrite && done && hasRes && <button disabled={imported} onClick={() => onImportResults(sb, bFiles)} style={{ fontSize: 11.5, fontWeight: 700, color: imported ? "#98A2B3" : "#067647", border: "1px solid " + (imported ? "#EAECF0" : "#ABEFC6"), borderRadius: 7, padding: "3px 10px" }}>{imported ? "Results imported" : "Import results into Test Cases"}</button>}
+                    {bFiles && <span style={{ fontSize: 10.5, color: "#98A2B3" }}>{bFiles.length} files stored</span>}
+                  </div>
+                  {sb.log && <pre style={{ marginTop: 8, maxHeight: 200, overflow: "auto", background: "#FCFCFD", border: "1px solid #EAECF0", borderRadius: 6, padding: 8, fontSize: 10.5, lineHeight: 1.4 }}>{sb.log}</pre>}
+                </div>); })()}
+            </div>
+            {isAdm && (<details style={{ marginTop: 10, border: "1px solid #EAECF0", borderRadius: 8, padding: "8px 12px" }} onToggle={(e) => { if (e.target.open && runners === null) loadRunners(); }}>
+              <summary style={{ fontSize: 12, fontWeight: 700, color: "#475467", cursor: "pointer" }}>Build runners (owner/admin)</summary>
+              <div style={{ fontSize: 11, color: "#667085", margin: "8px 0", lineHeight: 1.5 }}>Run your own runner so builds execute on your infrastructure and never leave it. Create a token, then start the runner with it — see <code>runner/README.md</code>. The token is shown once and can be revoked at any time.</div>
+              <div className="flex items-center gap-2"><input value={rName} onChange={(e) => setRName(e.target.value)} placeholder="Runner name (e.g. build-server-1)" style={{ fontSize: 12, padding: "4px 8px", border: "1px solid #D0D5DD", borderRadius: 7, width: 240 }} /><button onClick={makeRunner} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", borderRadius: 7, padding: "5px 12px" }}>Create runner token</button></div>
+              {rToken && (<div style={{ marginTop: 8, background: "#FFFCF5", border: "1px solid #FEC84B", borderRadius: 8, padding: 10 }}><div style={{ fontSize: 11, fontWeight: 700, color: "#B54708" }}>Copy this token now — it won't be shown again.</div><code style={{ display: "block", marginTop: 4, fontSize: 12, wordBreak: "break-all", userSelect: "all" }}>{rToken}</code><div style={{ fontSize: 10.5, color: "#667085", marginTop: 6 }}>SDV_API={typeof window !== "undefined" ? window.location.origin : ""} SDV_RUNNER_TOKEN=&lt;token&gt; node runner/runner.mjs</div><button onClick={() => setRToken(null)} style={{ marginTop: 6, fontSize: 11, color: "#475467" }}>I've saved it</button></div>)}
+              <table style={{ borderCollapse: "collapse", width: "100%", marginTop: 8 }}><tbody>{(runners || []).map((r) => (<tr key={r.id} style={{ borderTop: "1px solid #F2F4F7" }}>
+                <td style={{ padding: "4px 6px", fontSize: 12, fontWeight: 600 }}>{r.name}</td><td style={{ padding: "4px 6px", fontSize: 10.5, color: "#98A2B3" }}>{r.revoked ? "revoked" : (r.lastSeenAt ? "last seen " + new Date(r.lastSeenAt).toLocaleString() : "never connected")}</td><td style={{ padding: "4px 6px", fontSize: 10.5, color: "#98A2B3" }}>{r.info && r.info.compiler}</td>
+                <td style={{ padding: "4px 6px" }}>{!r.revoked && <button onClick={() => dropRunner(r.id)} style={{ fontSize: 11, color: "#B42318" }}>Revoke</button>}</td></tr>))}
+                {runners && runners.length === 0 && <tr><td style={{ padding: 6, fontSize: 11, color: "#98A2B3" }}>No runners yet — builds use the managed fleet.</td></tr>}</tbody></table>
+            </details>)}
+          </div>)}
+          {gen && (<div style={{ marginTop: 22 }}>
+            <div className="flex items-center gap-3"><div style={{ fontSize: 11, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>GENERATED OUTPUT</div>{gen.ok && <button onClick={download} style={{ fontSize: 11.5, fontWeight: 700, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 7, padding: "3px 10px" }}>Download .zip</button>}</div>
+            {!gen.ok && <div style={{ color: "#B42318", fontSize: 12, marginTop: 6 }}>Nothing generated — {gen.errors.length} blocking issue(s) above.</div>}
+            {gen.ok && (<><div style={{ fontSize: 11.5, color: "#475467", marginTop: 6 }}>{gen.files.length} files · {gen.tests.length} test cases · model hash <span style={{ fontFamily: "ui-monospace,monospace" }}>{gen.manifest.model.hash}</span> · generator v{gen.manifest.generator.version} · {gen.manifest.model.approved ? <b style={{ color: "#067647" }}>approved model</b> : <b style={{ color: "#B54708" }}>NOT approved — draft output, not releasable</b>}</div>
+              {gen.gaps.length > 0 && <div style={{ marginTop: 8, border: "1px solid #FEC84B", background: "#FFFCF5", borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "#B54708" }}><b>Not covered automatically ({gen.gaps.length})</b>{gen.gaps.map((g, i) => <div key={i} style={{ marginTop: 2 }}>• {g}</div>)}</div>}
+              <div className="flex" style={{ marginTop: 10, border: "1px solid #EAECF0", borderRadius: 8, overflow: "hidden", minHeight: 260 }}>
+                <div style={{ width: 210, borderRight: "1px solid #EAECF0", overflow: "auto", maxHeight: 420 }}>{gen.files.map((f) => <button key={f.name} onClick={() => setFileSel(f.name)} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 11, fontFamily: "ui-monospace,monospace", padding: "5px 10px", background: fileSel === f.name ? "#F5F8FC" : "#fff", color: "#344054" }}>{f.name}</button>)}</div>
+                <pre style={{ flex: 1, margin: 0, padding: 10, fontSize: 10.5, lineHeight: 1.45, overflow: "auto", maxHeight: 420, background: "#FCFCFD", color: "#101828" }}>{(gen.files.find((f) => f.name === fileSel) || { text: "" }).text}</pre></div>
+              <div style={{ marginTop: 10, border: "1px solid #EAECF0", borderRadius: 8, overflow: "auto", maxHeight: 300 }}><table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Test case", "Title", "Expectation"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+                {gen.tests.map((t) => <tr key={t.id} style={{ borderTop: "1px solid #F2F4F7" }}><td style={{ padding: "3px 8px", fontFamily: "ui-monospace,monospace", fontSize: 10, color: "#175CD3", whiteSpace: "nowrap" }}>{t.id}</td><td style={{ padding: "3px 8px", fontSize: 11, color: "#344054" }}>{t.title}</td><td style={{ padding: "3px 8px", fontSize: 10.5, color: "#667085" }}>{t.exp}</td></tr>)}</tbody></table></div>
+              <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 6 }}>These test cases now appear in the Test Cases view (stage SWE.4). Run the generated tests in the build, then import the JUnit XML to record results.</div></>)}
+          </div>)}
+        </div>)}
+      </div>
+    </div>
+  );
+}
 /* Gap Analysis panel — categorized, filterable list of the gaps computeGapAnalysis found. */
 function GapAnalysisPanel({ rep }) {
   const [cat, setCat] = useState("all");
@@ -7449,6 +7716,7 @@ export default function App() {
   const [reqStatus, setReqStatus] = useState({}); // requirement lifecycle: id -> { status, reviewer, approver, date }
   const [tcExec, setTcExec] = useState({}); // test-case execution: tcId -> { status: pass|fail|blocked, date, evidence, build, tool, coverage, durationSec, source }
   const [tcBuild, setTcBuild] = useState(""); // build / commit the next results belong to (stamped on results + audit entries)
+  const [behaviorModels, setBehaviorModels] = useState({}); // Phase 1 Behavior Models: id -> model (+ testIds, generatedTests, lastGen)
   const [tcRuns, setTcRuns] = useState([]); // imported result sets: [{ id, ts, file, source, build, matched, unmatched, pass, fail, blocked, covAvg }]
   const [auditLog, setAuditLog] = useState([]); // white-box change log: [{ ts, actor, action, target, detail, ai }]
   // White-box audit trail — records who changed what (human vs AI). Kept to the last 800 entries.
@@ -7838,8 +8106,8 @@ export default function App() {
     ...collectStores(),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: n.props }])),
     userNodes: Object.fromEntries(Object.values(nodes).filter((n) => n && n.userCreated).map((n) => [n.id, n])),
-    reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv,
-  }), [nodes, reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv]);
+    reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels,
+  }), [nodes, reqStatus, regEdits, baselines, tcExec, tcRuns, auditLog, userEcus, opsOv, behaviorModels]);
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
@@ -7848,6 +8116,7 @@ export default function App() {
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
     if (d.tcExec) setTcExec(clone(d.tcExec));
     if (Array.isArray(d.tcRuns)) setTcRuns(clone(d.tcRuns));
+    if (d.behaviorModels && typeof d.behaviorModels === "object") setBehaviorModels(clone(d.behaviorModels));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
     if (d.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(d.opsOv) });
@@ -7891,17 +8160,46 @@ export default function App() {
     document.addEventListener("visibilitychange", onVis);
     return () => { document.removeEventListener("pointerup", schedule, true); document.removeEventListener("keyup", schedule, true); document.removeEventListener("visibilitychange", onVis); clearTimeout(wsTimerRef.current); };
   }, []);
+  /* Import the JUnit results of a finished build (results.xml, produced by the runner) into Test Cases — same matching as the manual import,
+     stamped with the build label so the result, the audit entry and the build all share one ID. Idempotent per build. */
+  const importBuildResults = (build, files) => {
+    const f = (files || []).find((x) => x.name === "results.xml");
+    if (!f) { notify("This build has no results.xml to import."); return; }
+    if (tcRuns.some((r) => r.buildId === build.id)) { notify(build.label + " results were already imported."); return; }
+    // Register test definitions the build generated that this workspace does not know yet (IDs come from the build's own
+    // testIds map; a key that already maps to a DIFFERENT number is a conflict and is skipped, never overwritten).
+    let merged = null, added = 0, conflicts = 0; const tcf = (files || []).find((x) => x.name === "testcases.json");
+    if (tcf && behaviorModels[build.bmId]) { try {
+      const tc = JSON.parse(tcf.content); const m = JSON.parse(JSON.stringify(behaviorModels[build.bmId])); m.generatedTests = m.generatedTests || []; m.testIds = m.testIds || {};
+      const have = new Set(m.generatedTests.map((t) => t.id));
+      (tc.tests || []).forEach((t) => { if (have.has(t.id)) return; const num = (tc.testIds || {})[t.key]; if (m.testIds[t.key] && m.testIds[t.key] !== num) { conflicts++; return; } m.testIds[t.key] = num; m.generatedTests.push(t); have.add(t.id); added++; });
+      if (added) merged = m;
+    } catch (e) { /* malformed testcases.json: fall back to the tests this workspace already knows */ } }
+    const models = merged ? { ...behaviorModels, [build.bmId]: merged } : behaviorModels;
+    const known = new Set(Object.values(models).flatMap((m) => (m.generatedTests || []).map((t) => t.id)));
+    const { props, cases } = parseJUnit(f.content); const today = new Date().toISOString().slice(0, 10); const patch = {}; let n = 0, miss = 0;
+    cases.forEach((c) => { const id = matchTcId(c, known); if (!id) { miss++; return; } patch[id] = { status: c.status, date: today, evidence: c.note || "", build: build.label, tool: props.tool || "SDVsolution codegen", source: "build " + build.label, ...(c.time ? { durationSec: c.time } : {}) }; n++; });
+    if (!n) { notify("None of this build's tests match a known generated test case (" + miss + " unmatched)."); return; }
+    const vals = Object.values(patch), cnt = (s) => vals.filter((v) => v.status === s).length;
+    const run = { id: "RUN-" + Date.now(), buildId: build.id, ts: Date.now(), file: "results.xml (" + build.label + ")", source: props.tool || "build runner", build: build.label, matched: n, unmatched: miss, pass: cnt("pass"), fail: cnt("fail"), blocked: cnt("blocked"), covAvg: null };
+    if (merged) setBehaviorModels((p) => (p[build.bmId] ? { ...p, [build.bmId]: merged } : p));
+    setTcExec((p) => ({ ...p, ...patch })); setTcRuns((r) => [run, ...r].slice(0, 100));
+    logAudit("Imported build results", build.label, n + " matched · " + run.pass + " pass / " + run.fail + " fail" + (added ? " · " + added + " test case(s) registered from the build" : "") + (conflicts ? " · " + conflicts + " ID conflict(s) skipped" : "") + (miss ? " · " + miss + " unmatched" : ""), false, build.label);
+    notify(build.label + ": imported " + n + " result(s) — " + run.pass + " passed, " + run.fail + " failed" + (added ? " (+" + added + " test cases registered)" : "") + (conflicts ? " · " + conflicts + " ID conflict(s) skipped" : "") + ".");
+  };
   const snapshotWorking = useCallback(() => ({
     km: clone(KM_STORE.data),
     nodeEdits: Object.fromEntries(Object.values(nodes).filter((n) => n && n.edited).map((n) => [n.id, { label: n.label, statement: n.props?.statement, props: clone(n.props) }])),
     reqStatus: clone(reqStatus),
     regEdits: clone(regEdits),
-  }), [nodes, reqStatus, regEdits]);
+    behaviorModels: clone(behaviorModels), // builds start from the models frozen here
+  }), [nodes, reqStatus, regEdits, behaviorModels]);
   const applySnapshot = useCallback((snap) => {
     if (!snap) return;
     if (snap.km) KM_STORE.data = clone(snap.km);
     setReqStatus(clone(snap.reqStatus) || {});
     setRegEdits(clone(snap.regEdits) || {});
+    if (snap.behaviorModels) setBehaviorModels(clone(snap.behaviorModels));
     setNodes((prev) => {
       const nx = { ...prev }; const want = snap.nodeEdits || {};
       // revert edits made since the snapshot back to their generated baseline
@@ -7915,6 +8213,7 @@ export default function App() {
   const captureBaseline = useCallback((name) => {
     const bl = { id: "BL-" + Date.now(), name: (name || "").trim() || ("Baseline " + new Date().toLocaleString()), ts: new Date().toISOString(), snap: snapshotWorking() };
     setBaselines((p) => [bl, ...p]); setBlName(""); setBlSel(bl.id); setBlMsg("Captured “" + bl.name + "”");
+    return bl.id;
   }, [snapshotWorking]);
   const diffSnaps = (base, cur) => {
     const out = { km: { added: [], removed: [], changed: [] }, req: [], status: [], reg: [] };
@@ -7981,7 +8280,7 @@ export default function App() {
   const [confirmDel, setConfirmDel] = useState(null); // node id pending delete | null
 
   const nodeCount = Object.keys(nodes).length;
-  const readiness = useMemo(() => computeReadiness(nodes, tcExec), [nodes, tcExec]);
+  const readiness = useMemo(() => computeReadiness(nodes, tcExec, Object.values(behaviorModels).flatMap((m) => m.generatedTests || [])), [nodes, tcExec, behaviorModels]);
   /* Requirements-quality (ISO 29148) + process/approval readiness cards for the dashboard. */
   const qualityRep = useMemo(() => computeConsistency(reqStatus), [reqStatus, nodes, ecuTplV, sysReqV, swReqV]); // eslint-disable-line
   /* Every authored (structured) requirement — the population the quality + gap analyses scan. */
@@ -10416,7 +10715,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setQMenu(false)} />
                         <div className="absolute rounded-lg overflow-hidden" style={{ top: 40, left: 0, width: 210, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC", boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
                           <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>QUALITY GATE</div>
-                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
+                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["behavior", "Behavior Models", Cpu, "Typed behavior → generated QM code + tests"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
                             <button key={v} onClick={() => { setView(v); setQMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ background: view === v ? "#F5F8FC" : "#fff" }}>
                               <Icon size={14} color={view === v ? "#175CD3" : "#475467"} style={{ flexShrink: 0 }} />
                               <div className="flex-1 min-w-0">
@@ -10451,6 +10750,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const aspect = ASP[suffix] || suffix;
               aspiceTests(reqId, group, isL3, aspect).forEach((tc) => rows.push({ reqId, l1Id, feat, lvl, aspect, stage: tc.stage, method: tc.method, tcId: tc.id, title: tc.title, exp: tc.exp }));
             });
+            Object.values(behaviorModels).forEach((bm) => (bm.generatedTests || []).forEach((tc) => rows.push({ reqId: tc.reqId, l1Id: null, feat: bm.title, lvl: "L2", aspect: "Generated", stage: tc.stage, method: tc.method, tcId: tc.id, title: tc.title, exp: tc.exp }))); // generated unit tests (TC-<fn>-GEN-n)
             rows.sort((a, b) => (a.feat + a.reqId).localeCompare(b.feat + b.reqId));
             const reqCount = new Set(rows.map((r) => r.reqId)).size;
             const openReq = (l1Id) => { if (l1Id && getN(l1Id)) { materialize(l1Id); setSelected(l1Id); setView("reader"); } };
@@ -10592,6 +10892,10 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           )}
 
           {view === "gaps" && <GapAnalysisPanel rep={gapRep} />}
+          {view === "behavior" && <BehaviorPanel models={behaviorModels} setModels={setBehaviorModels} sms={STATE_MACHINES} canWrite={canWrite} periodMs={MIRROR_TIMING.runnablePeriodMs} build={tcBuild.trim()}
+            implFor={(smId) => { const pre = smId.replace(/-MODE$/, "-"); return Object.keys(REQ_STATEMENTS).filter((k) => k.startsWith(pre)); }}
+            reqText={(id) => REQ_STATEMENTS[id] || ((getN(id) && getN(id).props && getN(id).props.statement) || "")}
+            audit={logAudit} notify={notify} baselines={baselines} tcRuns={tcRuns} onImportResults={importBuildResults} onCaptureBaseline={captureBaseline} />}
 
           {view === "adminbilling" && (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
