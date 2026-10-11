@@ -2231,7 +2231,7 @@ const statusColor = (s) =>
   : /not exec|open|hara|required|not started|not built|stale|incomplete/i.test(s) ? "#B54708"
   : /draft/i.test(s) ? "#B54708" : /approv|base|done|pass/i.test(s) ? "#027A48" : "#475467";
 const covColor = (v) => (v >= 90 ? "#12B76A" : v >= 50 ? "#F79009" : "#F04438");
-const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", IMPL: "#0E9384", LOG: "#475467", GAP: "#DD2590" };
+const KEY_COLOR = { SYS: "#175CD3", SWE: "#0E7090", HWE: "#DC6803", SAFE: "#C4320A", SEC: "#C11574", FMEA: "#B42318", VNV: "#027A48", RQ: "#0BA5EC", PROC: "#7A5AF8", STD: "#0E7090", TC: "#12B76A", IMPL: "#0E9384", VMOD: "#067647", LOG: "#475467", GAP: "#DD2590" };
 
 function ProcRow({ p, accent }) {
   const st = statusColor(p.status);
@@ -8566,7 +8566,12 @@ export default function App() {
     const impl = { key: "IMPL", label: "Implementation (QM code)", master: "Behavior Models", primary: total, primaryLabel: "behavior models", view: "behavior",
       secondary: [["Approved", approved + "/" + total], ["Builds", builds], ["Line cov.", cov && cov.lines.pct != null ? cov.lines.pct + "%" : "—"]],
       coverage: total ? Math.round(100 * approved / total) : 0, coverageLabel: "models approved", status, flag };
-    const a = [...readiness.disciplines]; const i = a.findIndex((d) => d.key === "TC"); a.splice(i < 0 ? a.length : i + 1, 0, impl); return a;
+    // V-model card: how far the SDVsolution V (specify -> model -> generate -> verify -> release) is covered by the app; opens the V-Model Process Flow page
+  const vLive = SDV_V_STEPS.filter((s) => s.st === "Live").length, vPart = SDV_V_STEPS.filter((s) => s.st === "Partial").length, vRoad = SDV_V_STEPS.filter((s) => s.st === "Roadmap").length;
+  const vmod = { key: "VMOD", label: "V-Model Process", master: "SDVsolution V", primary: SDV_V_STEPS.length, primaryLabel: "process steps", view: "sdvv",
+    secondary: [["Live", vLive], ["Partial", vPart], ["Roadmap", vRoad]], coverage: Math.round(100 * vLive / SDV_V_STEPS.length), coverageLabel: "steps live", status: "In progress",
+    flag: "Specify \u2192 model \u2192 generate \u2192 verify \u2192 release \u00b7 " + vLive + " live, " + vPart + " partial, " + vRoad + " roadmap \u00b7 open the V-model" };
+  const a = [...readiness.disciplines]; const i = a.findIndex((d) => d.key === "TC"); a.splice(i < 0 ? a.length : i + 1, 0, impl, vmod); return a;
   }, [readiness, behaviorModels, reqEvidence]);
   /* Smart Devices = intelligent bus devices classified as Secondary ECU (same population the HWE dashboard counts). */
   const smartDevices = useMemo(() => Object.values(nodes).filter((n) => isSmartDevice(n) && dispType(n) === "ECUSecondaryNode").sort((a, b) => String(a.label).localeCompare(String(b.label))), [nodes]);
