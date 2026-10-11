@@ -87,4 +87,22 @@ const cx = pilot(); cx.stateMachine.transitions[4].guard = "mirror_temp_dC > hea
 // --- zip
 const z = zipStore([{ name: "a.txt", text: "hello" }, { name: "dir/b.txt", text: "world" }]); ok(z[0] === 0x50 && z[1] === 0x4b && z.length > 100, "zip writer produces a PK archive (" + z.length + " bytes)");
 
+// --- every pilot model (generic checks) — the second pilot (Fold Down Exterior Mirrors) exercises a different kind of function
+for (const [key, tpl] of Object.entries(PILOT_MODELS)) {
+  const bm = JSON.parse(JSON.stringify(tpl)), tag = "[" + bm.target.swc + "] ";
+  const val = validateModel(bm); ok(val.ready && val.errors.length === 0 && val.warnings.length === 0, tag + "validates with no errors or warnings");
+  const tgp = generateTests(bm); ok(tgp.gaps.length === 0, tag + "the test generator finds a stimulus for every state and transition (gaps: " + tgp.gaps.length + ")");
+  ok(tgp.tests.some((t) => t.key.startsWith("def:state")) && tgp.tests.some((t) => t.key.startsWith("def:timer")), tag + "defensive paths (corrupted state, timer saturation) are tested");
+  const multi = {}; bm.stateMachine.transitions.forEach((t) => { multi[t.from] = (multi[t.from] || 0) + 1; });
+  ok(Object.values(multi).every((n) => n < 2) || tgp.tests.some((t) => t.key.startsWith("prio:")), tag + "states with competing exits get priority tests");
+  const g1 = await generate(bm, { build: "x" }), g2 = await generate(bm, { build: "x" });
+  ok(g1.ok && g1.files.map((f) => f.name + f.text).join() === g2.files.map((f) => f.name + f.text).join(), tag + "generation is deterministic");
+  ok(g1.files.filter((f) => f.name !== "manifest.json").every((f) => /^[\x00-\x7f]*$/.test(f.text)), tag + "sources are pure ASCII");
+  ok(/^TC-L2-BODY-\d+-FUN-GEN-\d+$/.test(g1.tests[0].id) && new Set(g1.tests.map((x) => x.id)).size === g1.tests.length, tag + "test IDs follow TC-<function>-GEN-<n> and are unique");
+}
+{ // a guard that uses a boolean CONFIGURATION calibration is folded as a constant (found by the second pilot)
+  const bm = JSON.parse(JSON.stringify(PILOT_MODELS["L2-BODY-00193-MODE"])); const on = generateTests(bm); ok(on.gaps.length === 0 && on.tests.some((t) => /FOLDED>UNFOLDING#1#alt1/.test(t.key)), "boolean configuration calibration in a guard: the drive-away branch is tested when enabled");
+  bm.calibrations.find((c) => c.name === "CAL_AUTO_UNFOLD_EN").value = 0; const off = generateTests(bm);
+  ok(!off.tests.some((t) => /FOLDED>UNFOLDING#1#alt1/.test(t.key)), "…and no such test is invented when the feature is configured off (the branch is constant-false)");
+}
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);

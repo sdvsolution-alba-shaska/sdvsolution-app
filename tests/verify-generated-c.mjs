@@ -41,7 +41,7 @@ const MUTANTS = [
   ["boundary: over-current > becomes >=", "(int32_t)heater_current_mA > (int32_t)CAL_OVERCURRENT_MA", "(int32_t)heater_current_mA >= (int32_t)CAL_OVERCURRENT_MA"],
   ["timeout: heat timeout >= becomes >", "(int32_t)state_time_ms >= (int32_t)CAL_HEAT_MAX_MS", "(int32_t)state_time_ms > (int32_t)CAL_HEAT_MAX_MS"],
   ["output: DEGR PWM uses the wrong calibration", "heater_pwm_pct = (uint8_t)(int32_t)CAL_PWM_DERATE_PCT;", "heater_pwm_pct = (uint8_t)(int32_t)CAL_PWM_FULL_PCT;"],
-  ["priority: open-load ignored while over-current", "if (((int32_t)load_status != (int32_t)0))", "if (((int32_t)load_status != (int32_t)0) && ((int32_t)heater_current_mA <= (int32_t)CAL_OVERCURRENT_MA))"],
+  ["priority: open-load ignored while over-current", "if ((((int32_t)load_status != (int32_t)0) || (door_can_timeout != 0u)))", "if (((((int32_t)load_status != (int32_t)0) && ((int32_t)heater_current_mA <= (int32_t)CAL_OVERCURRENT_MA)) || (door_can_timeout != 0u)))"],
   ["timer never advances", "MirrorHeating_stateTimeMs += MIRRORHEATING_PERIOD_MS;", "MirrorHeating_stateTimeMs += 0u;"],
   ["auto-on < becomes <=", "(int32_t)ambient_temp_dC < (int32_t)CAL_AUTO_ON_TEMP_DC", "(int32_t)ambient_temp_dC <= (int32_t)CAL_AUTO_ON_TEMP_DC"],
   ["hysteresis minus becomes plus", "(int32_t)CAL_OVERTEMP_DC - (int32_t)CAL_TEMP_HYST_DC", "(int32_t)CAL_OVERTEMP_DC + (int32_t)CAL_TEMP_HYST_DC"],
@@ -57,5 +57,16 @@ MUTANTS.forEach((m, i) => {
   if (r.skipped) { ok(false, "mutant pattern not found (generator output changed?): " + m[0]); return; }
   ok(r.compile && r.ran && r.status === 1 && /^\d+ tests, [1-9]\d* failed/.test(r.out), "mutant caught (tests ran and reported failures): " + m[0] + (r.compile ? " (" + r.out + ")" : " — did not compile"));
 });
+// every OTHER pilot: strict compile + all of its generated tests pass (the explicit mutants above are specific to the first pilot;
+// tests/mutation.mjs derives mutants automatically for all of them)
+for (const [key, tpl] of Object.entries(PILOT_MODELS)) {
+  if (key === "L2-BODY-00194-MODE") continue;
+  const bm2 = JSON.parse(JSON.stringify(tpl)); const g2 = await generate(bm2, { build: "verify" }); const sw2 = bm2.target.swc;
+  const d2 = path.join(base, "p-" + sw2); for (const f of g2.files) { const p = path.join(d2, f.name); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, f.text); }
+  const cc = spawnSync(CC, [...FLAGS, "-o", "t", "src/" + sw2 + ".c", "src/" + sw2 + "_cfg.c", "test/Rte_" + sw2 + "_stub.c", "test/test_" + sw2 + ".c"], { cwd: d2, encoding: "utf8" });
+  ok(cc.status === 0, "[" + sw2 + "] compiles with " + FLAGS.filter((f) => /^-W/.test(f)).join(" ") + (cc.status === 0 ? "" : "\n" + (cc.stderr || "").slice(0, 500)));
+  const rr = cc.status === 0 ? spawnSync(path.resolve(d2, exeName), ["results.xml"], { cwd: d2, encoding: "utf8", env: { ...process.env, SDV_BUILD: "verify" } }) : { status: -1, stdout: "" };
+  ok(rr.status === 0 && new RegExp("^" + g2.tests.length + " tests, 0 failed").test((rr.stdout || "").trim()), "[" + sw2 + "] all " + g2.tests.length + " generated tests pass (" + (rr.stdout || "").trim() + ")");
+}
 fs.rmSync(base, { recursive: true, force: true });
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);

@@ -271,6 +271,9 @@ function solve(ast, bm) {
   const S = sigByName(bm);
   const isInput = (n) => n === TIME_SIGNAL || (S[n] && S[n].dir === "in");
   const atom = (n, lo, hi) => [{ [n]: { lo, hi } }];
+  // A sub-expression built only from calibrations / literals is a CONSTANT (e.g. a configuration flag such as CAL_AUTO_UNFOLD_EN):
+  // under the current calibration values it is simply true (adds no constraint) or false (can never hold).
+  { const k = constFold(ast, bm); if (k !== null && k !== undefined) return k ? [{}] : []; }
   if (ast.t === "bool") return ast.v ? [{}] : [];
   if (ast.t === "id") return isInput(ast.n) && S[ast.n] && S[ast.n].baseType === "boolean" ? atom(ast.n, 1, 1) : null;
   if (ast.t === "un" && ast.op === "!" && ast.a.t === "id") return isInput(ast.a.n) && S[ast.a.n] && S[ast.a.n].baseType === "boolean" ? atom(ast.a.n, 0, 0) : null;
@@ -339,17 +342,17 @@ export function generateTests(bm) {
   // 1) paths: shortest scenario from init to each state, found by BFS with simulator-verified hop vectors
   const path = { [sm.init]: [] }, queue = [sm.init], hopFor = {};
   // All simulator-verified stimuli that make transition kt fire (one per OR-branch of its guard, where one exists).
-  const hopsFor = (kt, priorSteps) => {
-    const t = kt.t; let ast; try { ast = parseExpr(t.guard); } catch (e) { return []; }
-    const cands = vectorsFor(bm, ast); if (!cands) return { unsupported: true };
+  const hopsFor = (kt, priorSteps, model) => {
+    const M = model || bm; const t = kt.t; let ast; try { ast = parseExpr(t.guard); } catch (e) { return []; }
+    const cands = vectorsFor(M, ast); if (!cands) return { unsupported: true };
     const prevInputs = priorSteps.length ? priorSteps[priorSteps.length - 1].inputs : base;
     const hops = [], seen = new Set();
     cands.forEach((c, ci) => {
       for (const bs of [prevInputs, base]) {
         const inputs = { ...bs, ...c.over }, runs = runsFor(c.time, P);
-        const sc = runScenario(bm, priorSteps.concat([{ inputs, runs }]));
+        const sc = runScenario(M, priorSteps.concat([{ inputs, runs }]));
         const pr = sc.perRun; // must fire exactly on the last run of this step
-        const firedAtEnd = pr.length && pr[pr.length - 1].fired === t && pr.slice(0, -1).every((x) => !x.fired);
+        const firedAtEnd = pr.length && pr[pr.length - 1].fired && pr[pr.length - 1].fired.from === t.from && pr[pr.length - 1].fired.to === t.to && pr[pr.length - 1].fired.guard === t.guard && pr.slice(0, -1).every((x) => !x.fired);
         const sig = JSON.stringify([inputs, runs]);
         if (firedAtEnd) { if (!seen.has(sig)) { seen.add(sig); hops.push({ inputs, runs, cand: c, base: bs, alt: ci }); } break; }
       }
@@ -422,12 +425,17 @@ export function generateTests(bm) {
       outer: for (const bs of [prev, base]) for (const a of ce) for (const b of ct) {
         const over = { ...a.over }; let clash = false; Object.keys(b.over).forEach((k) => { if (k in over && over[k] !== b.over[k]) clash = true; over[k] = b.over[k]; }); if (clash) continue;
         const inputs = { ...bs, ...over }, runs = runsFor(Math.max(a.time, b.time), P);
-        const sc = runScenario(bm, pre.concat([{ inputs, runs }])), pr = sc.perRun, lastRun = pr[pr.length - 1];
-        const before = runScenario(bm, pre.concat(runs > 1 ? [{ inputs, runs: runs - 1 }] : [])).st;
-        if (lastRun && lastRun.fired === E.t && pr.slice(0, -1).every((x) => !x.fired) && guardHolds(Tj.t, before, inputs)) { found = { inputs, runs }; break outer; }
+        // 1) one stimulus held throughout; 2) when a time condition is involved: stay idle until it is reached, then make BOTH guards true on the
+        //    same cycle — that is the only way to test "the end stop beats a stall/timeout that expires at the same instant".
+        const attempts = [[{ inputs, runs }]]; if (runs > 1) attempts.push([{ inputs: bs, runs: runs - 1 }, { inputs, runs: 1 }]);
+        for (const phases of attempts) {
+          const last = phases[phases.length - 1], sc = runScenario(bm, pre.concat(phases)), lastRun = sc.perRun[sc.perRun.length - 1];
+          const before = runScenario(bm, pre.concat(phases.slice(0, -1), last.runs > 1 ? [{ inputs: last.inputs, runs: last.runs - 1 }] : [])).st;
+          if (lastRun && lastRun.fired === E.t && before.state === s.id && guardHolds(Tj.t, before, inputs)) { found = phases; break outer; }
+        }
       }
       if (!found) continue;
-      const steps = pre.concat([found]);
+      const steps = pre.concat(found);
       addTest("prio:" + E.key + "|" + Tj.key, bm.function, "Priority in " + s.id + ": → " + E.t.to + " wins over → " + Tj.t.to + " when both guards hold", "With both '" + E.t.guard + "' and '" + Tj.t.guard + "' true in " + s.id + ", the earlier transition (to " + E.t.to + ") is taken.", steps, mkChecks(steps));
     }
   });
@@ -440,6 +448,29 @@ export function generateTests(bm) {
     for (const s of sm.states || []) { const sc = runScenario(bm, [{ ...st0, force: { state: s.id, tms: INT32_MAX - 5 } }]); if (sc.last && !sc.last.fired) { picked = s.id; break; } }
     if (picked) { const s2 = [{ ...st0, force: { state: picked, tms: INT32_MAX - 5 } }]; addTest("def:timer", bm.function, "Defensive: the state timer saturates instead of wrapping", "Close to the 32-bit limit, the state timer stops at its maximum (2147483647 ms) rather than overflowing.", s2, mkChecks(s2)); }
     else gaps.push("State timer saturation: every state leaves immediately at the timer limit with default inputs — add a manual test.");
+  }
+  // 7) CONFIGURATION FLAGS: a boolean calibration inside a guard is a feature switch (e.g. auto-unfold on drive-away "where configured").
+  //    The default setting is exercised by the transition tests; here the OTHER setting is exercised too, so "feature off" is proven to switch the
+  //    behaviour off (or "feature on" to switch it on). The unit-test build makes calibrations writable for this; production keeps them const.
+  {
+    const firesWith = (X, steps, tr) => { const r = runScenario(X, steps).perRun, l = r[r.length - 1]; return !!(l && l.fired && l.fired.from === tr.from && l.fired.to === tr.to && l.fired.guard === tr.guard); };
+    (bm.calibrations || []).filter((c) => c.baseType === "boolean").forEach((cf) => {
+      const flip = Number(cf.value) ? 0 : 1, flipped = JSON.parse(JSON.stringify(bm)); flipped.calibrations.find((c) => c.name === cf.name).value = flip;
+      keyed.filter((kt) => { try { return idsOf(parseExpr(kt.t.guard)).has(cf.name); } catch (e) { return false; } }).forEach((kt) => {
+        const pre = path[kt.t.from]; if (pre === undefined || runScenario(flipped, pre).st.state !== kt.t.from) return; // the flag must not change how this state is reached (a clean A/B)
+        for (const M of [bm, flipped]) {
+          const hops = hopsFor(kt, pre, M); if (!hops || hops.unsupported) continue;
+          const hit = hops.find((h) => { const st = pre.concat([{ inputs: h.inputs, runs: h.runs }]); return firesWith(bm, st, kt.t) !== firesWith(flipped, st, kt.t); });
+          if (!hit) continue;
+          const steps = pre.concat([{ inputs: hit.inputs, runs: hit.runs }]), ff = firesWith(flipped, steps, kt.t), sc = runScenario(flipped, steps);
+          tests.push({ key: "cfg:" + cf.name + ":" + kt.key, req: bm.function, cal: { [cf.name]: flip },
+            title: "Configuration: with " + cf.name + " = " + flip + " (default " + Number(cf.value) + "), " + kt.t.from + " → " + kt.t.to + (ff ? " IS taken" : " is NOT taken") + " by a stimulus that " + (ff ? "does not fire it" : "fires it") + " by default",
+            exp: "The calibration " + cf.name + " switches this behaviour: with it set to " + flip + " the transition " + kt.t.from + " → " + kt.t.to + (ff ? " fires" : " does not fire") + " on the same inputs (machine ends in " + sc.st.state + ").",
+            steps, checks: { state: sc.st.state, outputs: sc.last ? sc.last.outputs : null, tms: sc.st.tms } });
+          break;
+        }
+      });
+    });
   }
   return { tests, gaps, path };
 }
@@ -474,9 +505,15 @@ export async function generate(bm, opts = {}) {
     ...outs.map((s) => "Std_ReturnType Rte_Write_" + portFor(s) + "_" + elementFor(s) + "(" + T(s) + " data);"), "#endif", ""].join(NL));
   // --- cfg ---
   add("src/" + swc + "_cfg.h", [hdr(bm, swc + "_cfg.h", "Calibration parameters.", status), "#ifndef " + swc.toUpperCase() + "_CFG_H", "#define " + swc.toUpperCase() + "_CFG_H", '#include "Std_Types.h"',
-    ...cals.map((c) => "extern const " + TYPES[c.baseType].c + " " + c.name + "; /* " + (c.unit || "-") + " */"), "#endif", ""].join(NL));
-  add("src/" + swc + "_cfg.c", [hdr(bm, swc + "_cfg.c", "Calibration values (single definition point). Source/justification per value below.", status), '#include "' + swc + '_cfg.h"',
-    ...cals.map((c) => { const n = Number(c.value); const lit = n < 0 ? "(" + TYPES[c.baseType].c + ")(" + n + ")" : (c.baseType === "boolean" ? (n ? "TRUE" : "FALSE") : n + "u"); const note = ((c.unit || "-") + " | source: " + (c.source || "not recorded")).replace(/\*\//g, "* /"); return "const " + TYPES[c.baseType].c + " " + c.name + " = " + lit + "; /* " + note + " */"; }), ""].join(NL));
+    "#ifdef SDV_UNIT_TEST", "/* Unit-test build ONLY: calibrations are writable so tests can exercise configuration variants (e.g. a feature flag OFF). Production keeps them const. */",
+    ...cals.map((c) => "extern " + TYPES[c.baseType].c + " " + c.name + "; /* " + (c.unit || "-") + " */"), "void " + swc + "_TestResetCalibrations(void);", "#else",
+    ...cals.map((c) => "extern const " + TYPES[c.baseType].c + " " + c.name + "; /* " + (c.unit || "-") + " */"), "#endif", "", "#endif", ""].join(NL));
+  add("src/" + swc + "_cfg.c", [hdr(bm, swc + "_cfg.c", "Calibration values. Each value is defined ONCE (the *_DEFAULT macros); the production build uses them as const data and the unit-test build starts from the same values.", status), '#include "' + swc + '_cfg.h"', "",
+    ...cals.map((c) => { const n = Number(c.value); const lit = n < 0 ? "(" + TYPES[c.baseType].c + ")(" + n + ")" : (c.baseType === "boolean" ? (n ? "TRUE" : "FALSE") : n + "u"); const note = ((c.unit || "-") + " | source: " + (c.source || "not recorded")).replace(/\*\//g, "* /"); return "#define " + c.name + "_DEFAULT " + lit + " /* " + note + " */"; }),
+    "", "#ifdef SDV_UNIT_TEST",
+    ...cals.map((c) => TYPES[c.baseType].c + " " + c.name + " = " + c.name + "_DEFAULT;"), "",
+    "void " + swc + "_TestResetCalibrations(void)", "{", ...cals.map((c) => "    " + c.name + " = " + c.name + "_DEFAULT;"), "}",
+    "#else", ...cals.map((c) => "const " + TYPES[c.baseType].c + " " + c.name + " = " + c.name + "_DEFAULT;"), "#endif", ""].join(NL));
   // --- component header ---
   const E = (id) => swc + "_STATE_" + id.toUpperCase();
   add("src/" + swc + ".h", [hdr(bm, swc + ".h", "Public interface of " + swc + " (" + bm.title + ").", status), "#ifndef " + swc.toUpperCase() + "_H", "#define " + swc.toUpperCase() + "_H", '#include "Std_Types.h"',
@@ -544,12 +581,12 @@ export async function generate(bm, opts = {}) {
   const stepLines = (st) => { const o = []; if (st.force) { if (st.force.state != null) o.push("    " + swc + "_TestForceState(" + (st.force.state === "__invalid__" ? "255u" : "(uint32_t)" + E(st.force.state)) + ");"); if (st.force.tms != null) o.push("    " + swc + "_TestForceStateTimeMs(" + st.force.tms + "u);"); } ins.forEach((s) => o.push("    RteStub_Set_" + s.name + "(" + cv(s, st.inputs[s.name]) + ");")); o.push("    for (i = 0u; i < " + st.runs + "u; i++) { " + swc + "_Run(); }"); return o; };
   const checkLines = (c) => { const o = ["    CHECK_STATE(" + E(c.state) + ");"]; if (c.tms != null) o.push("    CHECK_EQ(\"state_time_ms\", (int32_t)" + swc + "_GetStateTimeMs(), " + c.tms + ");"); if (c.outputs) outs.forEach((s) => o.push("    CHECK_EQ(\"" + s.name + "\", (int32_t)RteStub_Get_" + s.name + "(), " + c.outputs[s.name] + ");")); return o; };
   const TL = [hdr(bm, "test_" + swc + ".c", "Unit tests generated from the Behavior Model (state, transition, boundary and timeout coverage). Emits JUnit XML.", status),
-    "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "' + swc + '.h"', '#include "Rte_' + swc + '_stub.h"', "",
+    "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "' + swc + '.h"', '#include "' + swc + '_cfg.h"', '#include "Rte_' + swc + '_stub.h"', "",
     "static int g_failed;", "static char g_msg[160];",
     "#define CHECK_STATE(exp) do { if (" + swc + "_GetState() != (exp)) { if (!g_failed) { (void)snprintf(g_msg, sizeof g_msg, \"state %d, expected %d\", (int)" + swc + "_GetState(), (int)(exp)); } g_failed = 1; } } while (0)",
     "#define CHECK_EQ(name, got, exp) do { if ((got) != (exp)) { if (!g_failed) { (void)snprintf(g_msg, sizeof g_msg, \"%s = %ld, expected %ld\", name, (long)(got), (long)(exp)); } g_failed = 1; } } while (0)", ""];
   tg.tests.forEach((t, n) => {
-    TL.push("/* " + t.id + " — " + t.title.replace(/\*\//g, "* /") + " @req " + t.req + " */", "static void tc_" + (n + 1) + "(void)", "{", "    uint32_t i;", "    (void)i;", "    " + swc + "_Init();", "    RteStub_Reset();");
+    TL.push("/* " + t.id + " — " + t.title.replace(/\*\//g, "* /") + " @req " + t.req + " */", "static void tc_" + (n + 1) + "(void)", "{", "    uint32_t i;", "    (void)i;", "    " + swc + "_Init();", "    RteStub_Reset();", "    " + swc + "_TestResetCalibrations();", ...Object.keys(t.cal || {}).map((k) => "    " + k + " = (" + TYPES[(bm.calibrations.find((c) => c.name === k) || {}).baseType].c + ")" + t.cal[k] + "; /* configuration variant */"));
     t.steps.forEach((st) => { TL.push(...stepLines(st)); if (st.check) TL.push(...checkLines(st.check)); });
     TL.push(...checkLines(t.checks), "}", "");
   });
