@@ -4527,6 +4527,91 @@ function AspiceFullProcess() {
     </div>
   );
 }
+/* SDVsolution V-model process flow — the SDVsolution way of working (model-based design with generated QM code), left arm = specify & model,
+   bottom = generate & build, right arm = verify & release. Each step says what the app does today and its status: Live / Partial / Roadmap. */
+const SDV_V_STEPS = [
+  { k: "L", i: 0, n: 1, t: "System Requirements", p: "SYS.2", g: "req", st: "Live", b: ["L0 \u2192 L1 \u2192 L2 requirements, EARS & singular checks", "Curated requirements are editable and reviewed"], where: "Requirements · Quality ▸ Consistency Report", view: "consistency" },
+  { k: "L", i: 1, n: 2, t: "Safety & Security Analysis", p: "SYS.2 / ISO 26262 / 21434", g: "saf", st: "Partial", b: ["HARA, FSR/TSR, TARA, FMEA generated as proposals", "A safety engineer confirms QM before any code"], where: "Safety, Cybersecurity, FMEA cards · Behavior Models (QM confirm)" },
+  { k: "L", i: 2, n: 3, t: "System Architecture", p: "SYS.3", g: "req", st: "Live", b: ["Functional model, ECU allocation (CZM hosts mirrors)", "K-Matrix, ICD and ARXML generated from the model"], where: "System Diagrams · Harness · K-Matrix" },
+  { k: "L", i: 3, n: 4, t: "Software Requirements & Architecture", p: "SWE.1 / SWE.2", g: "req", st: "Live", b: ["L3 software and L4 design items per ECU", "AUTOSAR composition; signals traced to the bus"], where: "Requirements (L3 / L4)" },
+  { k: "L", i: 4, n: 5, t: "Behavior Model", p: "SWE.3", g: "mbd", st: "Live", b: ["Typed signals, calibrations, guarded state machine", "Draft \u2192 Approved (QM-confirmed) \u2192 Baselined"], where: "Quality ▸ Behavior Models", view: "behavior" },
+  { k: "B", i: 5, n: 6, t: "Generate & Build", p: "SWE.3 / SWE.4", g: "mbd", st: "Live", b: ["Deterministic C code, calibrations, RTE stub and unit tests from the approved model (same model, same code)", "Runner: strict compile, static analysis, coverage, package"], where: "Behavior Models ▸ Generated output · Builds", view: "behavior" },
+  { k: "R", i: 4, n: 7, t: "Unit Verification", p: "SWE.4", g: "ver", st: "Live", b: ["Generated tests, line / branch / condition coverage", "Static analysis; generator is mutation-tested"], where: "Builds · Test Cases (import results & evidence)", view: "behavior" },
+  { k: "R", i: 3, n: 8, t: "SW Integration & Qualification", p: "SWE.5 / SWE.6", g: "ver", st: "Partial", b: ["Test cases traced to requirements; results imported", "SIL / HIL integration runs are on the roadmap"], where: "Table (test cases) · Quality ▸ Quality Dashboard", view: "dashboard" },
+  { k: "R", i: 2, n: 9, t: "System Integration", p: "SYS.4", g: "ver", st: "Partial", b: ["Bus / K-Matrix consistency checked live", "ECU-level HIL and vehicle tests are authored"], where: "Quality ▸ Consistency Report", view: "consistency" },
+  { k: "R", i: 1, n: 10, t: "Safety & Security Validation", p: "SYS.5 / ISO 26262 / 21434", g: "ver", st: "Roadmap", b: ["FSR/TSR and TARA evidence linked per requirement", "MISRA checking: not run yet"], where: "Safety · Cybersecurity cards" },
+  { k: "R", i: 0, n: 11, t: "Release & Delivery", p: "SUP.4 / SUP.8 / SUP.10", g: "rel", st: "Partial", b: ["Review, approval, baseline; packaged build", "Signed OTA delivery to the vehicle is next"], where: "Quality ▸ Review Board · Baselines", view: "review" },
+];
+function SdvVModel({ go }) {
+  const [zoom, setZoom] = useState(1);
+  const boxRef = useRef(null);
+  const VPW = 1240, VH = 640;
+  const fit = () => { const el = boxRef.current; const w = el ? el.clientWidth - 6 : VPW; setZoom(Math.max(0.3, Math.min(3, +(w / VPW).toFixed(3)))); };
+  useEffect(() => { const id = requestAnimationFrame(fit); const on = () => fit(); window.addEventListener("resize", on); return () => { cancelAnimationFrame(id); window.removeEventListener("resize", on); }; }, []);
+  const zBtn = { fontSize: 12, fontWeight: 700, color: "#475467", border: "1px solid #E4E7EC", borderRadius: 5, width: 22, height: 20, background: "#fff", cursor: "pointer", lineHeight: 1 };
+  const G = { req: { f: "#EFF4FF", s: "#175CD3", h: "#D1E0FF" }, saf: { f: "#FEF6EE", s: "#B54708", h: "#FEDF89" }, mbd: { f: "#ECFDF3", s: "#067647", h: "#ABEFC6" }, ver: { f: "#F4F3FF", s: "#5925DC", h: "#D9D6FE" }, rel: { f: "#F2F4F7", s: "#475467", h: "#D0D5DD" } };
+  const ST = { Live: { c: "#067647", b: "#ECFDF3" }, Partial: { c: "#B54708", b: "#FFFAEB" }, Roadmap: { c: "#475467", b: "#F2F4F7" } };
+  const BW = 282, BH = 80, STEP = 58, TOP = 54, GAP = 90;
+  const pos = (s) => s.k === "L" ? { x: 16 + s.i * STEP, y: TOP + s.i * GAP, w: BW } : s.k === "R" ? { x: VPW - 16 - BW - s.i * STEP, y: TOP + s.i * GAP, w: BW } : { x: 330, y: TOP + 5 * GAP + 4, w: 580 };
+  const wrap = (str, max) => { const ws = String(str).split(" "); const ls = []; let c = ""; ws.forEach((w) => { if ((c ? c + " " + w : w).length <= max) c = c ? c + " " + w : w; else { if (c) ls.push(c); c = w; } }); if (c) ls.push(c); return ls; };
+  const L = SDV_V_STEPS.filter((s) => s.k === "L"), R = SDV_V_STEPS.filter((s) => s.k === "R"), B = SDV_V_STEPS.find((s) => s.k === "B");
+  const arrow = (x1, y1, x2, y2, key) => <line key={key} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#667085" strokeWidth={1.4} markerEnd="url(#sdvAr)" />;
+  const card = (s) => { const p = pos(s), c = G[s.g], clk = !!(s.view && go), h = s.k === "B" ? BH + 6 : BH, maxCh = Math.floor((p.w - 20) / 4.15), sc = ST[s.st]; return (
+    <g key={s.n} onClick={clk ? () => go(s.view) : undefined} style={clk ? { cursor: "pointer" } : undefined}>
+      {clk && <title>{"Open " + s.where}</title>}
+      <rect x={p.x} y={p.y} width={p.w} height={h} rx={7} fill={c.f} stroke={c.s} strokeWidth={1.2} />
+      <path d={"M" + (p.x + 7) + "," + p.y + " h" + (p.w - 14) + " a7,7 0 0 1 7,7 v13 h" + (-p.w) + " v-13 a7,7 0 0 1 7,-7 z"} fill={c.h} />
+      <circle cx={p.x + 14} cy={p.y + 10} r={8} fill={c.s} /><text x={p.x + 14} y={p.y + 13.2} fontSize={9} fontWeight="700" fill="#fff" textAnchor="middle">{s.n}</text>
+      <text x={p.x + 28} y={p.y + 14} fontSize={10.5} fontWeight="700" fill="#101828">{s.t}</text>
+      <text x={p.x + p.w - 8} y={p.y + 13.5} fontSize={7.5} fontWeight="600" fill={c.s} textAnchor="end">{s.p}</text>
+      {s.b.flatMap((bt) => wrap("\u2022 " + bt, maxCh)).map((ln, i) => <text key={i} x={p.x + 10} y={p.y + 36 + i * 11} fontSize={8.3} fill="#344054">{ln}</text>)}
+      <rect x={p.x + p.w - 56} y={p.y + h - 17} width={48} height={12} rx={6} fill={sc.b} stroke={sc.c} strokeWidth={0.8} /><text x={p.x + p.w - 32} y={p.y + h - 8.2} fontSize={7.5} fontWeight="700" fill={sc.c} textAnchor="middle">{s.st}</text>
+    </g>
+  ); };
+  return (
+    <div>
+      <div style={{ border: "1px solid #E4E7EC", borderRadius: 8, background: "#F8FAFC", padding: 8, overflowX: "auto" }}>
+        <div className="flex items-center justify-between flex-wrap" style={{ marginBottom: 6, gap: 8 }}>
+          <div className="flex items-center gap-3 flex-wrap" style={{ fontSize: 9.5, fontWeight: 600, color: "#475467" }}>
+            {[["req", "Specify"], ["saf", "Safety & security"], ["mbd", "Model, generate, build"], ["ver", "Verify"], ["rel", "Release"]].map(([g, lb]) => <span key={g} className="flex items-center gap-1"><span style={{ width: 10, height: 10, borderRadius: 3, background: G[g].h, border: "1px solid " + G[g].s }} />{lb}</span>)}
+            <span style={{ color: "#98A2B3" }}>|</span>
+            {["Live", "Partial", "Roadmap"].map((k) => <span key={k} style={{ fontSize: 8.5, fontWeight: 700, color: ST[k].c, background: ST[k].b, border: "1px solid " + ST[k].c, borderRadius: 8, padding: "0 6px" }}>{k}</span>)}
+          </div>
+          <div className="flex items-center gap-1.5" style={{ flexShrink: 0 }}>
+            <button onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.2).toFixed(2)))} title="Zoom out" style={zBtn}>{"\u2212"}</button>
+            <button onClick={() => setZoom((z) => Math.min(3, +(z + 0.2).toFixed(2)))} title="Zoom in" style={zBtn}>+</button>
+            <button onClick={fit} title="Fit to page width" style={{ ...zBtn, width: 30 }}>{"\u2922"}</button>
+          </div>
+        </div>
+        <div ref={boxRef} style={{ overflow: "auto", border: "1px solid #EAECF0", borderRadius: 6, background: "#fff", maxHeight: 720 }}>
+          <svg viewBox={"0 0 " + VPW + " " + VH} width={Math.round(VPW * zoom)} height={Math.round(VH * zoom)} style={{ display: "block" }} xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="sdvAr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#667085" /></marker></defs>
+            {/* verification links: each specification step is verified by the step across the V */}
+            {L.map((s) => { const r = R.find((x) => x.i === s.i), a = pos(s), b = pos(r), y = a.y + BH / 2; return (
+              <g key={"v" + s.n}><line x1={a.x + a.w} y1={y} x2={b.x} y2={y} stroke="#98A2B3" strokeWidth={1.2} strokeDasharray="5 4" />
+                <text x={(a.x + a.w + b.x) / 2} y={y - 4} fontSize={8} fill="#98A2B3" textAnchor="middle">{"verified by step " + r.n}</text></g>); })}
+            {/* descent / ascent arrows */}
+            {L.slice(0, -1).map((s, i) => { const a = pos(s), n = pos(L[i + 1]); const x = n.x + 140; return arrow(x, a.y + BH, x, n.y, "dl" + i); })}
+            {R.slice(1).map((s, i) => { const lower = pos(R[i]), upper = pos(s); const x = lower.x + 140; return arrow(x, lower.y, x, upper.y + BH, "ur" + i); })}
+            {(() => { const a = pos(L[4]), b = pos(B), r = pos(R[0] && R.find((x) => x.i === 4)); return [arrow(a.x + 140, a.y + BH, a.x + 140, b.y, "bl"), arrow(r.x + 140, b.y, r.x + 140, r.y + BH, "br")]; })()}
+            {L.map(card)}{R.map(card)}{card(B)}
+            <text x={VPW / 2} y={34} fontSize={11} fontWeight="700" fill="#101828" textAnchor="middle">SDVsolution V-model {"\u00b7"} one approved Behavior Model drives the code, the tests and the evidence</text>
+            <text x={VPW / 2} y={VH - 14} fontSize={8.5} fill="#667085" textAnchor="middle">Left arm: specify and model {"\u00b7"} bottom: generate and build {"\u00b7"} right arm: verify and release. Click a card to open the part of the app that does it.</text>
+          </svg>
+        </div>
+      </div>
+      <div className="overflow-auto" style={{ marginTop: 12, border: "1px solid #E4E7EC", borderRadius: 8 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <thead><tr style={{ background: "#F9FAFB", textAlign: "left", color: "#667085", fontSize: 10 }}>{["#", "Step", "Process", "What SDVsolution does", "Where in the app", "Status"].map((h) => <th key={h} style={{ padding: "6px 10px", fontWeight: 700 }}>{h}</th>)}</tr></thead>
+          <tbody>{SDV_V_STEPS.slice().sort((a, b) => a.n - b.n).map((s) => <tr key={s.n} style={{ borderTop: "1px solid #EAECF0", verticalAlign: "top" }}>
+            <td style={{ padding: "6px 10px", color: "#98A2B3" }}>{s.n}</td><td style={{ padding: "6px 10px", fontWeight: 600, color: "#101828" }}>{s.t}</td><td style={{ padding: "6px 10px", color: G[s.g].s, whiteSpace: "nowrap" }}>{s.p}</td>
+            <td style={{ padding: "6px 10px", color: "#344054" }}>{s.b.join(" \u00b7 ")}</td><td style={{ padding: "6px 10px", color: "#475467" }}>{s.view && go ? <button onClick={() => go(s.view)} style={{ color: "#175CD3", textDecoration: "underline", background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, textAlign: "left" }}>{s.where}</button> : s.where}</td>
+            <td style={{ padding: "6px 10px" }}><span style={{ fontSize: 9.5, fontWeight: 700, color: ST[s.st].c, background: ST[s.st].b, border: "1px solid " + ST[s.st].c, borderRadius: 8, padding: "0 7px" }}>{s.st}</span></td></tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 /* ASPICE V-model reference — SYS / SWE / HWE processes: left arm (specification & design) descends to
    implementation, right arm (verification & test) ascends, with the horizontal verification links. */
 function AspiceVModel() {
@@ -10855,8 +10940,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               })()}
               <Btn active={view === "impact"} onClick={() => setView("impact")} icon={ArrowLeftRight}>Impact</Btn>
               {(() => {
-                const QD = { engflow: { label: "Engineering Readiness", icon: Workflow }, consistency: { label: "Consistency Report", icon: AlertTriangle }, dashboard: { label: "Quality Dashboard", icon: Table }, review: { label: "Review Board", icon: Check }, baselines: { label: "Baselines", icon: Copy }, compliance: { label: "Standards & Compliance", icon: Lock } };
-                const isQ = view === "engflow" || view === "consistency" || view === "dashboard" || view === "review" || view === "baselines" || view === "compliance";
+                const QD = { engflow: { label: "Engineering Readiness", icon: Workflow }, sdvv: { label: "V-Model Process Flow", icon: Layers }, consistency: { label: "Consistency Report", icon: AlertTriangle }, dashboard: { label: "Quality Dashboard", icon: Table }, review: { label: "Review Board", icon: Check }, baselines: { label: "Baselines", icon: Copy }, compliance: { label: "Standards & Compliance", icon: Lock } };
+                const isQ = view === "engflow" || view === "sdvv" || view === "consistency" || view === "dashboard" || view === "review" || view === "baselines" || view === "compliance";
                 const cur = QD[view] || QD.consistency;
                 const CurIcon = cur.icon;
                 return (
@@ -10872,7 +10957,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setQMenu(false)} />
                         <div className="absolute rounded-lg overflow-hidden" style={{ top: 40, left: 0, width: 210, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC", boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
                           <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>QUALITY GATE</div>
-                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["behavior", "Behavior Models", Cpu, "Typed behavior → generated QM code + tests"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
+                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["sdvv", "V-Model Process Flow", Layers, "SDVsolution process · model → code → verify"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["behavior", "Behavior Models", Cpu, "Typed behavior → generated QM code + tests"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
                             <button key={v} onClick={() => { setView(v); setQMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ background: view === v ? "#F5F8FC" : "#fff" }}>
                               <Icon size={14} color={view === v ? "#175CD3" : "#475467"} style={{ flexShrink: 0 }} />
                               <div className="flex-1 min-w-0">
@@ -10890,7 +10975,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               <Btn active={view === "table"} onClick={() => setView("table")} icon={Table}>Table</Btn>
               <Btn active={view === "tree"} onClick={() => setView("tree")} icon={Share2}>Graph</Btn>
             </div>
-            {canWrite && view !== "blocks" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && view !== "reader" && view !== "ecureq" && ioMenuControl()}
+            {canWrite && view !== "blocks" && view !== "sdvv" && view !== "aspice" && view !== "aspicefull" && view !== "statemachines" && view !== "reader" && view !== "ecureq" && ioMenuControl()}
           </div>
 
 
@@ -12165,6 +12250,16 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           })()}
 
           {/* ---- BLOCKS VIEW: SysML-style Systems Block Diagram — Vehicle System > (L0 system) > ECUs > devices, bus-labeled connectors ---- */}
+          {view === "sdvv" && (
+            <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
+              <div style={{ maxWidth: 1260, margin: "0 auto", padding: "18px 16px 40px" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#067647", letterSpacing: 0.5 }}>QUALITY · V-MODEL PROCESS FLOW</div>
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", margin: "2px 0 2px" }}>The SDVsolution V-model</h1>
+                <p style={{ fontSize: 12.5, color: "#475467", lineHeight: 1.55, margin: "0 0 12px" }}>How a function moves through SDVsolution: requirements and architecture on the left, one approved Behavior Model at the bottom that generates the production C code, the unit tests and the evidence, and verification and release on the right. Each card shows what the app does today.</p>
+                <SdvVModel go={(v) => setView(v)} />
+              </div>
+            </div>
+          )}
           {view === "aspice" && (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
               <div style={{ maxWidth: 1240, margin: "0 auto", padding: "18px 8px 40px" }}>
