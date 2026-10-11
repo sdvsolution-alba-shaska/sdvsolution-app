@@ -6662,7 +6662,8 @@ function computeConsistency(status = {}) {
   const allL1 = l1pairs.map((x) => x.n);
   const coveredL1 = new Set(allL1.map((n) => n.id));
   // Orphans: any L1 requirement in the model not linked under an L0.
-  Object.values(NODE).forEach((n) => { if (/L1/.test(n.subtype || "") && !coveredL1.has(n.id)) add("error", "orphan", "graph", titleCase(n.label) + " (L1) is not linked to any L0", n.id, n.id, null, n.id); });
+  // Anchored: an interface node whose connector/protocol text merely contains "L1" (e.g. connector "L151.1", protocol "KL15") is not an L1 requirement.
+  Object.values(NODE).forEach((n) => { if (/^L1\b/.test(n.subtype || "") && !coveredL1.has(n.id)) add("error", "orphan", "graph", titleCase(n.label) + " (L1) is not linked to any L0", n.id, n.id, null, n.id); });
   const idSeen = {};
   const bump = (id) => { if (id) idSeen[id] = (idSeen[id] || 0) + 1; };
   const knownEcu = new Set([...NETWORK.ecus.map((e) => e.id), ...Object.values(L1_CONTROLLER)]);
