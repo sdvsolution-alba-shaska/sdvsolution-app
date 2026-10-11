@@ -5,6 +5,7 @@
 const sig = (name, dir, baseType, min, max, unit, init, extra = {}) => ({ name, dir, baseType, min, max, unit, resolution: extra.resolution || "", init, invalid: extra.invalid ?? "", note: extra.note || "" });
 const cal = (name, baseType, value, unit, source) => ({ name, baseType, value, unit, source });
 const SRC = "Proposed starting value — confirm with heater/mirror supplier datasheet";
+const SRC2 = "Proposed starting value — confirm with mirror fold-motor supplier datasheet";
 
 export const PILOT_MODELS = {
   "L2-BODY-00194-MODE": {
@@ -18,6 +19,7 @@ export const PILOT_MODELS = {
       sig("mirror_temp_dC", "in", "sint16", -400, 1500, "0.1 °C", 200, { resolution: "0.1", invalid: 200 }),
       sig("heater_current_mA", "in", "uint16", 0, 20000, "mA", 0, { invalid: 0 }),
       sig("load_status", "in", "uint8", 0, 3, "enum", 0, { note: "0 OK · 1 open load · 2 short to ground · 3 short to battery", invalid: 0 }),
+      sig("door_can_timeout", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Center_Door_CAN01 feedback from the DCM missing beyond its timeout (E2E / alive supervision). A failed read counts as TIMED OUT (safe)." }),
       sig("heater_pwm_pct", "out", "uint8", 0, 100, "%", 0, { note: "Heater drive duty cycle" }),
       sig("heater_fault", "out", "boolean", 0, 1, "", 0, { note: "Request to log a heater fault" }),
     ],
@@ -43,13 +45,64 @@ export const PILOT_MODELS = {
       // Order = priority: protective transitions are listed before the normal release.
       transitions: [
         { from: "OFF", to: "HEATING", label: "heater request / auto-on", guard: "ignition_on && (heater_request || ambient_temp_dC < CAL_AUTO_ON_TEMP_DC)" },
-        { from: "HEATING", to: "FAULT", label: "open-load / short", guard: "load_status != 0" },
+        { from: "HEATING", to: "FAULT", label: "open-load / short / timeout", guard: "load_status != 0 || door_can_timeout" },
         { from: "HEATING", to: "DEGR", label: "over-current / over-temp", guard: "heater_current_mA > CAL_OVERCURRENT_MA || mirror_temp_dC > CAL_OVERTEMP_DC" },
         { from: "HEATING", to: "OFF", label: "release / timeout", guard: "!ignition_on || (!heater_request && ambient_temp_dC >= CAL_AUTO_ON_TEMP_DC) || state_time_ms >= CAL_HEAT_MAX_MS" },
+        { from: "DEGR", to: "FAULT", label: "bus timeout", guard: "door_can_timeout" },
         { from: "DEGR", to: "OFF", label: "de-rate / recovered", guard: "mirror_temp_dC <= CAL_OVERTEMP_DC - CAL_TEMP_HYST_DC && heater_current_mA <= CAL_OVERCURRENT_MA" },
-        { from: "FAULT", to: "OFF", label: "cleared", guard: "load_status == 0 && state_time_ms >= CAL_FAULT_RETRY_MS" },
+        { from: "FAULT", to: "OFF", label: "cleared", guard: "load_status == 0 && !door_can_timeout && state_time_ms >= CAL_FAULT_RETRY_MS" },
       ],
     },
     status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00194-MODE", template: true,
   },
+  "L2-BODY-00193-MODE": {
+    id: "BM-L2-BODY-00193", function: "L2-BODY-00193-FUN", title: "FOLD DOWN EXTERIOR MIRRORS",
+    implements: ["L2-BODY-00193-FUN", "L2-BODY-00193-IF", "L2-BODY-00193-PERF", "L2-BODY-00193-MODE", "L2-BODY-00193-DIAG", "L2-BODY-00193-SEC"],
+    target: { ecu: "ECU-CZM", swc: "MirrorFold" },
+    notes: "Hosting decision (confirmed by the product owner): this function is modelled and generated for the CZM; the door modules (DCM) execute the motor command and report position, current and status.",
+    signals: [
+      sig("fold_request", "in", "boolean", 0, 1, "", 0, { note: "HOLD (fold) switch or auto-fold on central locking / garage" }),
+      sig("unfold_request", "in", "boolean", 0, 1, "", 0, { note: "UNFOLD switch" }),
+      sig("vehicle_speed_kph", "in", "uint8", 0, 250, "km/h", 0, { invalid: 0, note: "Used for the no-fold-while-driving interlock and drive-away auto-unfold" }),
+      sig("fold_position_pct", "in", "uint8", 0, 100, "%", 0, { note: "0 = fully unfolded (drive position), 100 = fully folded (latch / end stop)" }),
+      sig("position_valid", "in", "boolean", 0, 1, "", 1, { invalid: 0, note: "Position/latch feedback is plausible. A failed read counts as INVALID (safe)." }),
+      sig("motor_current_mA", "in", "uint16", 0, 20000, "mA", 0, { invalid: 0 }),
+      sig("door_can_timeout", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Center_Door_CAN01 feedback from the DCM missing beyond its timeout (E2E / alive supervision). A failed read counts as TIMED OUT (safe)." }),
+      sig("motor_cmd", "out", "uint8", 0, 2, "enum", 0, { note: "0 stop · 1 fold-in (SP_FoldIn) · 2 fold-out (SP_FoldOut)" }),
+      sig("fold_status", "out", "uint8", 0, 4, "enum", 0, { note: "0 unfolded · 1 folding · 2 folded · 3 unfolding · 4 fault (SSA_FT_ASP_Fold_Status)" }),
+      sig("fold_fault", "out", "boolean", 0, 1, "", 0, { note: "SSA_FT_ASP_Fold_Fault" }),
+    ],
+    calibrations: [
+      cal("CAL_FOLDED_POS_PCT", "uint8", 95, "%", SRC2 + " (folded end reached)"),
+      cal("CAL_UNFOLDED_POS_PCT", "uint8", 5, "%", SRC2 + " (drive position reached)"),
+      cal("CAL_DRIVE_AWAY_KPH", "uint16", 10, "km/h", SRC2 + " (no folding above; auto-unfold above)"),
+      cal("CAL_AUTO_UNFOLD_EN", "boolean", 1, "", "Configuration — auto-unfold on drive-away 'where configured' (L2-BODY-00193-MODE)"),
+      cal("CAL_STALL_CURRENT_MA", "uint16", 3000, "mA", SRC2),
+      cal("CAL_STALL_DEBOUNCE_MS", "uint32", 200, "ms", SRC2 + " (debounce before a stall is confirmed)"),
+      cal("CAL_FOLD_TIMEOUT_MS", "uint32", 8000, "ms", SRC2 + " (maximum fold / unfold travel time)"),
+      cal("CAL_FAULT_RETRY_MS", "uint32", 3000, "ms", SRC2),
+    ],
+    runnable: { name: "Run", periodMs: 10 },
+    stateMachine: {
+      init: "UNF",
+      states: [
+        { id: "UNF", label: "Unfolded", outputs: { motor_cmd: "0", fold_status: "0", fold_fault: "false" } },
+        { id: "FOLDING", label: "Folding", outputs: { motor_cmd: "1", fold_status: "1", fold_fault: "false" } },
+        { id: "FOLDED", label: "Folded", outputs: { motor_cmd: "0", fold_status: "2", fold_fault: "false" } },
+        { id: "UNFOLDING", label: "Unfolding", outputs: { motor_cmd: "2", fold_status: "3", fold_fault: "false" } },
+        { id: "FAULT", label: "Fault → Safe", outputs: { motor_cmd: "0", fold_status: "4", fold_fault: "true" } },
+      ],
+      // Order = priority. Reaching the end stop must beat a stall (the current spikes AT the stop), so FOLDED is listed before FAULT.
+      transitions: [
+        { from: "UNF", to: "FOLDING", label: "fold req / auto-fold", guard: "fold_request && !unfold_request && vehicle_speed_kph <= CAL_DRIVE_AWAY_KPH" },
+        { from: "FOLDING", to: "FOLDED", label: "latch reached", guard: "!door_can_timeout && position_valid && fold_position_pct >= CAL_FOLDED_POS_PCT" },
+        { from: "FOLDED", to: "UNFOLDING", label: "unfold / drive-away", guard: "unfold_request || (CAL_AUTO_UNFOLD_EN && vehicle_speed_kph > CAL_DRIVE_AWAY_KPH)" },
+        { from: "UNFOLDING", to: "UNF", label: "drive position", guard: "!door_can_timeout && position_valid && fold_position_pct <= CAL_UNFOLDED_POS_PCT" },
+        { from: "UNFOLDING", to: "FAULT", label: "stall / timeout / bus loss", guard: "door_can_timeout || !position_valid || state_time_ms >= CAL_FOLD_TIMEOUT_MS || (motor_current_mA > CAL_STALL_CURRENT_MA && state_time_ms >= CAL_STALL_DEBOUNCE_MS)" },
+        { from: "FOLDING", to: "FAULT", label: "stall / timeout / bus loss", guard: "door_can_timeout || !position_valid || state_time_ms >= CAL_FOLD_TIMEOUT_MS || (motor_current_mA > CAL_STALL_CURRENT_MA && state_time_ms >= CAL_STALL_DEBOUNCE_MS)" },
+        { from: "FAULT", to: "UNF", label: "cleared", guard: "!door_can_timeout && position_valid && state_time_ms >= CAL_FAULT_RETRY_MS" },
+      ],
+    },
+    status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00193-MODE", template: true,
+  }
 };

@@ -45,7 +45,7 @@ async function setup(models) {
   const got = (await call(api.url, "editor", { action: "get", id: rq.body.build.id, files: true })).body;
   const b = got.build;
   ok(b.status === "passed", "build status is 'passed' (" + b.status + ")" + (b.status === "passed" ? "" : "\n" + (b.result && b.result.error) + "\n" + r.out.slice(-800)));
-  ok(b.result.tests && b.result.tests.run === 32 && b.result.tests.passed === 32 && b.result.tests.failed === 0, "32 of 32 generated tests ran and passed on the runner");
+  ok(b.result.tests && b.result.tests.run === 38 && b.result.tests.passed === 38 && b.result.tests.failed === 0, "38 of 38 generated tests ran and passed on the runner");
   ok(["integrity", "gate", "generate", "compile", "unit-tests", "static-analysis", "coverage", "package"].every((n, i) => b.result.steps[i] && b.result.steps[i].name === n && b.result.steps[i].status === "passed"), "all eight steps ran and passed, in order (incl. static-analysis and coverage)");
   const A = b.result.analysis, C = b.result.coverage;
   ok(A && A.status === "clean" && A.total === 0 && A.tools[0].name === "gcc" && A.tools[0].warnings >= 15, "static analysis: clean — gcc with a wide warning set (" + (A && A.tools[0].version) + ")");
@@ -60,8 +60,8 @@ async function setup(models) {
   ok(/name="build" value="B-1"/.test(xml), "the test results carry the build ID B-1 (traceable to the build)");
   ok(got.files.every((f) => f.sha256.length === 64), "every uploaded file has a server-computed SHA-256");
   const tcj = got.files.find((f) => f.name === "testcases.json"); const tcd = tcj ? JSON.parse(tcj.content) : null;
-  ok(tcd && tcd.tests.length === 32 && tcd.tests.every((t) => /^TC-L2-BODY-00194-FUN-GEN-\d+$/.test(t.id) && t.title && t.exp), "testcases.json carries all 32 generated test definitions (id, title, expectation)");
-  ok(tcd && Object.keys(tcd.testIds).length === 32 && tcd.tests.every((t) => tcd.testIds[t.key] && t.id.endsWith("-GEN-" + tcd.testIds[t.key])), "…with the key→number map, so the app registers IDs consistently and never reuses them");
+  ok(tcd && tcd.tests.length === 38 && tcd.tests.every((t) => /^TC-L2-BODY-00194-FUN-GEN-\d+$/.test(t.id) && t.title && t.exp), "testcases.json carries all 38 generated test definitions (id, title, expectation)");
+  ok(tcd && Object.keys(tcd.testIds).length === 38 && tcd.tests.every((t) => tcd.testIds[t.key] && t.id.endsWith("-GEN-" + tcd.testIds[t.key])), "…with the key→number map, so the app registers IDs consistently and never reuses them");
   const resIds = [...xml0(got.files)].sort().join(); ok(resIds === tcd.tests.map((t) => t.id).sort().join(), "the result IDs in results.xml are exactly the IDs defined in testcases.json");
   ok(/compile/.test(b.log) && /finished: passed/.test(b.log), "the runner log was stored");
   ok(b.result.compiler && /GCC|gcc/.test(b.result.compiler) && b.result.runner.version && b.result.generator, "the result records compiler, generator and runner versions");
@@ -116,7 +116,7 @@ async function setup(models) {
   await runRunner(api.url, token, { CC: wrapper });
   const got = (await call(api.url, "owner", { action: "get", id: rq.body.build.id, files: true })).body, b = got.build;
   ok(b.status === "failed", "a build whose generated tests catch a defect is 'failed' (" + b.status + ")" + (b.status === "failed" ? "" : " — " + (b.result && b.result.error)));
-  ok(b.result.tests && b.result.tests.failed >= 1 && b.result.tests.run === 32, "the result says " + b.result.tests.failed + " of 32 tests failed");
+  ok(b.result.tests && b.result.tests.failed >= 1 && b.result.tests.run === 38, "the result says " + b.result.tests.failed + " of 38 tests failed");
   ok(b.result.steps.find((s) => s.name === "compile").status === "passed" && b.result.steps.find((s) => s.name === "unit-tests").status === "failed", "compile passed, unit-tests failed");
   ok(!b.result.steps.some((s) => s.name === "package" || s.name === "static-analysis" || s.name === "coverage"), "a failed build is not packaged and gathers no further evidence");
   const xml = got.files.find((f) => f.name === "results.xml"); ok(xml && /<failure /.test(xml.content), "the failing results.xml is still uploaded as evidence");
@@ -158,7 +158,18 @@ async function wrapperFor(mutationJs) {
   cleanup(); await api.close();
 }
 
-// 5) auth
+// 4d) the SECOND pilot through the whole chain: request -> runner -> compile -> tests -> static analysis -> coverage
+{
+  const BM2 = "BM-L2-BODY-00193", m2 = { ...JSON.parse(JSON.stringify(PILOT_MODELS["L2-BODY-00193-MODE"])), status: "approved", qmConfirmed: { by: "safety@acme.test", at: 1 } };
+  const { api, token } = await setup({ [BM2]: m2 }); const rq = await call(api.url, "owner", { action: "request", bmId: BM2, baselineId: "BL-1" });
+  await runRunner(api.url, token); const got = (await call(api.url, "owner", { action: "get", id: rq.body.build.id, files: true })).body, b = got.build;
+  ok(b.status === "passed" && b.result.tests && b.result.tests.run === 43 && b.result.tests.failed === 0, "[MirrorFold] the second pilot builds on the runner: " + b.status + ", " + (b.result.tests && b.result.tests.passed + "/" + b.result.tests.run) + " tests" + (b.status === "passed" ? "" : " — " + b.result.error));
+  ok(b.result.analysis && b.result.analysis.status === "clean" && b.result.coverage && b.result.coverage.lines.pct === 100 && b.result.coverage.branches.pct === 100 && b.result.coverage.complete === true && (!b.result.coverage.conditions || b.result.coverage.conditions.pct === 100), "[MirrorFold] static analysis clean; coverage COMPLETE (lines, branches, conditions where supported) — 100% line + branch coverage (" + (b.result.coverage && b.result.coverage.lines.covered + "/" + b.result.coverage.lines.total) + " lines)");
+  ok(got.files.some((f) => f.name === "src/MirrorFold.c") && got.files.some((f) => f.name === "results.xml"), "[MirrorFold] generated sources and results were stored");
+  await api.close();
+}
+
+// 5) auth// 5) auth
 {
   const { api, token } = await setup();
   const r = await runRunner(api.url, "sdvr_not_a_real_token", {}, ["--once"]);

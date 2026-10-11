@@ -1,0 +1,4 @@
+{
+  "L2-BODY-00194-MODE|firedGate": "EQUIVALENT for this model: 'fired != FALSE' and 'next != state' only differ for a SELF-transition (S -> S), and this model has none. If a self-transition is ever added, the generated tests must (and do) cover it — see the 'self-transition resets the state timer' case in tests/codegen.test.mjs — so remove this entry then.",
+  "L2-BODY-00193-MODE|firedGate": "EQUIVALENT for this model: no self-transition (S -> S) exists, which is the only case where the two conditions differ."
+}
