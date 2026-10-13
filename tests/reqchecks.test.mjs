@@ -33,7 +33,7 @@ ok(curatedFindings({ statement: "The x shall a and shall b.", func: true, ears: 
 const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "App.jsx"), "utf8");
 const OPS = JSON.parse(src.match(/const OPS_REQS = (\{.*\});/)[1]);
 const all = curatedToGapReqs(OPS);
-ok(all.length >= 200 && Object.keys(OPS).length === 11, "the real curated set is loaded (" + all.length + " requirements in " + Object.keys(OPS).length + " subdomains)");
+ok(all.length >= 200 && Object.keys(OPS).length === 13, "the real curated set is loaded (" + all.length + " requirements in " + Object.keys(OPS).length + " subdomains)");
 ok(all.every((r) => r.id && r.title && r.statement), "every curated requirement adapts to id + title + statement");
 const byId = Object.fromEntries(all.map((r) => [r.id, r]));
 ok(curatedFindings(byId["VP-ID-01"]).filter((f) => f.cat === "ears").length === 0, "VP-ID-01 ('When a user enters the vehicle, …') is consistent with Event-driven");
