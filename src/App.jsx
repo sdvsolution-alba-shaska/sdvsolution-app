@@ -4534,7 +4534,7 @@ const SDV_V_STEPS = [
   { k: "L", i: 1, n: 2, t: "Safety & Security Analysis", p: "SYS.2 / ISO 26262 / 21434", g: "saf", st: "Partial", b: ["HARA, FSR/TSR, TARA, FMEA generated as proposals", "A safety engineer confirms QM before any code"], where: "Safety, Cybersecurity, FMEA cards · Behavior Models (QM confirm)" },
   { k: "L", i: 2, n: 3, t: "System Architecture", p: "SYS.3", g: "req", st: "Live", b: ["Functional model, ECU allocation (CZM hosts mirrors)", "K-Matrix, ICD and ARXML generated from the model"], where: "System Diagrams · Harness · K-Matrix" },
   { k: "L", i: 3, n: 4, t: "Software Requirements & Architecture", p: "SWE.1 / SWE.2", g: "req", st: "Live", b: ["L3 software and L4 design items per ECU", "AUTOSAR composition; signals traced to the bus"], where: "Requirements (L3 / L4)" },
-  { k: "L", i: 4, n: 5, t: "Behavior Model", p: "SWE.3", g: "mbd", st: "Live", b: ["Typed signals, calibrations, guarded state machine", "Draft \u2192 Approved (QM-confirmed) \u2192 Baselined"], where: "Quality ▸ Behavior Models", view: "behavior" },
+  { k: "L", i: 4, n: 5, t: "Behavior Model", p: "SWE.3", g: "mbd", st: "Live", b: ["Typed signals, calibrations, guarded state machine", "Draft \u2192 Approved (QM-confirmed) \u2192 Baselined"], where: "Behavior Models (left panel, between Features and ECUs)", view: "behavior" },
   { k: "B", i: 5, n: 6, t: "Generate & Build", p: "SWE.3 / SWE.4", g: "mbd", st: "Live", b: ["Deterministic C code, calibrations, RTE stub and unit tests from the approved model (same model, same code)", "Runner: strict compile, static analysis, coverage, package"], where: "Behavior Models ▸ Generated output · Builds", view: "behavior" },
   { k: "R", i: 4, n: 7, t: "Unit Verification", p: "SWE.4", g: "ver", st: "Live", b: ["Generated tests, line / branch / condition coverage", "Static analysis; generator is mutation-tested"], where: "Builds · Test Cases (import results & evidence)", view: "behavior" },
   { k: "R", i: 3, n: 8, t: "SW Integration & Qualification", p: "SWE.5 / SWE.6", g: "ver", st: "Partial", b: ["Test cases traced to requirements; results imported", "SIL / HIL integration runs are on the roadmap"], where: "Table (test cases) · Quality ▸ Quality Dashboard", view: "dashboard" },
@@ -7131,7 +7131,7 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, 
 /* Behavior Models (Phase 1) — typed signals, calibrations, guarded state machine and Moore outputs per function.
    The deterministic generator (src/lib/codegen.js, registered as window.__sdvCodegen) turns an approved model into C + tests.
    AI may PROPOSE model content here; a human reviews and approves it — the generator never sees unreviewed AI output as approved. */
-function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, audit, notify, build, periodMs, baselines = [], tcRuns = [], onImportResults, onCaptureBaseline }) {
+function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, audit, notify, build, periodMs, baselines = [], tcRuns = [], onImportResults, onCaptureBaseline, selId, onSel, hideList }) {
   const CG = typeof window !== "undefined" ? window.__sdvCodegen : null;
   const [sel, setSel] = useState(null); const [draft, setDraft] = useState(null); const [dirty, setDirty] = useState(false);
   const [gen, setGen] = useState(null); const [fileSel, setFileSel] = useState(null); const [busy, setBusy] = useState("");
@@ -7156,7 +7156,10 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
   const bmId = (smId) => "BM-" + smId.replace(/-MODE$/, "");
   const cl = (o) => JSON.parse(JSON.stringify(o));
   const val = useMemo(() => (CG && draft ? CG.validateModel(draft) : null), [draft]); // eslint-disable-line
-  const open = (smId) => { if (dirty && !window.confirm("Discard unsaved changes?")) return; setSel(smId); setDraft(models[bmId(smId)] ? cl(models[bmId(smId)]) : null); setDirty(false); setGen(null); setFileSel(null); };
+  const open = (smId) => { if (dirty && !window.confirm("Discard unsaved changes?")) return false; setSel(smId); setDraft(models[bmId(smId)] ? cl(models[bmId(smId)]) : null); setDirty(false); setGen(null); setFileSel(null); return true; };
+  useEffect(() => { // selection driven from the left panel's Behavior Models tab; keep it in sync if the user keeps unsaved changes
+    if (selId && selId !== sel && !open(selId) && onSel) onSel(sel);
+  }, [selId]); // eslint-disable-line
   const edit = (fn) => { setDraft((d) => { const m = cl(d); fn(m); return m; }); setDirty(true); };
   const save = () => {
     if (!draft) return null; const prev = models[draft.id]; const m = cl(draft); m.rev = (prev ? prev.rev || 1 : 0) + 1;
@@ -7252,18 +7255,18 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
   const T = ["uint8", "uint16", "uint32", "sint8", "sint16", "sint32", "boolean"];
   return (
     <div className="flex-1 flex" style={{ background: "#fff", minHeight: 0 }}>
-      <div style={{ width: 270, borderRight: "1px solid #EAECF0", overflow: "auto", flexShrink: 0 }}>
+      {!hideList && <div style={{ width: 270, borderRight: "1px solid #EAECF0", overflow: "auto", flexShrink: 0 }}>
         <div style={{ padding: "12px 12px 6px", fontSize: 11, fontWeight: 800, color: "#12B76A", letterSpacing: 0.5 }}>PHASE 1 · QM CODE</div>
         <div style={{ padding: "0 12px 8px", fontSize: 11, color: "#667085", lineHeight: 1.4 }}>Functions with a state machine. Define a Behavior Model, get it approved, then generate code and tests.</div>
         {Object.keys(sms).filter((id) => inScope(id)).map((id) => { const m = models[bmId(id)]; const v = m ? CG.validateModel(m) : null; return (
-          <button key={id} onClick={() => open(id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", borderTop: "1px solid #F2F4F7", background: sel === id ? "#F5F8FC" : "#fff" }}>
+          <button key={id} onClick={() => { if (open(id) && onSel) onSel(id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", borderTop: "1px solid #F2F4F7", background: sel === id ? "#F5F8FC" : "#fff" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#101828" }}>{sms[id].title}</div>
             <div className="flex items-center gap-2" style={{ marginTop: 2 }}><span style={{ fontSize: 9.5, color: "#98A2B3", fontFamily: "ui-monospace,monospace" }}>{id.replace("-MODE", "")}</span>{m ? chip(m.status) : <span style={{ fontSize: 9, color: "#B6C0CC" }}>no model</span>}{m && v && !v.ready && <span style={{ fontSize: 9, color: "#B42318" }}>{v.errors.length} to fix</span>}{m && m.lastGen && <span style={{ fontSize: 9, color: "#067647" }}>{m.generatedTests ? m.generatedTests.length : 0} tests</span>}</div>
           </button>); })}
         <div style={{ padding: "8px 12px", fontSize: 10.5, color: "#98A2B3", borderTop: "1px solid #F2F4F7", lineHeight: 1.4 }}>Platform state machines (power mode, DTC, SecOC) are outside Phase 1 scope. Wiper functions may carry safety relevance — classification must be confirmed first.</div>
-      </div>
+      </div>}
       <div className="flex-1 overflow-auto" style={{ padding: "18px 24px" }}>
-        {!sel && <div style={{ color: "#667085", fontSize: 13, maxWidth: 560, lineHeight: 1.55 }}><b style={{ color: "#101828" }}>Behavior Models</b> close the gap between the architecture (structure) and generated code (behavior): typed signals, named calibrations, a guarded state machine and the outputs of each state. The generator is deterministic — same approved model, same code. AI can propose content; a person approves it. Pick a function on the left. Start with <b>Heating Exterior Mirrors</b> (pilot).</div>}
+        {!sel && <div style={{ color: "#667085", fontSize: 13, maxWidth: 560, lineHeight: 1.55 }}><b style={{ color: "#101828" }}>Behavior Models</b> close the gap between the architecture (structure) and generated code (behavior): typed signals, named calibrations, a guarded state machine and the outputs of each state. The generator is deterministic — same approved model, same code. AI can propose content; a person approves it. Pick a function in the Behavior Models list on the left. Start with <b>Heating Exterior Mirrors</b> (pilot).</div>}
         {sel && !draft && (<div><h2 style={{ fontSize: 18, fontWeight: 700, color: "#101828" }}>{sms[sel].title}</h2><div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>{sms[sel].states.length} states · {sms[sel].trans.length} transitions in the architecture model. No Behavior Model yet.</div>
           {canWrite && <button onClick={create} style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", borderRadius: 8, padding: "7px 14px" }}>{CG.pilots && CG.pilots[sel] ? "Create from pilot template (proposed values)" : "Create from state machine (skeleton)"}</button>}
           <div style={{ fontSize: 11, color: "#98A2B3", marginTop: 8, maxWidth: 520 }}>{CG.pilots && CG.pilots[sel] ? "The template carries proposed types, thresholds, guards and outputs — starting points for the function owner to confirm, not approved values." : "The skeleton copies states and transitions. Signals, guards and outputs must then be defined (or proposed by the Assistant) and reviewed."}</div></div>)}
@@ -7946,7 +7949,9 @@ export default function App() {
     logAudit("Deleted ECU", id, e.name || "");
     notify("ECU deleted.");
   };
-  const [treeMode, setTreeMode] = useState("system"); // "system" | "ecu" — left panel tree
+  const [treeMode, setTreeMode] = useState("system"); // "system" | "behavior" | "ecu" — left panel tree
+  const [bmSel, setBmSel] = useState(null); // state-machine id selected in the Behavior Models tab
+  useEffect(() => { if (view === "behavior") setTreeMode("behavior"); }, [view]); // any link into Behavior Models also shows its list on the left
   const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive", "Software Platform", "Vehicle Platform", "Engineering & Operations"])); // Features-tree domain groups expanded by default
   const [selOps, setSelOps] = useState(null); // selected operational requirement { l0, id } for the tailored reader
   const [opsOv, setOpsOv] = useState(OPS_EMPTY_OV); // owner edits/additions/deletions layered over OPS_REQS (persisted with the workspace)
@@ -8559,7 +8564,7 @@ export default function App() {
     const cov = latest && latest.coverage ? latest.coverage : null, an = latest && latest.analysis ? latest.analysis : null;
     const buildOk = latest && latest.status === "passed" && (!an || an.status === "clean");
     const status = total === 0 ? "Not started" : staleModels.size ? "Stale — rebuild needed" : latest ? (buildOk ? "Build passing" : "Build failing") : (approved === total ? "Approved, not built" : "Draft");
-    const flag = total === 0 ? "No Behavior Models yet — open Quality → Behavior Models to generate QM code and tests from a function."
+    const flag = total === 0 ? "No Behavior Models yet — open the Behavior Models tab (left panel) to generate QM code and tests from a function."
       : approved + " of " + total + " model" + (total === 1 ? "" : "s") + " approved · " + genT + " generated test" + (genT === 1 ? "" : "s")
         + (latest ? " · latest " + latest.build + " " + latest.status + (cov ? " · lines " + cov.lines.pct + "% branches " + cov.branches.pct + "%" + (cov.conditions ? " MC/DC " + cov.conditions.pct + "%" : "") : "") + (an ? " · analysis " + (an.status === "clean" ? "clean" : an.total + " finding(s)") + ", MISRA not run" : "") : " · no build imported yet")
         + (staleModels.size ? " · " + staleModels.size + " model(s) changed since their last build" : "");
@@ -10725,8 +10730,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           </div>
           <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid #F2F4F7" }}>
             <div className="flex items-center gap-1 p-0.5 rounded-md" style={{ background: "#F2F4F7" }}>
-              {[["system", "Features"], ["ecu", "ECUs"]].map(([m, lbl]) => (
-                <button key={m} onClick={() => setTreeMode(m)} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, padding: "2px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: treeMode === m ? "#fff" : "transparent", color: treeMode === m ? "#175CD3" : "#98A2B3", boxShadow: treeMode === m ? "0 1px 2px rgba(16,24,40,0.08)" : "none" }}>{lbl}</button>
+              {[["system", "Features"], ["behavior", "Behavior Models"], ["ecu", "ECUs"]].map(([m, lbl]) => (
+                <button key={m} onClick={() => { setTreeMode(m); if (m === "behavior") setView("behavior"); }} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, padding: "2px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: treeMode === m ? "#fff" : "transparent", color: treeMode === m ? "#175CD3" : "#98A2B3", boxShadow: treeMode === m ? "0 1px 2px rgba(16,24,40,0.08)" : "none" }}>{lbl}</button>
               ))}
             </div>
             <div className="flex items-center gap-2">
@@ -10765,7 +10770,26 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             </div>
           )}
           <div className="flex-1 overflow-auto px-1 py-1">
-            {treeMode === "ecu" ? (() => {
+            {treeMode === "behavior" ? (() => {
+              const bmIdOf = (smId) => "BM-" + smId.replace(/-MODE$/, "");
+              const ST = { draft: ["Draft", "#667085", "#F2F4F7"], proposed: ["Proposed", "#B54708", "#FEF6EE"], approved: ["Approved", "#067647", "#ECFDF3"] };
+              const fns = Object.keys(STATE_MACHINES).filter((id) => /^L2-BODY-/.test(id)); // Phase 1 scope — same as the Behavior Models view
+              const withModel = fns.filter((id) => behaviorModels[bmIdOf(id)]).length;
+              return (
+                <div>
+                  <div className="px-2 pt-2 pb-1" style={{ fontSize: 10, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>PHASE 1 · QM CODE <span style={{ color: "#98A2B3", fontWeight: 600 }}>· {withModel} of {fns.length} modeled</span></div>
+                  <div className="px-2 pb-2" style={{ fontSize: 11, color: "#667085", lineHeight: 1.4 }}>Functions with a state machine. Define a Behavior Model, get it approved, then generate code and tests.</div>
+                  {fns.map((id) => { const m = behaviorModels[bmIdOf(id)]; const st = m && ST[m.status]; const on = view === "behavior" && bmSel === id; return (
+                    <button key={id} onClick={() => { setBmSel(id); setView("behavior"); }} className="w-full text-left rounded-md" style={{ display: "block", padding: "6px 8px", background: on ? "#EFF4FF" : "transparent", border: "none", cursor: "pointer" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: on ? 600 : 500, color: "#101828" }}>{STATE_MACHINES[id].title}</div>
+                      <div className="flex items-center gap-2" style={{ marginTop: 1 }}>
+                        <span style={{ fontSize: 9.5, color: "#98A2B3", fontFamily: "ui-monospace,monospace" }}>{id.replace("-MODE", "")}</span>
+                        {st ? <span style={{ fontSize: 9, fontWeight: 800, color: st[1], background: st[2], borderRadius: 4, padding: "0 6px" }}>{st[0].toUpperCase()}</span> : <span style={{ fontSize: 9, color: "#B6C0CC" }}>no model</span>}
+                      </div>
+                    </button>); })}
+                  <div className="px-2 py-2" style={{ fontSize: 10.5, color: "#98A2B3", borderTop: "1px solid #F2F4F7", marginTop: 4, lineHeight: 1.4 }}>Platform state machines (power mode, DTC, SecOC) are outside Phase 1 scope.</div>
+                </div>);
+            })() : treeMode === "ecu" ? (() => {
               const dot = { primary: "#175CD3", secondary: "#B54708", smart: "#9E77ED" };
               const devItem = (n, kind) => ({ id: n.id, name: n.label, tag: (resolveEcuId(n.props?.controller) || "").replace("ECU-", ""), kind, dev: true });
               const usr = (kind) => userEcus.filter((e) => e.kind === kind).map((e) => ({ id: e.id, name: e.name, tag: "NEW", kind, usr: true }));
@@ -10962,7 +10986,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setQMenu(false)} />
                         <div className="absolute rounded-lg overflow-hidden" style={{ top: 40, left: 0, width: 210, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC", boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
                           <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>QUALITY GATE</div>
-                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["sdvv", "V-Model Process Flow", Layers, "SDVsolution process · model → code → verify"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["behavior", "Behavior Models", Cpu, "Typed behavior → generated QM code + tests"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
+                          {[["engflow", "Engineering Readiness", Workflow, "End-to-end flow · V-model status"], ["sdvv", "V-Model Process Flow", Layers, "SDVsolution process · model → code → verify"], ["consistency", "Consistency Report", AlertTriangle, "Live issues per function / ECU"], ["dashboard", "Quality Dashboard", Table, "Coverage & health metrics"], ["review", "Review Board", Check, "Approve · baseline · assign (SUP.4)"], ["baselines", "Baselines", Copy, "Snapshot · diff · restore · persist"], ["compliance", "Standards & Compliance", Lock, "Certifications & standards register"]].map(([v, label, Icon, sub]) => (
                             <button key={v} onClick={() => { setView(v); setQMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ background: view === v ? "#F5F8FC" : "#fff" }}>
                               <Icon size={14} color={view === v ? "#175CD3" : "#475467"} style={{ flexShrink: 0 }} />
                               <div className="flex-1 min-w-0">
@@ -11142,7 +11166,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           {view === "behavior" && <BehaviorPanel models={behaviorModels} setModels={setBehaviorModels} sms={STATE_MACHINES} canWrite={canWrite} periodMs={MIRROR_TIMING.runnablePeriodMs} build={tcBuild.trim()}
             implFor={(smId) => { const pre = smId.replace(/-MODE$/, "-"); return Object.keys(REQ_STATEMENTS).filter((k) => k.startsWith(pre)); }}
             reqText={(id) => REQ_STATEMENTS[id] || ((getN(id) && getN(id).props && getN(id).props.statement) || "")}
-            audit={logAudit} notify={notify} baselines={baselines} tcRuns={tcRuns} onImportResults={importBuildResults} onCaptureBaseline={captureBaseline} />}
+            audit={logAudit} notify={notify} baselines={baselines} tcRuns={tcRuns} onImportResults={importBuildResults} onCaptureBaseline={captureBaseline}
+            selId={bmSel} onSel={setBmSel} hideList={treeMode === "behavior" && !leftHidden} />}
 
           {view === "adminbilling" && (
             <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
