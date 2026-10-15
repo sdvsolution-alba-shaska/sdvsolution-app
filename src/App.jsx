@@ -7951,6 +7951,7 @@ export default function App() {
   };
   const [treeMode, setTreeMode] = useState("system"); // "system" | "behavior" | "ecu" — left panel tree
   const [bmSel, setBmSel] = useState(null); // state-machine id selected in the Behavior Models tab
+  const [bmClosed, setBmClosed] = useState(() => new Set()); // collapsed domain/subdomain keys in the Behavior Models tree (all open by default)
   useEffect(() => { if (view === "behavior") setTreeMode("behavior"); }, [view]); // any link into Behavior Models also shows its list on the left
   const [domOpen, setDomOpen] = useState(() => new Set(["ADAS", "Body", "Energy", "Infotainment", "Drive", "Software Platform", "Vehicle Platform", "Engineering & Operations"])); // Features-tree domain groups expanded by default
   const [selOps, setSelOps] = useState(null); // selected operational requirement { l0, id } for the tailored reader
@@ -10771,23 +10772,55 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           )}
           <div className="flex-1 overflow-auto px-1 py-1">
             {treeMode === "behavior" ? (() => {
+              /* Behavior Models tree — same Domain ▸ SubDomain grouping as the Features tree. Each state-machine function sits under
+                 the subdomain of its L1 feature (L2-BODY-00187-MODE → L1-BODY-00187). Platform state machines have no L1 feature, so they
+                 are placed under the subdomain that owns them. Only Phase 1 functions (body domain) open a Behavior Model; the rest are listed
+                 greyed so the tree shows where models will come next. */
               const bmIdOf = (smId) => "BM-" + smId.replace(/-MODE$/, "");
               const ST = { draft: ["Draft", "#667085", "#F2F4F7"], proposed: ["Proposed", "#B54708", "#FEF6EE"], approved: ["Approved", "#067647", "#ECFDF3"] };
-              const fns = Object.keys(STATE_MACHINES).filter((id) => /^L2-BODY-/.test(id)); // Phase 1 scope — same as the Behavior Models view
-              const withModel = fns.filter((id) => behaviorModels[bmIdOf(id)]).length;
+              const PLATFORM_SUB = { "PLATFORM-POWERMODE": "Vehicle State & Power Management", "PLATFORM-DTC": "Diagnostics", "PLATFORM-SECOC": "Security & Privacy", "PLATFORM-DIGMIRROR": "Occupant Visibility" };
+              const inPhase1 = (id) => /^L2-BODY-/.test(id); // same scope as the Behavior Models view
+              const featOf = (id) => (/^L2-/.test(id) ? id.replace(/^L2-/, "L1-").replace(/-MODE$/, "") : null);
+              const subOf = (id) => { const f = featOf(id), n = f && getN(f); if (n) return (n.props && n.props.subdomain) || ((getN(n.props && n.props.parentL0) || {}).label) || "Other"; return PLATFORM_SUB[id] || "Other"; };
+              const bySub = {}; Object.keys(STATE_MACHINES).forEach((id) => { const sd = subOf(id); (bySub[sd] = bySub[sd] || []).push(id); });
+              const doms = FEATURE_DOMAINS.map(([dom, labels]) => [dom, labels.filter((l) => bySub[l]).map((l) => [l, bySub[l]])]);
+              const placed = new Set(doms.flatMap(([, subs]) => subs.map(([l]) => l))); const other = Object.keys(bySub).filter((l) => !placed.has(l));
+              if (other.length) doms.push(["Other", other.map((l) => [l, bySub[l]])]);
+              const isOpen = (k) => !bmClosed.has(k); const toggle = (k) => setBmClosed((p) => { const x = new Set(p); x.has(k) ? x.delete(k) : x.add(k); return x; });
+              const smTitle = (t) => titleCase(String(t || "").toLowerCase()).replace(/\b(Dtc|Uds|Secoc|Ota)\b/g, (w) => ({ Dtc: "DTC", Uds: "UDS", Secoc: "SecOC", Ota: "OTA" })[w]);
+              const total = Object.keys(STATE_MACHINES).filter(inPhase1), modeled = total.filter((id) => behaviorModels[bmIdOf(id)]).length;
+              const fnRow = (id) => { const m = behaviorModels[bmIdOf(id)], st = m && ST[m.status], ok = inPhase1(id), on = view === "behavior" && bmSel === id; return (
+                <button key={id} disabled={!ok} onClick={ok ? () => { setBmSel(id); setView("behavior"); } : undefined}
+                  title={ok ? STATE_MACHINES[id].title : "Outside Phase 1 scope — Behavior Models currently cover body-domain functions only"}
+                  className="w-full text-left rounded flex items-center gap-1 py-1 pr-2" style={{ paddingLeft: 6 + 2 * 13 + 16, background: on ? "#EAF2FF" : "transparent", border: "none", cursor: ok ? "pointer" : "default" }}>
+                  <span className="truncate flex-1" style={{ fontSize: 12, color: !ok ? "#B6C0CC" : on ? "#101828" : "#344054", fontWeight: on ? 600 : 400 }}>{smTitle(STATE_MACHINES[id].title)}</span>
+                  {ok ? (st ? <span style={{ fontSize: 8.5, fontWeight: 800, color: st[1], background: st[2], borderRadius: 3, padding: "0 5px", flexShrink: 0 }}>{st[0].toUpperCase()}</span>
+                    : <span style={{ fontSize: 9, color: "#B6C0CC", flexShrink: 0 }}>no model</span>)
+                    : <span style={{ fontSize: 8.5, color: "#B6C0CC", flexShrink: 0, whiteSpace: "nowrap" }}>not in Phase 1</span>}
+                </button>); };
               return (
                 <div>
-                  <div className="px-2 pt-2 pb-1" style={{ fontSize: 10, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>PHASE 1 · QM CODE <span style={{ color: "#98A2B3", fontWeight: 600 }}>· {withModel} of {fns.length} modeled</span></div>
-                  <div className="px-2 pb-2" style={{ fontSize: 11, color: "#667085", lineHeight: 1.4 }}>Functions with a state machine. Define a Behavior Model, get it approved, then generate code and tests.</div>
-                  {fns.map((id) => { const m = behaviorModels[bmIdOf(id)]; const st = m && ST[m.status]; const on = view === "behavior" && bmSel === id; return (
-                    <button key={id} onClick={() => { setBmSel(id); setView("behavior"); }} className="w-full text-left rounded-md" style={{ display: "block", padding: "6px 8px", background: on ? "#EFF4FF" : "transparent", border: "none", cursor: "pointer" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: on ? 600 : 500, color: "#101828" }}>{STATE_MACHINES[id].title}</div>
-                      <div className="flex items-center gap-2" style={{ marginTop: 1 }}>
-                        <span style={{ fontSize: 9.5, color: "#98A2B3", fontFamily: "ui-monospace,monospace" }}>{id.replace("-MODE", "")}</span>
-                        {st ? <span style={{ fontSize: 9, fontWeight: 800, color: st[1], background: st[2], borderRadius: 4, padding: "0 6px" }}>{st[0].toUpperCase()}</span> : <span style={{ fontSize: 9, color: "#B6C0CC" }}>no model</span>}
-                      </div>
-                    </button>); })}
-                  <div className="px-2 py-2" style={{ fontSize: 10.5, color: "#98A2B3", borderTop: "1px solid #F2F4F7", marginTop: 4, lineHeight: 1.4 }}>Platform state machines (power mode, DTC, SecOC) are outside Phase 1 scope.</div>
+                  <div className="px-2 pt-1 pb-1" style={{ fontSize: 10, fontWeight: 700, color: "#12B76A", letterSpacing: 0.5 }}>PHASE 1 · QM CODE <span style={{ color: "#98A2B3", fontWeight: 600 }}>· {modeled} of {total.length} modeled</span></div>
+                  {doms.map(([dom, subs]) => { const dc = DOMAIN_COLOR[dom] || "#667085", fns = subs.reduce((n, [, ids]) => n + ids.length, 0), dk = "d:" + dom, empty = !fns;
+                    const dm = subs.reduce((n, [, ids]) => n + ids.filter((id) => behaviorModels[bmIdOf(id)]).length, 0);
+                    return (
+                      <div key={dk}>
+                        <button onClick={empty ? undefined : () => toggle(dk)} className="flex items-center gap-1 w-full py-1 pr-2 rounded" style={{ paddingLeft: 6, cursor: empty ? "default" : "pointer", opacity: empty ? 0.45 : 1 }}>
+                          {empty ? <span style={{ width: 13 }} /> : isOpen(dk) ? <ChevronDown size={13} color="#98A2B3" /> : <ChevronRight size={13} color="#98A2B3" />}
+                          <span style={{ width: 7, height: 7, borderRadius: 2, background: dc, flexShrink: 0 }} />
+                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: dc }}>{dom.toUpperCase()}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: dc, marginLeft: "auto", whiteSpace: "nowrap" }}>{empty ? "No functions yet" : "Function " + fns + " · Model " + dm}</span>
+                        </button>
+                        {!empty && isOpen(dk) && subs.map(([sub, ids]) => { const sk = "s:" + sub; return (
+                          <div key={sk}>
+                            <div className="flex items-center gap-1 py-1 pr-2 rounded" style={{ paddingLeft: 6 + 13, cursor: "pointer" }} onClick={() => toggle(sk)}>
+                              <span className="shrink-0 w-4 h-4 flex items-center justify-center" style={{ color: "#98A2B3" }}>{isOpen(sk) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+                              <span className="truncate flex-1" style={{ fontSize: 12, color: "#344054" }}>{sub}</span>
+                              <span style={{ fontSize: 9.5, color: "#B6C0CC", flexShrink: 0, whiteSpace: "nowrap" }}>Function {ids.length}</span>
+                            </div>
+                            {isOpen(sk) && ids.map(fnRow)}
+                          </div>); })}
+                      </div>); })}
                 </div>);
             })() : treeMode === "ecu" ? (() => {
               const dot = { primary: "#175CD3", secondary: "#B54708", smart: "#9E77ED" };
