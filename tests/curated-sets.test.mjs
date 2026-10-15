@@ -23,6 +23,7 @@ ok(all.every((x) => /\bshall\b/i.test(x.r.req) && String(x.r.ac || "").trim()), 
 const FULL_BAR = [
   { set: "Driver Assistance", l0: "L0-ADAS-002", l1Count: 53, idRe: /^DA-[A-Z]{3}-\d{2}$/ },
   { set: "Camera & Surround View", l0: "L0-ADAS-001", l1Count: 15, idRe: /^CSV-[A-Z]{3}-\d{2}$/ },
+  { set: "Occupant Visibility", l0: "L0-BODY-008", l1Count: 21, idRe: /^OV-[A-Z]{3}-\d{2}$/ },
 ];
 const RETIRED = ["DA-CAM-01", "DA-CAM-02", "DA-CAM-04", "CSV-COL-01", "CSV-DMS-01", "CSV-DMS-02"]; // merged away into the requirements that list them in mergedFrom
 const tracedAnywhere = new Set(all.flatMap((x) => x.r.l1 || [])), graphIds = new Set(RAW.nodes.map((n) => n.id));
