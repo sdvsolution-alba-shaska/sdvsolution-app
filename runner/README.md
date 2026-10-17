@@ -20,6 +20,8 @@ SDV_API=https://app.sdvsolution.com SDV_RUNNER_TOKEN=sdvr_xxx node runner/runner
 
 Or with Docker (from the repository root): `docker build -f runner/Dockerfile -t sdv-runner .`
 
+On Windows with Docker Desktop, double-click `runner/start-runner.cmd`: it builds the image, asks for the token without showing it, and starts the runner.
+
 ## Managed vs customer-run
 
 One program, two deployments. A **customer runner** holds a token registered by that company's owner/admin and only ever
