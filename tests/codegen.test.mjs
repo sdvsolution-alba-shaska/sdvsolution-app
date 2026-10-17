@@ -105,4 +105,31 @@ for (const [key, tpl] of Object.entries(PILOT_MODELS)) {
   bm.calibrations.find((c) => c.name === "CAL_AUTO_UNFOLD_EN").value = 0; const off = generateTests(bm);
   ok(!off.tests.some((t) => /FOLDED>UNFOLDING#1#alt1/.test(t.key)), "…and no such test is invented when the feature is configured off (the branch is constant-false)");
 }
+// --- AUTOSAR SWC description (arxml/<swc>.arxml): well-formed, internally consistent, and matching the generated C names
+for (const key of Object.keys(PILOT_MODELS)) {
+  const g = await generate(clone(PILOT_MODELS[key]), { build: "arx" }), tag = key + ": ";
+  const ax = g.files.find((f) => /^arxml\/.+\.arxml$/.test(f.name)); ok(!!ax, tag + "an ARXML SWC description is generated (" + (ax && ax.name) + ")"); if (!ax) continue;
+  const xml = ax.text, rteH = g.files.find((f) => /^src\/Rte_.+\.h$/.test(f.name)).text, swcH = g.files.find((f) => /^src\/[^/]+\.h$/.test(f.name) && !/Rte_|_cfg/.test(f.name)).text;
+  // well-formed: tags balance, and collect every element path built from nested SHORT-NAMEs
+  const stack = [], names = [], paths = new Set(); let wf = true; const re = /<SHORT-NAME>([^<]*)<\/SHORT-NAME>|<(\/?)([A-Z0-9-]+)([^>]*?)(\/?)>/g; let mm;
+  const body = xml.replace(/<\?xml[^>]*\?>/, "").replace(/<!--[\s\S]*?-->/g, "");
+  while ((mm = re.exec(body))) {
+    if (mm[1] != null) { names[stack.length - 1] = mm[1]; paths.add("/" + names.slice(0, stack.length).filter(Boolean).join("/")); continue; }
+    if (mm[5] === "/") continue; if (mm[2] === "/") { if (stack.pop() !== mm[3]) wf = false; names.length = stack.length; } else { stack.push(mm[3]); names[stack.length - 1] = undefined; }
+  }
+  ok(wf && stack.length === 0, tag + "ARXML is well-formed (every element closed in order)");
+  const refs = [...xml.matchAll(/<[A-Z-]+-T?REF DEST="[A-Z-]+">([^<]+)<\//g)].map((r) => r[1]), own = refs.filter((r) => !r.startsWith("/AUTOSAR_Platform/")), missing = own.filter((r) => !paths.has(r));
+  ok(own.length > 0 && !missing.length, tag + "every reference inside the package resolves (" + own.length + " refs)" + (missing.length ? " — missing: " + missing.slice(0, 3).join(", ") : ""));
+  ok(refs.filter((r) => r.startsWith("/AUTOSAR_Platform/")).every((r) => /\/(uint8|uint16|uint32|sint8|sint16|sint32|boolean)$/.test(r)), tag + "only standard AUTOSAR platform types are referenced from outside");
+  const apis = [...rteH.matchAll(/Rte_(Read|Write)_([A-Za-z0-9_]+)\(/g)];
+  const portsOf = (kind) => [...xml.matchAll(new RegExp("<" + kind + ">\\s*<SHORT-NAME>([^<]+)</SHORT-NAME>[\\s\\S]*?<DATA-ELEMENT-REF DEST=\"VARIABLE-DATA-PROTOTYPE\">[^<]*/([^/<]+)</DATA-ELEMENT-REF>", "g"))].map((r) => r[1] + "_" + r[2]);
+  const rIn = new Set(portsOf("R-PORT-PROTOTYPE")), pOut = new Set(portsOf("P-PORT-PROTOTYPE"));
+  const portsOk = apis.length > 0 && apis.length === rIn.size + pOut.size && apis.every(([, rw, pe]) => (rw === "Read" ? rIn : pOut).has(pe));
+  ok(portsOk, tag + "every Rte_Read_/Rte_Write_ in the generated C has its port and data element in the ARXML (" + apis.length + ")");
+  const syms = [...xml.matchAll(/<SYMBOL>([^<]+)<\/SYMBOL>/g)].map((r) => r[1]);
+  ok(syms.length === 2 && syms.every((sy) => new RegExp("void " + sy + "\\(void\\);").test(swcH)), tag + "runnable symbols match the C functions (" + syms.join(", ") + ")");
+  const per = (xml.match(/<PERIOD>([^<]+)<\/PERIOD>/) || [])[1]; ok(Number(per) * 1000 === Number(clone(PILOT_MODELS[key]).runnable.periodMs), tag + "timing event period matches the runnable period (" + per + " s)");
+  const g2 = await generate(clone(PILOT_MODELS[key]), { build: "arx" }); ok(g2.files.find((f) => f.name === ax.name).text === xml, tag + "ARXML is deterministic");
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
