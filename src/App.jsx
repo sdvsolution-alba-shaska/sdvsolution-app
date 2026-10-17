@@ -7246,7 +7246,15 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
   const blObj = baselines.find((b) => b.id === bl) || null;
   const blModel = blObj && blObj.snap && blObj.snap.behaviorModels ? blObj.snap.behaviorModels[draft ? draft.id : ""] : null;
   const blGate = CG ? CG.checkBuildable(blModel, blObj) : { ok: false, reasons: [] };
-  const captureNow = () => { if (dirty) { notify("Save your changes first — the baseline captures saved models."); return; } const id = onCaptureBaseline("Build baseline · " + draft.title + " · rev " + (draft.rev || 1)); if (id) { setBl(id); setBMsg("Baseline captured and selected."); } };
+  /* Baseline labels: when it was captured + every Behavior Model it holds with its status (the page's own model first).
+     Auto-generated names ("Build baseline · …", "Baseline <date>") are replaced by this; a name a person typed is kept in front. */
+  const blAutoName = (n) => !n || /^Build baseline · /.test(n) || /^Baseline \d/.test(n);
+  const blWhen = (b) => { const d = new Date(b.ts); return isNaN(d) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+  const blModels = (b) => { const ms = Object.values((b.snap && b.snap.behaviorModels) || {}).filter(Boolean); if (!ms.length) return "no behavior models";
+    ms.sort((x, y) => (x.id === (draft && draft.id) ? -1 : y.id === (draft && draft.id) ? 1 : String(x.title).localeCompare(String(y.title))));
+    return ms.map((m) => titleCase(String(m.title || m.id).toLowerCase()) + (m.status === "approved" && m.qmConfirmed ? " ✓" : " (" + (m.status || "draft") + ")")).join(", "); };
+  const blLabel = (b) => (blAutoName(b.name) ? "" : b.name + " · ") + blWhen(b) + " — " + blModels(b);
+  const captureNow = () => { if (dirty) { notify("Save your changes first — the baseline captures saved models."); return; } const id = onCaptureBaseline(""); if (id) { setBl(id); setBMsg("Baseline captured and selected."); } };
   const requestBuild = async () => {
     setBBusy(true); setBMsg("");
     try {
@@ -7352,12 +7360,12 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
           </tbody></table>))}
           {BA && (<div style={{ marginTop: 22 }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: "#475467", letterSpacing: 0.4 }}>BUILDS</div>
-            <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 6 }}>A build always starts from a <b>baseline</b> that holds an <b>approved, QM-confirmed</b> model. A runner regenerates the code, compiles it with strict warnings, runs the generated tests and reports back. Static analysis and coverage are not run yet and are shown as such.</div>
+            <div style={{ fontSize: 11, color: "#98A2B3", marginBottom: 6 }}>A build always starts from a <b>baseline</b> that holds an <b>approved, QM-confirmed</b> model. A runner regenerates the code, compiles it with strict warnings, runs the generated tests, static analysis and coverage, and reports back. Each baseline shows when it was captured and the models it holds (✓ = approved and QM-confirmed).</div>
             <div style={{ border: "1px solid #EAECF0", borderRadius: 8, padding: 12 }}>
               <div className="flex items-center gap-2 flex-wrap">
-                <select value={bl} onChange={(e) => setBl(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", border: "1px solid #D0D5DD", borderRadius: 7, maxWidth: 360 }}>
+                <select value={bl} onChange={(e) => setBl(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", border: "1px solid #D0D5DD", borderRadius: 7, maxWidth: 620 }}>
                   <option value="">— choose a baseline —</option>
-                  {baselines.map((b) => { const m = b.snap && b.snap.behaviorModels && b.snap.behaviorModels[draft.id]; return <option key={b.id} value={b.id}>{b.name} · {m ? (m.status === "approved" && m.qmConfirmed ? "approved ✓" : m.status) : "model not in baseline"}</option>; })}
+                  {baselines.map((b) => <option key={b.id} value={b.id}>{blLabel(b)}</option>)}
                 </select>
                 {canWrite && <button onClick={captureNow} style={{ fontSize: 11.5, fontWeight: 600, color: "#175CD3", border: "1px solid #B2CCFF", borderRadius: 7, padding: "4px 10px" }}>Capture baseline now</button>}
                 {canWrite && <button onClick={requestBuild} disabled={bBusy || !blGate.ok} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: blGate.ok && !bBusy ? "#12B76A" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>{bBusy ? "Requesting…" : "Request build"}</button>}
@@ -7368,7 +7376,7 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
               {builds.length > 0 && (<table style={{ borderCollapse: "collapse", width: "100%", marginTop: 12 }}><thead><tr>{["Build", "Status", "Baseline", "Tests", "Where", "When", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
                 {builds.map((b) => (<tr key={b.id} onClick={() => { if (bSel !== b.id) { setBSel(b.id); setBFiles(null); } }} style={{ borderTop: "1px solid #F2F4F7", cursor: "pointer", background: bSel === b.id ? "#F5F8FC" : "#fff" }}>
                   <td style={{ padding: "4px 8px", fontFamily: "ui-monospace,monospace", fontSize: 11, fontWeight: 700, color: "#175CD3" }}>{b.label}</td><td style={{ padding: "4px 8px" }}>{bchip(b.status)}</td>
-                  <td style={{ padding: "4px 8px", fontSize: 11, color: "#475467" }}>{b.baselineName || b.baselineId}</td>
+                  <td style={{ padding: "4px 8px", fontSize: 11, color: "#475467" }}>{(() => { const lb = baselines.find((x) => x.id === b.baselineId); return lb ? blLabel(lb) : (b.baselineName || b.baselineId); })()}</td>
                   <td style={{ padding: "4px 8px", fontSize: 11, color: "#344054" }}>{b.result && b.result.tests ? b.result.tests.passed + "/" + b.result.tests.run : "—"}</td>
                   <td style={{ padding: "4px 8px", fontSize: 10.5, color: "#98A2B3" }}>{b.pool === "customer" ? "your runner" : "managed"}</td>
                   <td style={{ padding: "4px 8px", fontSize: 10.5, color: "#98A2B3", whiteSpace: "nowrap" }}>{new Date(b.createdAt).toLocaleString()} {dur(b)}</td>
