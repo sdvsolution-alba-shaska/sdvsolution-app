@@ -404,8 +404,8 @@ const NETWORK = {
    (85H.962.133; anti-theft "Einbruchschutz" + Mobile Device Key). RSAD_IN1/IN2/VR/VL/HL/HR.
    ⚠ J1192.4 & J1193.5 both read "vorne rechts"; one is almost certainly front-left (VL) — flagged. */
 [
-  ["ECU-VAS-INF", "VAS_INF", "interior, front roof (RSAD_IN1)", "J1191.2"],
-  ["ECU-VAS-INR", "VAS_INR", "interior, rear roof (RSAD_IN2)", "J1309.2"],
+  ["ECU-VAS-IFR", "VAS_IFR", "interior, front roof (RSAD_IN1)", "J1191.2"],
+  ["ECU-VAS-IRR", "VAS_IRR", "interior, rear roof (RSAD_IN2)", "J1309.2"],
   ["ECU-VAS-FR",  "VAS_FR",  "front right (RSAD_VR)", "J1192.4"],
   ["ECU-VAS-FL",  "VAS_FL",  "front left (RSAD_VL) ⚠", "J1193.5"],
   ["ECU-VAS-RL",  "VAS_RL",  "rear left (RSAD_HL)", "J1194.5"],
@@ -1400,7 +1400,7 @@ const ecuOf = (n) => { if (!n) return "";
   if (n.type === "Requirement" && /L1/.test(n.subtype || "")) { const e = ecuFor(n); return e ? e.replace("ECU-", "") : ""; }
   return ""; };
 /* Design Responsible Engineer (DRE) — placeholder per-ECU assignment, proposed pending real allocation. */
-const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CID: "D. Koch", FID: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "VAS-INF": "N. Vogel", "VAS-INR": "N. Vogel", "VAS-FR": "N. Vogel", "VAS-FL": "N. Vogel", "VAS-RL": "N. Vogel", "VAS-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
+const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CID: "D. Koch", FID: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "VAS-IFR": "N. Vogel", "VAS-IRR": "N. Vogel", "VAS-FR": "N. Vogel", "VAS-FL": "N. Vogel", "VAS-RL": "N. Vogel", "VAS-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
 const dreFor = (n) => (n && n.props && n.props.dre) || DRE_BY_ECU[ecuOf(n)] || "";
 
 /* The full V for ONE L1, generated on demand the first time it's opened. */
@@ -2032,8 +2032,8 @@ const resolveEcuId = (t) => {
   if (/\brrdcu\b|rear.?door control|tailgate control|heckklappe/.test(t)) return "ECU-RRDCU";
   if (/\bsrcu\b|ausstelldach|tilt.?roof control|sliding.?roof control|cabana roof/.test(t)) return "ECU-SRCU";
   if (/\bpscu\b|powered.?sunshade|sunshade control/.test(t)) return "ECU-PSCU";
-  if (/rsad_in1|vas_inf/.test(t)) return "ECU-VAS-INF";
-  if (/rsad_in2|vas_inr/.test(t)) return "ECU-VAS-INR";
+  if (/rsad_in1|vas_ifr/.test(t)) return "ECU-VAS-IFR";
+  if (/rsad_in2|vas_irr/.test(t)) return "ECU-VAS-IRR";
   if (/rsad_vr|vas_fr/.test(t)) return "ECU-VAS-FR";
   if (/rsad_vl|vas_fl/.test(t)) return "ECU-VAS-FL";
   if (/rsad_hl|vas_rl/.test(t)) return "ECU-VAS-RL";
@@ -13126,7 +13126,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           {/* ---- TOPOLOGY VIEW: governed physical E/E network — ECUs + approved bus links (CAN/Ethernet/GMSL), ASIL badges and mismatch flags ---- */}
           {view === "deploy" && (() => {
             const total = Object.values(deployment).reduce((s, a) => s + a.length, 0) || 1;
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const sel2 = ECU_BY_ID[deployEcu];
             const fns = deployment[deployEcu] || [];
             /* scene layout — CCM sits on top of CCU; DLC left of CCU; cloud outside the vehicle */
@@ -13496,7 +13496,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const protos = [...new Set(items.map((i) => i.props?.protocol).filter(Boolean))];
               return protos.slice(0, 3).join(" · ");
             };
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
                 <div className="px-6 pt-5 pb-2">
@@ -13801,7 +13801,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             /* ===== SECTION: Schematics view - connector pin-out diagrams ===== */
             const ECUS = NETWORK.ecus;
             const ioNodes = Object.values(nodes).filter((n) => n.type === "ECUSmartNode" && /I\/O list$/.test(n.props?.source || ""));
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const wc = (cls) => { const c = (cls || "").toUpperCase();
               if (c.indexOf("ETH") >= 0 || c.indexOf("NET") === 0) return "#175CD3";
               if (c.indexOf("CAN") >= 0 || c.indexOf("LIN") >= 0 || c.indexOf("BUS") === 0) return "#C4320A";
