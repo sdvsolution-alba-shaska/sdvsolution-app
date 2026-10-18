@@ -6,6 +6,7 @@ const sig = (name, dir, baseType, min, max, unit, init, extra = {}) => ({ name, 
 const cal = (name, baseType, value, unit, source) => ({ name, baseType, value, unit, source });
 const SRC = "Proposed starting value — confirm with heater/mirror supplier datasheet";
 const SRC2 = "Proposed starting value — confirm with mirror fold-motor supplier datasheet";
+const SRC4 = "Proposed starting value — confirm with the EC-mirror supplier datasheet and vehicle tuning";
 const SRC3 = "Proposed starting value — confirm with mirror-glass adjust-motor supplier datasheet";
 
 export const PILOT_MODELS = {
@@ -163,5 +164,62 @@ export const PILOT_MODELS = {
       ],
     },
     status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00187-MODE", template: true,
+  },
+  "L2-BODY-00189-MODE": {
+    id: "BM-L2-BODY-00189", function: "L2-BODY-00189-FUN", title: "AUTO-DIM INTERIOR MIRROR",
+    implements: ["L2-BODY-00189-FUN", "L2-BODY-00189-IF", "L2-BODY-00189-PERF", "L2-BODY-00189-MODE", "L2-BODY-00189-DIAG", "L2-BODY-00189-SEC"],
+    target: { ecu: "ECU-CZM", swc: "AutoDimInteriorMirror" },
+    notes: "Distributed function: the CZM (chip B) arbitrates whether dimming is permitted and commands the level; the EC_Mirror (Y7.3, LIN slave on Center_Roof_LIN01) senses glare, drives the electrochromic glass and reports faults. Reverse gear forces the glass clear from every state within one cycle (FMVSS 111, OV-MIR-08). Open: L2-BODY-00189-FUN mentions gating on vehicle speed, but no speed limit is defined — not modelled until one is set.",
+    signals: [
+      sig("power_mode", "in", "uint8", 0, 3, "enum", 0, { invalid: 0, note: "0 Sleep · 1 Standby · 2 Active · 3 Retained accessory. A failed read counts as Sleep (glass clear)." }),
+      sig("autodim_enabled", "in", "boolean", 0, 1, "", 0, { invalid: 0, note: "Driver HMI auto-dim on/off (restored from the user profile). Authenticated (SecOC); a failed read counts as OFF." }),
+      sig("reverse_gear", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Reverse engaged. Authenticated (SecOC); a failed read counts as REVERSE (glass clear, FMVSS 111)." }),
+      sig("digital_mode", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Digital (camera) interior-mirror mode selected — EC dimming not used. A failed read counts as SELECTED (clear)." }),
+      sig("glare_pct", "in", "uint8", 0, 100, "%", 0, { invalid: 0, note: "Rear headlamp glare relative to ambient, from the EC_Mirror sensors (Center_Roof_LIN01)" }),
+      sig("ambient_lux", "in", "uint16", 0, 10000, "lx", 10000, { invalid: 10000, note: "Forward ambient light. A failed read counts as BRIGHT (no dimming)." }),
+      sig("ec_fault", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "EC element open-load / short, or glare / ambient sensor fault reported by the mirror. A failed read counts as FAULT." }),
+      sig("lin_timeout", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "EC_Mirror status frame missing on Center_Roof_LIN01 beyond its timeout. A failed read counts as TIMED OUT." }),
+      sig("dim_cmd", "out", "uint8", 0, 3, "enum", 0, { note: "To the EC_Mirror: 0 no dim · 1 low · 2 medium · 3 high" }),
+      sig("autodim_status", "out", "uint8", 0, 4, "enum", 0, { note: "To the driver display: 0 clear · 1 low · 2 medium · 3 high · 4 forced clear (reverse / digital / fault)" }),
+      sig("autodim_fault", "out", "boolean", 0, 1, "", 0, { note: "Request to log a DTC (EC element / sensor fault or LIN timeout) — not set for reverse or digital mode" }),
+    ],
+    calibrations: [
+      cal("CAL_MIN_POWER_MODE", "uint8", 2, "enum", "Configuration — auto-dim active in Active (2) and Retained accessory (3) (L2-BODY-00189-MODE)"),
+      cal("CAL_AMBIENT_DARK_LUX", "uint16", 30, "lx", SRC4 + " (dimming only below this ambient light)"),
+      cal("CAL_GLARE_LOW_PCT", "uint8", 25, "%", SRC4),
+      cal("CAL_GLARE_MED_PCT", "uint8", 50, "%", SRC4),
+      cal("CAL_GLARE_HIGH_PCT", "uint8", 75, "%", SRC4),
+      cal("CAL_GLARE_HYST_PCT", "uint8", 10, "%", SRC4 + " (step-down hysteresis)"),
+      cal("CAL_LEVEL_HOLD_MS", "uint32", 500, "ms", SRC4 + " (minimum time in a level before stepping — rate limit)"),
+      cal("CAL_FAULT_RETRY_MS", "uint32", 500, "ms", SRC4 + " (stay clear this long after reverse / fault ends)"),
+    ],
+    runnable: { name: "Run", periodMs: 10 },
+    stateMachine: {
+      init: "CLEAR",
+      states: [
+        { id: "CLEAR", label: "Clear (No dim)", outputs: { dim_cmd: "0", autodim_status: "0", autodim_fault: "false" } },
+        { id: "LOW", label: "Low", outputs: { dim_cmd: "1", autodim_status: "1", autodim_fault: "false" } },
+        { id: "MED", label: "Medium", outputs: { dim_cmd: "2", autodim_status: "2", autodim_fault: "false" } },
+        { id: "HIGH", label: "High", outputs: { dim_cmd: "3", autodim_status: "3", autodim_fault: "false" } },
+        { id: "FAULT", label: "Fault / Reverse → Clear", outputs: { dim_cmd: "0", autodim_status: "4", autodim_fault: "ec_fault || lin_timeout" } },
+      ],
+      // Order = priority within a state: reverse / digital / fault first in every state, then loss of permission, then level steps.
+      transitions: [
+        { from: "CLEAR", to: "FAULT", label: "reverse / digital / fault", guard: "reverse_gear || digital_mode || ec_fault || lin_timeout" },
+        { from: "CLEAR", to: "LOW", label: "glare permitted", guard: "power_mode >= CAL_MIN_POWER_MODE && autodim_enabled && ambient_lux < CAL_AMBIENT_DARK_LUX && glare_pct >= CAL_GLARE_LOW_PCT" },
+        { from: "LOW", to: "FAULT", label: "reverse / digital / fault", guard: "reverse_gear || digital_mode || ec_fault || lin_timeout" },
+        { from: "LOW", to: "CLEAR", label: "glare gone / not permitted", guard: "power_mode < CAL_MIN_POWER_MODE || !autodim_enabled || ambient_lux >= CAL_AMBIENT_DARK_LUX || glare_pct < CAL_GLARE_LOW_PCT - CAL_GLARE_HYST_PCT" },
+        { from: "LOW", to: "MED", label: "more glare", guard: "glare_pct >= CAL_GLARE_MED_PCT && state_time_ms >= CAL_LEVEL_HOLD_MS" },
+        { from: "MED", to: "FAULT", label: "reverse / digital / fault", guard: "reverse_gear || digital_mode || ec_fault || lin_timeout" },
+        { from: "MED", to: "CLEAR", label: "glare gone / not permitted", guard: "power_mode < CAL_MIN_POWER_MODE || !autodim_enabled || ambient_lux >= CAL_AMBIENT_DARK_LUX" },
+        { from: "MED", to: "LOW", label: "less glare", guard: "glare_pct < CAL_GLARE_MED_PCT - CAL_GLARE_HYST_PCT && state_time_ms >= CAL_LEVEL_HOLD_MS" },
+        { from: "MED", to: "HIGH", label: "more glare", guard: "glare_pct >= CAL_GLARE_HIGH_PCT && state_time_ms >= CAL_LEVEL_HOLD_MS" },
+        { from: "HIGH", to: "FAULT", label: "reverse / digital / fault", guard: "reverse_gear || digital_mode || ec_fault || lin_timeout" },
+        { from: "HIGH", to: "CLEAR", label: "glare gone / not permitted", guard: "power_mode < CAL_MIN_POWER_MODE || !autodim_enabled || ambient_lux >= CAL_AMBIENT_DARK_LUX" },
+        { from: "HIGH", to: "MED", label: "less glare", guard: "glare_pct < CAL_GLARE_HIGH_PCT - CAL_GLARE_HYST_PCT && state_time_ms >= CAL_LEVEL_HOLD_MS" },
+        { from: "FAULT", to: "CLEAR", label: "force no-dim", guard: "!reverse_gear && !digital_mode && !ec_fault && !lin_timeout && state_time_ms >= CAL_FAULT_RETRY_MS" },
+      ],
+    },
+    status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00189-MODE", template: true,
   }
 };

@@ -5315,18 +5315,28 @@ const STATE_MACHINES = {
     { from: "FAULT", to: "OFF", label: "cleared" },
   ] },
   "L2-BODY-00189-MODE": { title: "AUTO-DIM INTERIOR MIRROR", init: "CLEAR", states: [
-    { id: "CLEAR", label: "Clear (No dim)", x: 60, y: 140, kind: "normal" },
-    { id: "LOW", label: "Low", x: 320, y: 60, kind: "active" },
-    { id: "MED", label: "Medium", x: 320, y: 150, kind: "active" },
-    { id: "HIGH", label: "High", x: 320, y: 240, kind: "active" },
-    { id: "FAULT", label: "Fault / Reverse → Clear", x: 620, y: 150, kind: "fault" },
+    { id: "CLEAR", label: "Clear (No dim)", x: 30, y: 120, kind: "normal" },
+    { id: "LOW", label: "Low", x: 285, y: 120, kind: "active" },
+    { id: "MED", label: "Medium", x: 500, y: 120, kind: "active" },
+    { id: "HIGH", label: "High", x: 715, y: 120, kind: "active" },
+    { id: "FAULT", label: "Fault / Reverse → Clear", x: 390, y: 262, kind: "fault" },
   ], trans: [
-    { from: "CLEAR", to: "LOW", label: "glare permitted", bend: -30 },
-    { from: "LOW", to: "MED", label: "more glare" },
-    { from: "MED", to: "HIGH", label: "more glare" },
-    { from: "HIGH", to: "CLEAR", label: "glare gone", bend: 90 },
+    /* Levels step up (above each pair) and down with hysteresis (below each pair); reverse gear, digital mode or a fault clears
+       the glass from EVERY state (FMVSS 111). The step-down, X→Clear and X→Fault transitions were added with the Auto-Dim
+       Interior Mirror pilot proposal on 2026-10-18 (pending approval) — the original diagram had no way down and reverse only from Medium. */
+    { from: "CLEAR", to: "LOW", label: "glare permitted", bend: -14 },
+    { from: "LOW", to: "CLEAR", label: "glare gone / not permitted", bend: -14 },
+    { from: "LOW", to: "MED", label: "more glare", bend: -14 },
+    { from: "MED", to: "LOW", label: "less glare", bend: -14 },
+    { from: "MED", to: "HIGH", label: "more glare", bend: -14 },
+    { from: "HIGH", to: "MED", label: "less glare", bend: -14 },
+    { from: "MED", to: "CLEAR", label: "glare gone / not permitted", bend: 60 },
+    { from: "HIGH", to: "CLEAR", label: "glare gone / not permitted", bend: 110 },
+    { from: "CLEAR", to: "FAULT", label: "reverse / digital / fault" },
+    { from: "LOW", to: "FAULT", label: "reverse / digital / fault" },
     { from: "MED", to: "FAULT", label: "reverse / digital / fault" },
-    { from: "FAULT", to: "CLEAR", label: "force no-dim", bend: -70 },
+    { from: "HIGH", to: "FAULT", label: "reverse / digital / fault" },
+    { from: "FAULT", to: "CLEAR", label: "force no-dim", bend: -40 },
   ] },
   "L2-BODY-00188-MODE": { title: "AUTO-DIM EXTERIOR MIRRORS", init: "CLEAR", states: [
     { id: "CLEAR", label: "Clear (No dim)", x: 60, y: 140, kind: "normal" },
