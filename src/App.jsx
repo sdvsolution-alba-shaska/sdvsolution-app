@@ -402,12 +402,12 @@ const NETWORK = {
 };
 /* Vehicle Access System (VAS) — 6 KESSY/RSAD UWB(+BLE) antenna Secondary ECUs (supplier Flextronics) on the CZM Center Vehicle-Access CAN
    (85H.962.133; anti-theft "Einbruchschutz" + Mobile Device Key). RSAD_IN1/IN2/VR/VL/HL/HR.
-   ⚠ J1192.4 & J1193.5 both read "vorne rechts"; one is almost certainly front-left (VL) — flagged. */
+   J1193.5 is front left (VAS_FL, "vorne links") — confirmed by George; the source reading "vorne rechts" was an error. */
 [
   ["ECU-VAS-IFR", "VAS_IFR", "interior, front roof (RSAD_IN1)", "J1191.2"],
   ["ECU-VAS-IRR", "VAS_IRR", "interior, rear roof (RSAD_IN2)", "J1309.2"],
   ["ECU-VAS-FR",  "VAS_FR",  "front right (RSAD_VR)", "J1192.4"],
-  ["ECU-VAS-FL",  "VAS_FL",  "front left (RSAD_VL) ⚠", "J1193.5"],
+  ["ECU-VAS-FL",  "VAS_FL",  "front left (RSAD_VL)", "J1193.5"],
   ["ECU-VAS-RL",  "VAS_RL",  "rear left (RSAD_HL)", "J1194.5"],
   ["ECU-VAS-RR",  "VAS_RR",  "rear right (RSAD_HR)", "J1196.4"],
 ].forEach(([id, vas, loc, conn]) => {
