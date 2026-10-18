@@ -4015,7 +4015,7 @@ const ethNodeOptions = () => {
   const { ethLinks, names } = ethTopology(), ids = Array.from(new Set(ethLinks.flatMap(([a, b]) => [a, b])));
   const opts = [["|", "—"]];
   ids.forEach((id) => { const e = NETWORK.ecus.find((x) => x.id === id);
-    if (e && e.mcus) { e.mcus.forEach((m) => opts.push([id + "|" + m.id, names[id] + " · " + m.name])); opts.push([id + "|SW", names[id] + " · Ethernet switch"]); }
+    if (e && e.mcus) { opts.push([id + "|", names[id] + " — " + e.name + " (chip not set)"]); e.mcus.forEach((m) => opts.push([id + "|" + m.id, names[id] + " · " + m.name])); opts.push([id + "|SW", names[id] + " · Ethernet switch"]); }
     else opts.push([id + "|", (e && e.name ? names[id] + " — " + e.name : names[id] === "DLC" ? "DLC — Data Link Connector (tester)" : names[id])]); });
   return opts;
 };
@@ -4024,6 +4024,8 @@ const ETH_NODE_ALIASES = [
   { re: /^XMM$/i, ecu: "ECU-CCU" },                       // XMM is the CCU in the SDVsolution model
   { re: /^CZC_1$/i, ecu: "ECU-CZM", mcu: "A" }, { re: /^CZC_2$/i, ecu: "ECU-CZM", mcu: "B" }, { re: /^CZC_Switch$/i, ecu: "ECU-CZM", mcu: "SW" },
   { re: /^FZC$/i, ecu: "ECU-FZM" }, { re: /^ADAS(_|$)/i, ecu: "ECU-ADAS" }, { re: /^TestTool$/i, ecu: "DLC" },
+  { re: /^RFM$/i, ecu: "ECU-CCM" },                       // RFM is the CCM (Connectivity Control Module)
+  { re: /^BZC$/i, ecu: "ECU-CZM" },                       // Back Zonal Controls are integrated into the CZM (chip to be set)
 ];
 function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
