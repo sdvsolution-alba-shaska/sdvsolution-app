@@ -5277,7 +5277,7 @@ const STATE_MACHINES = {
     { from: "IDLE", to: "AUTH", label: "adjust request" },
     { from: "AUTH", to: "VALID", label: "granted" },
     { from: "VALID", to: "ADJ", label: "valid" },
-    { from: "VALID", to: "IDLE", label: "invalid / no mirror", bend: 80 },
+    { from: "VALID", to: "IDLE", label: "invalid / no mirror", bend: 80 }, // approved by George Shaska 2026-10-18 (Validating had no exit)
     { from: "ADJ", to: "IDLE", label: "complete / release", bend: -60 },
     { from: "AUTH", to: "IDLE", label: "denied", bend: 40 },
     { from: "ADJ", to: "DEGR", label: "stall / over-current" },
