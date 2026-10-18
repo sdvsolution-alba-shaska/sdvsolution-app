@@ -322,7 +322,7 @@ const NETWORK = {
   ecus: [
     { id: "ECU-CCU", name: "Central Compute Unit", vendor: "Qualcomm", processor: "QC8255", supplier: "Quanta", asil: "B", deviceClass: "Cockpit / infotainment SoC (ASIL B)", scope: "Centralized compute, cockpit, vehicle applications and platform services", codes: ["HMI", "APP", "VSM", "SWL", "EMS", "UNC"] },
     { id: "ECU-ADAS", name: "Advanced Driver Assistance Systems", vendor: "Qualcomm", processor: "Snapdragon SA8650P", supplier: "Quanta", asil: "D", deviceClass: "Snapdragon Ride ADAS / AD SoC", scope: "ADAS, perception and automated-driving workloads", codes: ["ADAS"] },
-    { id: "ECU-CZM", name: "Central Zonal Module", vendor: "Infineon", processor: "2 × AURIX TC4x", supplier: "Flextronics (board manufacturing)", asil: "D", deviceClass: "Dual TriCore safety MCU (ASIL D)", scope: "Body, access, closures, lighting, thermal and domain-control workloads", codes: ["BODY", "THERM"],
+    { id: "ECU-CZM", name: "Central Zonal Module", vendor: "Infineon", processor: "2 × AURIX TC4x", supplier: "Flextronics", asil: "D", deviceClass: "Dual TriCore safety MCU (ASIL D)", scope: "Body, access, closures, lighting, thermal and domain-control workloads", codes: ["BODY", "THERM"],
       /* Work split across the two TC4x (decided in the CZM ECU Integration Ownership Plan). fns = L1 features or platform state machines hosted on the chip. */
       mcus: [
         { id: "A", name: "Chip A · network and safety", processor: "AURIX TC4x", asil: "D", hosts: ["Gateway and communication (CAN FD, LIN, Ethernet)", "Diagnostics (UDS, DoIP), flashing and OTA for both chips", "Power and vehicle modes", "Key storage (CSRM)", "Functions the HARA rates ASIL"], fns: ["PLATFORM-POWERMODE", "PLATFORM-DTC", "PLATFORM-SECOC"] },
@@ -335,7 +335,7 @@ const NETWORK = {
       ],
       mcuLink: "Inter-chip link: Ethernet or SPI, set in the board design. All vehicle traffic enters through chip A.",
       mcuNote: "Fold speed lock-out (OV-MIR-05, proposed ASIL A) runs in an ASIL A partition on chip B. Confirm the level in the HARA; chip B then carries a small safety case for that partition." },
-    { id: "ECU-FZM", name: "Front Zonal Module", vendor: "Infineon", processor: "AURIX TC4x", supplier: "Flextronics (board manufacturing)", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Vehicle dynamics, chassis and motion-control workloads", codes: ["DYN", "SAFE"] },
+    { id: "ECU-FZM", name: "Front Zonal Module", vendor: "Infineon", processor: "AURIX TC4x", supplier: "Flextronics", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Vehicle dynamics, chassis and motion-control workloads", codes: ["DYN", "SAFE"] },
     { id: "ECU-CCM", name: "Connectivity Control Module", vendor: "Qualcomm", processor: "SA525", supplier: "Quanta", asil: "QM", deviceClass: "5G / C-V2X modem-RF (telematics)", scope: "Connectivity, telematics and cloud-services workloads", codes: ["DVS", "SEC"] },
     { id: "ECU-BEC", name: "Battery Energy Module", vendor: "Infineon", processor: "AURIX TC3x", supplier: "TBD", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Energy management, battery management and charging workloads", codes: ["ENG"] },
     { id: "ECU-RTM", name: "Radio Tuner Module", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Broadcast radio tuner (AM / FM / DAB)", scope: "Broadcast radio reception, delivered to the CCU over Ethernet", codes: ["RTM"], kind: "peripheral", subtype: "Radio tuner module" },
