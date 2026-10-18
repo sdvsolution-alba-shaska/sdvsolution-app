@@ -3771,7 +3771,8 @@ const HWREQ_STORE = { data: {} };
    single plain object and restore it. The App layer adds its React-state parts
    (node edits, review status, regulation edits, baselines) to build the full
    "workspace" document that is saved per company. */
-const WS_STORES = { KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
+const ETH_STORE = { data: { nodes: [], pdus: [] } }; // Ethernet backbone K-Matrix (see EthKMatrixPanel)
+const WS_STORES = { ETH_STORE, KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
 function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k] = JSON.parse(JSON.stringify(WS_STORES[k].data)); } catch (e) {} } return o; }
 function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } }
 const icdRowsToAoa = (groups) => { const aoa = [["Connector", "Signal / Interface", "Pins", "Class", "Dir", "Wired to", "From"]]; (groups || []).forEach((g) => (g.rows || []).forEach((r) => aoa.push([g.conn, r.signal, r.pins, r.cls, r.dir, r.wired, r.from]))); return aoa; };
@@ -4000,6 +4001,121 @@ function IcdTool({ ecuId, tag = "", derivedGroups = [], canWrite = false, onChan
 /* K-Matrix tool — the aggregate communication matrix (Vector-style), collecting the message/signal
    definitions from every L1's Interfaces & Signals. Editable (Owner) and synchronized to the ARXML and
    Excel exports. Rendered under each ECU's Network Topology; the ARXML is generated from this matrix. */
+/* Ethernet backbone K-Matrix (ETH) — nodes, PDUs, frames, signals. Built up over time: partial released workbooks are
+   merged (conflicts reported, nothing overwritten), signals are added as Behavior Models define what crosses the backbone.
+   Logic lives in src/lib/ethKmatrix.js (window.__sdvEthKm); the data is the ETH_STORE part of the workspace. */
+const ETH_CHIP_OPTIONS = [["", "—"], ["ECU-CZM|A", "CZM · Chip A (network & safety)"], ["ECU-CZM|B", "CZM · Chip B (body application)"], ["ECU-CZM|SW", "CZM · Ethernet switch"], ["ECU-FZM|", "FZM"], ["ECU-CCU|", "CCU"], ["ECU-ADAS|", "ADAS"], ["ECU-CCM|", "CCM"], ["ECU-BEC|", "BEC"]];
+function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
+  const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
+  const [, setV] = useState(0); const bump = () => setV((v) => v + 1);
+  const [tab, setTab] = useState("pdus"); const [open, setOpen] = useState(() => new Set()); const [rep, setRep] = useState(null); const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+  if (!EK) return <div className="flex-1 p-8" style={{ color: "#667085", fontSize: 13 }}>The Ethernet K-Matrix module isn't loaded in this runtime. Open the app from the main site.</div>;
+  const D = ETH_STORE.data; D.nodes = D.nodes || []; D.pdus = D.pdus || [];
+  const findings = EK.checkEth(D), st = EK.ethStats(D), errs = findings.filter((f) => f.sev === "error").length;
+  const th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "#98A2B3", fontWeight: 700, whiteSpace: "nowrap", background: "#F9FAFB", borderBottom: "1px solid #EAECF0" };
+  const td = { padding: "3px 6px", borderTop: "1px solid #F2F4F7", fontSize: 11.5, verticalAlign: "top" };
+  const cell = (val, on, w, mono) => canWrite ? <input value={val == null ? "" : val} onChange={(e) => { on(e.target.value); bump(); }} style={{ width: w || "100%", fontSize: 11.5, padding: "2px 5px", border: "1px solid #E4E7EC", borderRadius: 5, fontFamily: mono ? "ui-monospace,monospace" : "inherit" }} /> : <span style={{ fontFamily: mono ? "ui-monospace,monospace" : "inherit" }}>{val == null ? "" : String(val)}</span>;
+  const num = (v) => (v === "" ? null : (isFinite(Number(v)) ? Number(v) : v));
+  const doImport = async (file) => {
+    if (!file) return; setBusy(true);
+    try {
+      const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheets = {}; wb.SheetNames.forEach((n) => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "", raw: true }); });
+      const { eth, warnings } = EK.parseWorkbook(sheets), { eth: merged, report } = EK.mergeEth(D, eth);
+      ETH_STORE.data = merged; setRep({ file: file.name, warnings, ...report }); bump(); notify("Merged " + file.name);
+    } catch (e) { setRep({ file: file.name, error: e.message }); } finally { setBusy(false); }
+  };
+  const doExport = async () => {
+    const sheets = EK.toWorkbook(D);
+    try { const XLSX = await ensureXLSXLib(); const wb = XLSX.utils.book_new(); Object.entries(sheets).forEach(([n, aoa]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), n)); XLSX.writeFile(wb, "K-Matrix_ETH.xlsx"); }
+    catch (e) { notify("Could not build the Excel file: " + e.message); }
+  };
+  const addNode = () => { let n = "New_Node", k = 1; while (D.nodes.some((x) => x.name === n)) n = "New_Node_" + (++k); D.nodes.push({ name: n, mac: "", ipv4: "", ipv6: "", rxPort: 20000, txPort: 20000 }); bump(); };
+  const addPdu = () => { const id = D.pdus.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1; D.pdus.push({ id, name: "New_PDU_" + EK.fmtId(id), sendType: "cyclic", cycleMs: 100, sender: "", receivers: [], frame: { layout: "UDP", ipType: "IPv6" }, signals: [] }); setOpen((s) => new Set(s).add(id)); bump(); };
+  const addSig = (p) => { let n = "New_Signal", k = 1; while (p.signals.some((s) => s.name === n)) n = "New_Signal_" + (++k); const end = p.signals.reduce((m, s) => Math.max(m, (s.startBit || 0) + (s.length || 0)), 0); p.signals.push({ name: n, startBit: end, length: 8, factor: 1, offset: 0, min: null, max: null, unit: "", init: 0, roles: p.sender ? { [p.sender]: "S", ...Object.fromEntries((p.receivers || []).map((r) => [r, "R"])) } : {} }); bump(); };
+  const tabBtn = (k, label) => <button onClick={() => setTab(k)} style={{ fontSize: 12, fontWeight: tab === k ? 700 : 500, color: tab === k ? "#175CD3" : "#667085", borderBottom: "2px solid " + (tab === k ? "#175CD3" : "transparent"), padding: "6px 2px" }}>{label}</button>;
+  const btn = { fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "5px 12px", border: "1px solid #D0D5DD", color: "#344054", background: "#fff" };
+  return (
+    <div className="flex-1 overflow-auto" style={{ background: "#fff", padding: "20px 28px" }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#175CD3", letterSpacing: 0.5 }}>NETWORK · ETHERNET BACKBONE</div>
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#101828", margin: "2px 0 4px" }}>K-Matrix ETH</h1>
+      <div style={{ fontSize: 12, color: "#667085", maxWidth: 820, lineHeight: 1.5 }}>Nodes, messages (PDUs), frames and signals of the Ethernet backbone, in the released workbook layout (Legend · Nodes · Messages · BackboneETH). Import partial workbooks as they arrive — they are merged, and any value that differs from what is already here is listed as a conflict instead of being overwritten. Signals are added PDU by PDU as Behavior Models define what crosses the backbone.</div>
+      <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 12 }}>
+        <span style={{ fontSize: 12, color: "#344054" }}><b>{st.nodes}</b> nodes · <b>{st.pdus}</b> PDUs · <b>{st.signals}</b> signals ({st.pdusWithSignals} of {st.pdus} PDUs have signals)</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: errs ? "#B42318" : findings.length ? "#B54708" : "#067647" }}>{errs ? errs + " errors · " : ""}{findings.length - errs} warnings</span>
+        <div className="flex gap-2" style={{ marginLeft: "auto" }}>
+          {canWrite && <button disabled={busy} onClick={() => fileRef.current && fileRef.current.click()} style={btn}>{busy ? "Importing…" : "Import / merge .xlsx"}</button>}
+          <button onClick={doExport} style={{ ...btn, color: "#fff", background: "#175CD3", border: "1px solid #175CD3" }}>Export K-Matrix_ETH.xlsx</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
+        </div>
+      </div>
+      {rep && (<div style={{ marginTop: 10, border: "1px solid " + (rep.error ? "#FECDCA" : "#D1E9FF"), background: rep.error ? "#FFFBFA" : "#F5FAFF", borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "#344054" }}>
+        <div className="flex"><b>{rep.file}</b><button onClick={() => setRep(null)} style={{ marginLeft: "auto", color: "#98A2B3" }}>✕</button></div>
+        {rep.error ? <div style={{ color: "#B42318" }}>Import failed: {rep.error}</div> : <>
+          <div>Added {rep.added.nodes} nodes, {rep.added.pdus} PDUs, {rep.added.signals} signals; filled blanks in {rep.filled} existing entries.</div>
+          {rep.warnings.map((w, i) => <div key={i} style={{ color: "#B54708" }}>• {w}</div>)}
+          {rep.conflicts.length > 0 && <div style={{ marginTop: 4 }}><b style={{ color: "#B54708" }}>{rep.conflicts.length} conflicts — existing values kept:</b>{rep.conflicts.slice(0, 12).map((c, i) => <div key={i} style={{ fontFamily: "ui-monospace,monospace", fontSize: 10.5 }}>{c.where} · {c.field}: kept {JSON.stringify(c.kept)}, file has {JSON.stringify(c.incoming)}</div>)}{rep.conflicts.length > 12 && <div>…and {rep.conflicts.length - 12} more</div>}</div>}
+        </>}
+      </div>)}
+      <div className="flex gap-5" style={{ marginTop: 14, borderBottom: "1px solid #EAECF0" }}>{tabBtn("pdus", "Messages & signals")}{tabBtn("nodes", "Nodes")}{tabBtn("checks", "Checks (" + findings.length + ")")}</div>
+      {tab === "nodes" && (<div style={{ marginTop: 10 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "MAC address", "IPv4 address", "IPv6 address", "Rx port", "Tx port", "ECU / chip", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+          {D.nodes.map((n, i) => (<tr key={i}>
+            <td style={td}>{cell(n.name, (v) => { const old = n.name; n.name = v; D.pdus.forEach((p) => { if (p.sender === old) p.sender = v; p.receivers = (p.receivers || []).map((r) => (r === old ? v : r)); p.signals.forEach((s) => { if (s.roles && s.roles[old]) { s.roles[v] = s.roles[old]; delete s.roles[old]; } }); }); }, 140)}</td>
+            <td style={td}>{cell(n.mac, (v) => { n.mac = v.toUpperCase(); }, 150, true)}</td><td style={td}>{cell(n.ipv4, (v) => { n.ipv4 = v; }, 120, true)}</td><td style={td}>{cell(n.ipv6, (v) => { n.ipv6 = v.toLowerCase(); }, 200, true)}</td>
+            <td style={td}>{cell(n.rxPort, (v) => { n.rxPort = num(v); }, 70, true)}</td><td style={td}>{cell(n.txPort, (v) => { n.txPort = num(v); }, 70, true)}</td>
+            <td style={td}>{canWrite ? <select value={(n.ecu || "") + "|" + (n.mcu || "")} onChange={(e) => { const [ecu, mcu] = e.target.value.split("|"); n.ecu = ecu || undefined; n.mcu = mcu || undefined; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5, padding: "2px 4px" }}>{ETH_CHIP_OPTIONS.map(([v, l]) => <option key={v} value={v === "" ? "|" : v}>{l}</option>)}</select> : <span>{(ETH_CHIP_OPTIONS.find(([v]) => v === (n.ecu || "") + "|" + (n.mcu || "")) || ["", "—"])[1]}</span>}</td>
+            <td style={td}>{canWrite && <button onClick={() => { D.nodes.splice(i, 1); bump(); }} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td>
+          </tr>))}
+          {!D.nodes.length && <tr><td colSpan={8} style={{ ...td, color: "#98A2B3", padding: 12 }}>No nodes yet — import a workbook or add one.</td></tr>}
+        </tbody></table>
+        {canWrite && <button onClick={addNode} style={{ ...btn, marginTop: 8 }}>+ Add node</button>}
+      </div>)}
+      {tab === "pdus" && (<div style={{ marginTop: 10 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["", "Message ID", "PDU name", "Send type", "Cycle (ms)", "Sender", "Receivers", "Payload (B)", "Signals", ""].map((h, k) => <th key={k} style={th}>{h}</th>)}</tr></thead><tbody>
+          {[...D.pdus].sort((a, b) => (a.id ?? 1e12) - (b.id ?? 1e12)).map((p) => { const isOpen = open.has(p.id); const nodeNames = D.nodes.map((n) => n.name); return (<React.Fragment key={p.id + "|" + p.name}>
+            <tr>
+              <td style={td}><button onClick={() => setOpen((s) => { const x = new Set(s); x.has(p.id) ? x.delete(p.id) : x.add(p.id); return x; })} style={{ color: "#98A2B3" }}>{isOpen ? "▾" : "▸"}</button></td>
+              <td style={td}>{canWrite ? <input key={"id" + p.id} defaultValue={EK.fmtId(p.id)} onBlur={(e) => { const n = EK.parseId(e.target.value); if (n != null) { p.id = n; bump(); } else e.target.value = EK.fmtId(p.id); }} onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} title="Hex (0x1A) or decimal; applied when you leave the field" style={{ width: 70, fontSize: 11.5, padding: "2px 5px", border: "1px solid #E4E7EC", borderRadius: 5, fontFamily: "ui-monospace,monospace" }} /> : <span style={{ fontFamily: "ui-monospace,monospace" }}>{EK.fmtId(p.id)}</span>}</td>
+              <td style={td}>{cell(p.name, (v) => { p.name = v; }, 190)}</td>
+              <td style={td}>{canWrite ? <select value={p.sendType || ""} onChange={(e) => { p.sendType = e.target.value; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5 }}><option value="">—</option><option value="cyclic">cyclic</option><option value="spontaneous">spontaneous</option><option value="cyclic+spontaneous">cyclic+spontaneous</option></select> : p.sendType}</td>
+              <td style={td}>{cell(p.cycleMs, (v) => { p.cycleMs = num(v); }, 60, true)}</td>
+              <td style={td}>{canWrite ? <select value={p.sender || ""} onChange={(e) => { p.sender = e.target.value; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5, maxWidth: 130 }}><option value="">—</option>{nodeNames.map((n) => <option key={n} value={n}>{n}</option>)}{p.sender && !nodeNames.includes(p.sender) && <option value={p.sender}>{p.sender} (unknown)</option>}</select> : p.sender}</td>
+              <td style={td}>{cell((p.receivers || []).join(", "), (v) => { p.receivers = v.split(/[,;]+/).map((x) => x.trim()).filter(Boolean); }, 200)}</td>
+              <td style={td}>{cell(p.frame && p.frame.payloadBytes, (v) => { p.frame = p.frame || {}; p.frame.payloadBytes = num(v); }, 60, true)}</td>
+              <td style={{ ...td, color: p.signals.length ? "#344054" : "#B6C0CC" }}>{p.signals.length || "none yet"}</td>
+              <td style={td}>{canWrite && <button onClick={() => { D.pdus.splice(D.pdus.indexOf(p), 1); bump(); }} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td>
+            </tr>
+            {isOpen && (<tr><td />
+              <td colSpan={9} style={{ ...td, background: "#FCFCFD", padding: "6px 8px 10px" }}>
+                <div style={{ fontSize: 10.5, color: "#667085", marginBottom: 4 }}>Frame: {(p.frame && p.frame.layout) || "—"} · {(p.frame && p.frame.ipType) || "—"} · {(p.frame && p.frame.srcIp) || "src ?"}:{(p.frame && p.frame.srcPort) || "?"} → {(p.frame && p.frame.dstIp) || "dst ?"}:{(p.frame && p.frame.dstPort) || "?"}</div>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Signal", "Start bit", "Length", "Factor", "Offset", "Min", "Max", "Unit", "Init", "Roles (S / S* / 0 / 0* / R / R*)", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+                  {p.signals.map((s, si) => (<tr key={si}>
+                    <td style={td}>{cell(s.name, (v) => { s.name = v; }, 170, true)}</td>
+                    {["startBit", "length", "factor", "offset", "min", "max"].map((k) => <td key={k} style={td}>{cell(s[k], (v) => { s[k] = num(v); }, 58, true)}</td>)}
+                    <td style={td}>{cell(s.unit, (v) => { s.unit = v; }, 60)}</td><td style={td}>{cell(s.init, (v) => { s.init = num(v); }, 50, true)}</td>
+                    <td style={td}>{cell(Object.entries(s.roles || {}).map(([n, r]) => n + ":" + r).join(", "), (v) => { const o = {}; v.split(/[,;]+/).forEach((t) => { const [n, r] = t.split(":").map((x) => (x || "").trim()); if (n && EK.ROLE_CODES.includes((r || "").toUpperCase())) o[n] = r.toUpperCase(); }); s.roles = o; }, 240, true)}</td>
+                    <td style={td}>{canWrite && <button onClick={() => { p.signals.splice(si, 1); bump(); }} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td>
+                  </tr>))}
+                  {!p.signals.length && <tr><td colSpan={11} style={{ ...td, color: "#98A2B3" }}>No signals yet. They are added as Behavior Models define what this PDU carries.</td></tr>}
+                </tbody></table>
+                {canWrite && <button onClick={() => addSig(p)} style={{ ...btn, marginTop: 6, fontSize: 11 }}>+ Add signal</button>}
+              </td></tr>)}
+          </React.Fragment>); })}
+          {!D.pdus.length && <tr><td colSpan={10} style={{ ...td, color: "#98A2B3", padding: 12 }}>No messages yet — import a workbook or add one.</td></tr>}
+        </tbody></table>
+        {canWrite && <button onClick={addPdu} style={{ ...btn, marginTop: 8 }}>+ Add message (PDU)</button>}
+      </div>)}
+      {tab === "checks" && (<div style={{ marginTop: 10, fontSize: 12 }}>
+        {!findings.length && <div style={{ color: "#067647" }}>No findings.</div>}
+        {findings.map((f, i) => <div key={i} style={{ padding: "4px 0", borderTop: "1px solid #F2F4F7", color: f.sev === "error" ? "#B42318" : "#B54708" }}>{f.sev === "error" ? "✕" : "⚠"} {f.msg}</div>)}
+      </div>)}
+      <div style={{ marginTop: 18, fontSize: 11, color: "#98A2B3", lineHeight: 1.5 }}>Legend — {EK.LEGEND.map(([c, t]) => c + ": " + t).join("  ")}</div>
+    </div>
+  );
+}
+
 function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHandled }) {
   const [kmOpen, setKmOpen] = useState(false);
   const [, setKmV] = useState(0);
@@ -11012,8 +11128,8 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                 );
               })()}
               {(() => {
-                const DIAG = { deploy: { label: "Topology", icon: Cpu }, logicals: { label: "Logicals", icon: Workflow }, schematics: { label: "Connectors", icon: GitBranch } };
-                const isDiag = view === "deploy" || view === "logicals" || view === "schematics";
+                const DIAG = { deploy: { label: "Topology", icon: Cpu }, logicals: { label: "Logicals", icon: Workflow }, schematics: { label: "Connectors", icon: GitBranch }, ethkm: { label: "K-Matrix ETH", icon: Table } };
+                const isDiag = view === "deploy" || view === "logicals" || view === "schematics" || view === "ethkm";
                 const cur = DIAG[view] || { label: "Harness", icon: GitBranch };
                 const CurIcon = cur.icon;
                 return (
@@ -11032,7 +11148,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <div className="absolute rounded-lg overflow-hidden"
                           style={{ top: 40, left: 0, width: 176, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC", boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
                           <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>HARNESS</div>
-                          {[["deploy", "Topology", Cpu, "Governed network"], ["logicals", "Logicals", Workflow, "As-wired interfaces"], ["schematics", "Connectors", GitBranch, "Connector pin-outs"]].map(([v, label, Icon, sub]) => (
+                          {[["deploy", "Topology", Cpu, "Governed network"], ["logicals", "Logicals", Workflow, "As-wired interfaces"], ["schematics", "Connectors", GitBranch, "Connector pin-outs"], ["ethkm", "K-Matrix ETH", Table, "Ethernet backbone nodes, PDUs, signals"]].map(([v, label, Icon, sub]) => (
                             <button key={v} onClick={() => { setView(v); setViewMenu(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-left"
                               style={{ background: view === v ? "#F5F8FC" : "#fff" }}>
@@ -11245,6 +11361,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           )}
 
           {view === "gaps" && <GapAnalysisPanel rep={gapRep} onOpen={openCuratedReq} />}
+          {view === "ethkm" && <EthKMatrixPanel canWrite={canWrite} notify={notify} />}
           {view === "behavior" && <BehaviorPanel models={behaviorModels} setModels={setBehaviorModels} sms={STATE_MACHINES} canWrite={canWrite} periodMs={MIRROR_TIMING.runnablePeriodMs} build={tcBuild.trim()}
             implFor={(smId) => { const pre = smId.replace(/-MODE$/, "-"); return Object.keys(REQ_STATEMENTS).filter((k) => k.startsWith(pre)); }}
             reqText={(id) => REQ_STATEMENTS[id] || ((getN(id) && getN(id).props && getN(id).props.statement) || "")}
