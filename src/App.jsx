@@ -377,7 +377,6 @@ const NETWORK = {
     { id: "NT-004-A", a: "ECU-CZM", b: "ECU-BEC", cls: "ECU-to-zone", proto: "CAN FD 1", rate: "1 Mbps", basis: "Energy, charging, status, diagnostics and control path", dir: "Bidirectional" },
     { id: "NT-004-B", a: "ECU-CZM", b: "ECU-BEC", cls: "ECU-to-zone", proto: "CAN FD 2", rate: "1 Mbps", basis: "Redundant energy, charging, status, diagnostics and control path", dir: "Bidirectional" },
     { id: "NT-005-ETH", a: "ECU-CZM", b: "ECU-FZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "Center-Front", rate: "100BASE-T1", basis: "Center-Front Ethernet, reconciled both sides (CZM-IF-001 ↔ FZM-IF-001)", dir: "Bidirectional" },
-    { id: "NT-009", a: "ECU-CCU", b: "ECU-CZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "CCU ↔ Center", rate: "2.5GBASE-T1", basis: "Compute-to-center Ethernet (CZM-IF-006)", dir: "Bidirectional" },
     { id: "NT-010", a: "ECU-CCU", b: "ECU-FZM", cls: "ECU-to-zone", proto: "CAN FD", net: "Platform CAN", rate: "1 Mbps", basis: "Platform CAN reaches FZM (FZM-IF-017)", dir: "Bidirectional" },
     { id: "NT-008-ETH1", a: "ECU-CCU", b: "DLC", cls: "Service link", proto: "Automotive Ethernet", net: "Ethernet 1", rate: "1 Gbps", basis: "Diagnostics and service access", dir: "Bidirectional" },
     { id: "NT-008-ETH2", a: "ECU-CCU", b: "DLC", cls: "Service link", proto: "Automotive Ethernet", net: "Ethernet 2", rate: "100 Mbps", basis: "Service / legacy diagnostics access", dir: "Bidirectional" },
