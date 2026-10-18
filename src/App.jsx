@@ -340,8 +340,8 @@ const NETWORK = {
     { id: "ECU-BEC", name: "Battery Energy Module", vendor: "Infineon", processor: "AURIX TC3x", supplier: "TBD", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Energy management, battery management and charging workloads", codes: ["ENG"] },
     { id: "ECU-RTM", name: "Radio Tuner Module", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Broadcast radio tuner (AM / FM / DAB)", scope: "Broadcast radio reception, delivered to the CCU over Ethernet", codes: ["RTM"], kind: "peripheral", subtype: "Radio tuner module" },
     { id: "ECU-BST", name: "8-Channel Premium Booster", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "8-channel premium audio booster / amplifier", scope: "Digital sound package amplifier \u2014 receives an A2B stream from the CCU and drives the premium speakers", codes: ["BST"], kind: "peripheral", subtype: "Audio amplifier" },
-    { id: "ECU-CID", name: "Center Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center information display (HMI sink)", scope: "Center display (CI_Display, +LSR) \u2014 receives video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS01), control on XMM_IVI_CAN01", codes: ["CID", "CI_DISPLAY"], kind: "peripheral", subtype: "Display" },
-    { id: "ECU-FID", name: "Front Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Front information display (HMI sink)", scope: "Driver display (Kombi) \u2014 video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS04), control on the CZM Center_Dashboard_CAN01", codes: ["FID", "KOMBI"], kind: "peripheral", subtype: "Display" },
+    { id: "ECU-CDM", name: "Center Display Module", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center display module (HMI sink, Secondary ECU)", scope: "Center display (CI_Display, +LSR) \u2014 receives video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS01), control on XMM_IVI_CAN01", codes: ["CDM", "CID", "CI_DISPLAY"], kind: "peripheral", subtype: "Display" },
+    { id: "ECU-DDM", name: "Driver Display Module", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Driver display module (Kombi, HMI sink, Secondary ECU)", scope: "Driver display (Kombi) \u2014 video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS04), control on the CZM Center_Dashboard_CAN01", codes: ["DDM", "FID", "KOMBI"], kind: "peripheral", subtype: "Display" },
     { id: "ECU-RRDCU", name: "Tailgate / Rear-Closure Control Unit", vendor: "\u2014", processor: "\u2014", supplier: "Kostal", asil: "QM", deviceClass: "Tailgate / rear-closure control unit (liftgate, benchgate/splitgate, rear-window regulator, cinching, central locking) \u2014 NOT a side door", scope: "Rear-window / tailgate closure, locking, lighting, seat and comfort functions on the CZM Door CAN", codes: ["RRDCU"], kind: "peripheral", subtype: "Door control unit" },
     { id: "ECU-SRCU", name: "Sliding-/Tilt-Roof Control Unit (TiltRoof)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Sunroof / tilt-roof (TiltRoof) control unit \u2014 drives roof motors, Hall feedback and operating panel", scope: "Sunroof / tilt-roof (TiltRoof) actuation and roller-blind control on the CZM Center Roof CAN/LIN", codes: ["SRCU"], kind: "peripheral", subtype: "Roof control unit" },
     { id: "ECU-PSCU", name: "Powered-Sunshade Control Unit (SlidingRoof)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Powered sunshade / sliding-roof-blind control unit on the CZM Center Roof (Sunshade) LIN", scope: "Powered sunshade / sliding-roof-blind control on the CZM Center Roof LIN", codes: ["PSCU"], kind: "peripheral", subtype: "Sunshade control unit" },
@@ -454,10 +454,10 @@ SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, 
 });
 /* Displays per the switch map: video over LVDS from the CCU (XMM); control over CAN. */
 NETWORK.links.push(
-  { id: "NT-CID-LVDS01", a: "ECU-CCU", b: "ECU-CID", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },
-  { id: "NT-CID-IVICAN01", a: "ECU-CCU", b: "ECU-CID", cls: "ECU-to-display", proto: "CAN", net: "XMM_IVI_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Center Display\"", dir: "Bidirectional" },
-  { id: "NT-FID-LVDS04", a: "ECU-CCU", b: "ECU-FID", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS04", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi; replaces H-MTD)", dir: "CCU → Display" },
-  { id: "NT-FID-DASHCAN01", a: "ECU-CZM", b: "ECU-FID", cls: "zone-to-peripheral", proto: "CAN", net: "Center_Dashboard_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi)", dir: "Bidirectional" },
+  { id: "NT-CDM-LVDS01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },
+  { id: "NT-CDM-IVICAN01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "CAN", net: "XMM_IVI_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Center Display\"", dir: "Bidirectional" },
+  { id: "NT-DDM-LVDS04", a: "ECU-CCU", b: "ECU-DDM", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS04", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi; replaces H-MTD)", dir: "CCU → Display" },
+  { id: "NT-DDM-DASHCAN01", a: "ECU-CZM", b: "ECU-DDM", cls: "zone-to-peripheral", proto: "CAN", net: "Center_Dashboard_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi)", dir: "Bidirectional" },
 );
 const CODE_TO_ECU = {};
 NETWORK.ecus.forEach((e) => e.codes.forEach((c) => (CODE_TO_ECU[c] = e.id)));
@@ -634,7 +634,7 @@ function buildGraph(input) {
   });
   /* CID / FID display I/O (display side; FID identical to CID). Reconciles with the
      CCU's CID/FID display interfaces into first-class CCU<->display links. */
-  [["ECU-CID", CID_IO, "Center Information Display"], ["ECU-FID", FID_IO, "Front Information Display"]].forEach(([eid, list, ctrl]) => {
+  [["ECU-CDM", CDM_IO, "Center Display Module"], ["ECU-DDM", DDM_IO, "Driver Display Module"]].forEach(([eid, list, ctrl]) => {
     list.forEach((io) => {
       nodes.push({ id: io.id, type: "ECUSmartNode", label: io.name, subtype: `${io.conn} \u00b7 ${io.proto}`, ...GEN,
         props: P({ connector: io.conn, interfaceClass: io.cls, protocol: io.proto, direction: io.dir, pins: io.pins, endpoint: io.endpoint, ecuInterface: io.ecuIf, swService: io.sw, diagnostics: io.diag, architecture: io.arch, controller: ctrl, source: `${eid.replace("ECU-", "")} I/O list`, status: "Allocated" }) });
@@ -672,10 +672,10 @@ const CCU_IO = [
   { id: "CCU-IF-085", conn: "U31.2", name: "K-Line", cls: "CTL", proto: "K-Line (ISO 9141 / 14230)", dir: "Bidir", pins: 1, endpoint: "DLC / diagnostic port", ecuIf: "K-Line", sw: "Diagnostics (legacy)", diag: "Yes", arch: "Diagnostics" },
   { id: "CCU-IF-086", conn: "U31.2", name: "Airbag Deployment (disposal)", cls: "CTL", proto: "Discrete", dir: "In", pins: 1, endpoint: "Airbag / pyro (disposal)", ecuIf: "Airbag disposal enable", sw: "Safety", diag: "No", arch: "Safety" },
   { id: "CCU-IF-087", conn: "U31.2", name: "Diagnostic Connector Power", cls: "PWR", proto: "KL15 / KL30 / GND", dir: "In", pins: 4, endpoint: "Vehicle power net", ecuIf: "Diag connector power", sw: "Power", diag: "No", arch: "Power net" },
-  { id: "CCU-IF-088", conn: "J9 (R184.9)", name: "CID Display Video", cls: "VID-DISP", proto: "GMSL3", dir: "Out", pins: 3, endpoint: "Center Information Display (CID)", ecuIf: "Display video (Rx+/Rx-/shield) \u00b7 A4-1/A4-2 GMSL3±; A4S shield (CID/PID link)", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
-  { id: "CCU-IF-089", conn: "R238.1", name: "CID CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Center Information Display (CID)", ecuIf: "Display CAN-FD (High/Low)", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
-  { id: "CCU-IF-091", conn: "J9 (R184.9)", name: "FID Display Video", cls: "VID-DISP", proto: "GMSL3", dir: "Out", pins: 3, endpoint: "Front Information Display (FID)", ecuIf: "Display video (Rx+/Rx-/shield) \u00b7 A1-1/A1-2 GMSL3±; A1S shield (FID/AR-HUD link)", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
-  { id: "CCU-IF-092", conn: "KO2.2", name: "FID CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Front Information Display (FID)", ecuIf: "Display CAN-FD (High/Low)", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
+  { id: "CCU-IF-088", conn: "J9 (R184.9)", name: "XMM_LVDS_Display_Out_LVDS01 (CDM video)", cls: "VID-DISP", proto: "LVDS", dir: "Out", pins: 3, endpoint: "Center Display Module (CDM)", ecuIf: "Display video (Rx+/Rx-/shield) \u00b7 A4-1/A4-2 LVDS±; A4S shield", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
+  { id: "CCU-IF-089", conn: "R238.1", name: "XMM_IVI_CAN01 (CDM)", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Center Display Module (CDM)", ecuIf: "Display CAN-FD (High/Low)", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
+  { id: "CCU-IF-091", conn: "J9 (R184.9)", name: "XMM_LVDS_Display_Out_LVDS04 (DDM video)", cls: "VID-DISP", proto: "LVDS", dir: "Out", pins: 3, endpoint: "Driver Display Module (DDM)", ecuIf: "Display video (Rx+/Rx-/shield) \u00b7 A1-1/A1-2 LVDS±; A1S shield", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
+  { id: "CCU-IF-092", conn: "KO2.2", name: "DDM CAN-FD \u26a0", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Driver Display Module (DDM)", ecuIf: "Display CAN-FD (High/Low) \u2014 \u26a0 the switch map puts the DDM CAN on the CZM Center_Dashboard_CAN01 (CZM-IF-009); confirm whether this CCU pin is used", sw: "Infotainment / HMI", diag: "No", arch: "Displays" },
   { id: "CCU-IF-094", conn: "U41.3", name: "USB-C Charging 1 (2\u00d745W)", cls: "IO-USB", proto: "USB-C PD 2\u00d745W (charging only)", dir: "Out", pins: 4, endpoint: "USB-C socket \u2014 media / console", ecuIf: "USB charge port (KL30 / +5V / KL58 / KL31)", sw: "Charging", diag: "No", arch: "Cabin" },
   { id: "CCU-IF-095", conn: "U37.3", name: "USB-C Charging \u2014 Rear Center Console (2\u00d745W)", cls: "IO-USB", proto: "USB-C PD 2\u00d745W (charging only)", dir: "Out", pins: 4, endpoint: "USB-C socket \u2014 rear center console", ecuIf: "USB charge port (KL30 / enable / KL58 / KL31)", sw: "Charging", diag: "No", arch: "Cabin" },
   { id: "CCU-IF-096", conn: "U104.1", name: "USB-C Charging \u2014 Headliner (45W)", cls: "IO-USB", proto: "USB-C PD 45W (charging only)", dir: "Out", pins: 4, endpoint: "USB-C socket \u2014 headliner (roof)", ecuIf: "USB charge port (KL30 / enable / KL58 / KL31)", sw: "Charging", diag: "No", arch: "Cabin" },
@@ -754,7 +754,7 @@ const CZM_IO = [
   { id: "CZM-IF-006", conn: "J6", name: "CCU↔Center Ethernet", cls: "NET-ETH", proto: "100BASE-T1", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "CCU↔Center Ethernet", sw: "Zonal data / SOA", diag: "No", arch: "Zonal" },
   { id: "CZM-IF-007", conn: "J1356.2", name: "CAN termination 6 (spare)", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Bus termination (spare)", ecuIf: "J1356.2 · B8 term high; B9 term low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-008", conn: "J1356.4", name: "Center Backbone CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Zonal backbone (CCU/zone ECUs)", ecuIf: "J1356.4 · D6 CAN High; D19 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
-  { id: "CZM-IF-009", conn: "J1356.2", name: "Center Dashboard CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Instrument cluster / dashboard", ecuIf: "J1356.2 · B6 CAN High; B7 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
+  { id: "CZM-IF-009", conn: "J1356.2", name: "Center Dashboard CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Driver Display Module (DDM, Kombi) and dashboard nodes", ecuIf: "J1356.2 · B6 CAN High; B7 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-010", conn: "J1356.3", name: "Center Door CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Door subsystem", ecuIf: "J1356.3 · F10 CAN High; F23 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-011", conn: "J1356.3", name: "Center Frontlighting CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Frontlighting subsystem", ecuIf: "J1356.3 · F8 CAN High; F21 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-012", conn: "J1356.4", name: "Center Frontlighting CAN02", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Frontlighting subsystem", ecuIf: "J1356.4 · D1 CAN High; D14 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
@@ -1360,17 +1360,17 @@ const GROUNDS = [
   { id: "MB651", loc: "Right rear, lower (approx)", stud: "—", area: "—", approx: true },
   { id: "MB809", loc: "Right rear, lower (approx)", stud: "—", area: "—", approx: true },
 ];
-/* ===== SECTION: CID I/O (SDV-ICD-CID-007) ===== */
-const CID_IO = [
-  { id: "CID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
-  { id: "CID-IF-002", conn: "A", name: "Display CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
-  { id: "CID-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
+/* ===== SECTION: CDM (Center Display Module, was CID) I/O (SDV-ICD-CID-007) ===== */
+const CDM_IO = [
+  { id: "CDM-IF-001", conn: "A", name: "Display Video In (XMM_LVDS_Display_Out_LVDS01)", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "CDM-IF-002", conn: "A", name: "Display CAN-FD (XMM_IVI_CAN01)", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "CDM-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
 ];
-/* ===== SECTION: FID I/O (SDV-ICD-FID-008) ===== */
-const FID_IO = [
-  { id: "FID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
-  { id: "FID-IF-002", conn: "A", name: "Display CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
-  { id: "FID-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
+/* ===== SECTION: DDM (Driver Display Module / Kombi, was FID) I/O (SDV-ICD-FID-008) ===== */
+const DDM_IO = [
+  { id: "DDM-IF-001", conn: "A", name: "Display Video In (XMM_LVDS_Display_Out_LVDS04)", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "DDM-IF-002", conn: "A", name: "Display CAN-FD (Center_Dashboard_CAN01)", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Zonal Module (CZM)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "DDM-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
 ];
 
 /* ===== SECTION: BST I/O (8-Channel Premium Booster) ===== */
@@ -1400,7 +1400,7 @@ const ecuOf = (n) => { if (!n) return "";
   if (n.type === "Requirement" && /L1/.test(n.subtype || "")) { const e = ecuFor(n); return e ? e.replace("ECU-", "") : ""; }
   return ""; };
 /* Design Responsible Engineer (DRE) — placeholder per-ECU assignment, proposed pending real allocation. */
-const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CID: "D. Koch", FID: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "VAS-IFR": "N. Vogel", "VAS-IRR": "N. Vogel", "VAS-FR": "N. Vogel", "VAS-FL": "N. Vogel", "VAS-RL": "N. Vogel", "VAS-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
+const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CDM: "D. Koch", DDM: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "VAS-IFR": "N. Vogel", "VAS-IRR": "N. Vogel", "VAS-FR": "N. Vogel", "VAS-FL": "N. Vogel", "VAS-RL": "N. Vogel", "VAS-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
 const dreFor = (n) => (n && n.props && n.props.dre) || DRE_BY_ECU[ecuOf(n)] || "";
 
 /* The full V for ONE L1, generated on demand the first time it's opened. */
@@ -2027,8 +2027,8 @@ const resolveEcuId = (t) => {
   if (/\bbec\b|\bbem\b|battery/.test(t)) return "ECU-BEC";
   if (/\brtm\b|radio tuner/.test(t)) return "ECU-RTM";
   if (/\bbst\b|premium booster/.test(t)) return "ECU-BST";
-  if (/\bcid\b|center information display/.test(t)) return "ECU-CID";
-  if (/\bfid\b|front information display/.test(t)) return "ECU-FID";
+  if (/\bcdm\b|\bcid\b|center display module|center information display/.test(t)) return "ECU-CDM";
+  if (/\bddm\b|\bfid\b|\bkombi\b|driver display module|front information display/.test(t)) return "ECU-DDM";
   if (/\brrdcu\b|rear.?door control|tailgate control|heckklappe/.test(t)) return "ECU-RRDCU";
   if (/\bsrcu\b|ausstelldach|tilt.?roof control|sliding.?roof control|cabana roof/.test(t)) return "ECU-SRCU";
   if (/\bpscu\b|powered.?sunshade|sunshade control/.test(t)) return "ECU-PSCU";
@@ -6108,8 +6108,8 @@ const ioCategory = (cls, kind) => {
 const FULL_ECU_IO = () => {
   const out = ALL_ECU_IO().map((x) => ({ ...x }));
   BST_IO.forEach((x) => out.push({ ...x, ecu: "ECU-BST" }));
-  CID_IO.forEach((x) => out.push({ ...x, ecu: "ECU-CID" }));
-  FID_IO.forEach((x) => out.push({ ...x, ecu: "ECU-FID" }));
+  CDM_IO.forEach((x) => out.push({ ...x, ecu: "ECU-CDM" }));
+  DDM_IO.forEach((x) => out.push({ ...x, ecu: "ECU-DDM" }));
   NETWORK.ecus.filter((e) => e.rsadConn).forEach((e) => {
     out.push({ ecu: e.id, id: e.id.replace("ECU-", "") + "-IF-001", conn: e.rsadConn, name: "UWB(+BLE) antenna (KESSY / anti-theft)", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 6, endpoint: "CZM Center Vehicle-Access CAN01", ecuIf: e.rsadConn + " · A1..A6 CAN FD + coding + T30" });
   });
@@ -13126,17 +13126,18 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           {/* ---- TOPOLOGY VIEW: governed physical E/E network — ECUs + approved bus links (CAN/Ethernet/GMSL), ASIL badges and mismatch flags ---- */}
           {view === "deploy" && (() => {
             const total = Object.values(deployment).reduce((s, a) => s + a.length, 0) || 1;
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CDM": "#0BA5EC", "ECU-DDM": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const sel2 = ECU_BY_ID[deployEcu];
             const fns = deployment[deployEcu] || [];
             /* scene layout — CCM sits on top of CCU; DLC left of CCU; cloud outside the vehicle */
             const NW = 150, NH = 52;
             const pos = { "ECU-CCM": [372, 168], "ECU-ADAS": [120, 268], "ECU-CCU": [372, 268],
-              "ECU-CZM": [372, 396], "ECU-FZM": [630, 396], "ECU-BEC": [120, 396] };
+              "ECU-CZM": [372, 396], "ECU-FZM": [630, 396], "ECU-BEC": [120, 396],
+              "ECU-CDM": [120, 168], "ECU-DDM": [630, 168] }; /* Secondary display ECUs (switch map) */
             const DLC = [630, 268];
             const cx = (id) => pos[id][0] + NW / 2, cy = (id) => pos[id][1] + NH / 2;
             const dcx = DLC[0] + NW / 2, dcy = DLC[1] + NH / 2;
-            const CBLUE = "#175CD3", CGMSL = "#7F56D9", CCAN = "#C4320A", CLIN = "#12B76A";
+            const CBLUE = "#175CD3", CGMSL = "#7F56D9", CCAN = "#C4320A", CLIN = "#12B76A", CLVDS = "#42307D";
             /* dual line: two parallel strokes (Ethernet 1 solid, Ethernet 2 dashed) */
             const Dual = ({ x1, y1, x2, y2, color }) => {
               const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1;
@@ -13182,6 +13183,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <span style={{ color: CGMSL, fontWeight: 700 }}>━ GMSL</span>
                         <span style={{ color: CCAN, fontWeight: 700 }}>━ CAN</span>
                         <span style={{ color: CLIN, fontWeight: 700 }}>━ LIN</span>
+                        <span style={{ color: CLVDS, fontWeight: 700 }}>━ LVDS</span>
                       </span>
                     </div>
                     <div className="relative" onWheel={onTWheel} onMouseDown={startTDrag}
@@ -13251,22 +13253,16 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
                         <text x={14} y={47} fontSize={8.5} fontWeight={700} fill="#175CD3">Ethernet 1 Gbps + 100 Mbps</text>
                       </g>
 
-                      {/* Displays (×8) — on CAN FD with the Central Compute Unit */}
-                      {(() => {
-                        const DX = 632, DY = 192, DWn = 128, DHn = 46;
-                        const dCx = DX + DWn / 2, dBottom = DY + DHn;
-                        const landX = 500, ccuTop = pos["ECU-CCU"][1];
-                        return (
-                          <g style={{ cursor: "pointer" }} onClick={() => refocus("DISPLAYS")}>
-                            <path d={`M ${dCx} ${dBottom} L ${dCx} ${dBottom + 12} L ${landX} ${dBottom + 12} L ${landX} ${ccuTop}`} fill="none" stroke={CCAN} strokeWidth={2} strokeDasharray="6 3" strokeLinecap="round" />
-                            <text x={landX + 6} y={dBottom + 8} fontSize={8} fill={CCAN} fontWeight={700}>CAN FD 1 Mbps</text>
-                            <rect x={DX} y={DY} width={DWn} height={DHn} rx={8} fill="#fff" stroke={CCAN} strokeWidth={1.4} />
-                            <rect x={DX} y={DY} width={5} height={DHn} rx={2.5} fill={CCAN} />
-                            <text x={DX + 14} y={DY + 19} fontSize={10.5} fontWeight={700} fill="#101828">Displays (×8)</text>
-                            <text x={DX + 14} y={DY + 32} fontSize={8} fill="#98A2B3">Up to 8 displays maximum</text>
-                            <text x={DX + 14} y={DY + 43} fontSize={8} fontWeight={700} fill={CCAN}>CAN FD · Central Compute Unit</text>
-                          </g>);
-                      })()}
+                      {/* Display ECUs (Switchmap Arch Mapping): video over LVDS from the CCU (XMM); control over CAN.
+                          CDM: XMM_LVDS_Display_Out_LVDS01 + XMM_IVI_CAN01 (CCU). DDM (Kombi): XMM_LVDS_Display_Out_LVDS04 (CCU) + Center_Dashboard_CAN01 (CZM). */}
+                      <path d="M 230 220 L 230 232 L 412 232 L 412 268" fill="none" stroke={CLVDS} strokeWidth={2.4} strokeLinejoin="round" />
+                      <path d="M 160 220 L 160 244 L 392 244 L 392 268" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
+                      <text x={236} y={228} fontSize={8} fill={CLVDS} fontWeight={700}>LVDS01</text>
+                      <text x={166} y={240} fontSize={8} fill={CCAN} fontWeight={700}>XMM_IVI_CAN01</text>
+                      <path d="M 630 186 L 592 186 L 592 236 L 518 236 L 518 268" fill="none" stroke={CLVDS} strokeWidth={2.4} strokeLinejoin="round" />
+                      <path d="M 646 220 L 646 250 L 578 250 L 578 380 L 506 380 L 506 396" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
+                      <text x={596} y={182} fontSize={8} fill={CLVDS} fontWeight={700} textAnchor="end">LVDS04</text>
+                      <text x={582} y={262} fontSize={8} fill={CCAN} fontWeight={700}>Dashboard CAN01</text>
 
                       {/* ECU modules — one node each; ASIL badge */}
                       {NETWORK.ecus.filter((e) => pos[e.id]).map((e) => {
@@ -13461,7 +13457,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const hubId = "ECU-CCU";
               const cx = 450, cy = 290;
               const allIds = ECUS.map((e) => e.id);
-              const pref = ["ECU-RTM", "ECU-CCM", "ECU-CID", "ECU-BST", "ECU-FZM", "ECU-CZM", "ECU-FID", "ECU-ADAS", "ECU-BEC", "ECU-RRDCU"];
+              const pref = ["ECU-RTM", "ECU-CCM", "ECU-CDM", "ECU-BST", "ECU-FZM", "ECU-CZM", "ECU-DDM", "ECU-ADAS", "ECU-BEC", "ECU-RRDCU"];
               const orderPool = (pool) => [...new Set([...pref, ...pool])].filter((id) => pool.includes(id));
               /* inner ring = nodes with a direct interface to the CCU; outer ring = reached only via another ECU */
               const directIds = new Set();
@@ -13496,7 +13492,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const protos = [...new Set(items.map((i) => i.props?.protocol).filter(Boolean))];
               return protos.slice(0, 3).join(" · ");
             };
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CDM": "#0BA5EC", "ECU-DDM": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
                 <div className="px-6 pt-5 pb-2">
@@ -13801,7 +13797,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             /* ===== SECTION: Schematics view - connector pin-out diagrams ===== */
             const ECUS = NETWORK.ecus;
             const ioNodes = Object.values(nodes).filter((n) => n.type === "ECUSmartNode" && /I\/O list$/.test(n.props?.source || ""));
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CDM": "#0BA5EC", "ECU-DDM": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-IFR": "#7A5AF8", "ECU-VAS-IRR": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const wc = (cls) => { const c = (cls || "").toUpperCase();
               if (c.indexOf("ETH") >= 0 || c.indexOf("NET") === 0) return "#175CD3";
               if (c.indexOf("CAN") >= 0 || c.indexOf("LIN") >= 0 || c.indexOf("BUS") === 0) return "#C4320A";
