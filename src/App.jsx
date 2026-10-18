@@ -340,8 +340,8 @@ const NETWORK = {
     { id: "ECU-BEC", name: "Battery Energy Module", vendor: "Infineon", processor: "AURIX TC3x", supplier: "TBD", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Energy management, battery management and charging workloads", codes: ["ENG"] },
     { id: "ECU-RTM", name: "Radio Tuner Module", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Broadcast radio tuner (AM / FM / DAB)", scope: "Broadcast radio reception, delivered to the CCU over Ethernet", codes: ["RTM"], kind: "peripheral", subtype: "Radio tuner module" },
     { id: "ECU-BST", name: "8-Channel Premium Booster", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "8-channel premium audio booster / amplifier", scope: "Digital sound package amplifier \u2014 receives an A2B stream from the CCU and drives the premium speakers", codes: ["BST"], kind: "peripheral", subtype: "Audio amplifier" },
-    { id: "ECU-CID", name: "Center Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center information display (HMI sink)", scope: "Center display \u2014 receives video from the CCU over H-MTD, plus CAN-FD", codes: ["CID"], kind: "peripheral", subtype: "Display" },
-    { id: "ECU-FID", name: "Front Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Front information display (HMI sink)", scope: "Front display \u2014 same I/O as CID (video over H-MTD + CAN-FD)", codes: ["FID"], kind: "peripheral", subtype: "Display" },
+    { id: "ECU-CID", name: "Center Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center information display (HMI sink)", scope: "Center display (CI_Display, +LSR) \u2014 receives video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS01), control on XMM_IVI_CAN01", codes: ["CID", "CI_DISPLAY"], kind: "peripheral", subtype: "Display" },
+    { id: "ECU-FID", name: "Front Information Display", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Front information display (HMI sink)", scope: "Driver display (Kombi) \u2014 video from the CCU (XMM) over LVDS (XMM_LVDS_Display_Out_LVDS04), control on the CZM Center_Dashboard_CAN01", codes: ["FID", "KOMBI"], kind: "peripheral", subtype: "Display" },
     { id: "ECU-RRDCU", name: "Tailgate / Rear-Closure Control Unit", vendor: "\u2014", processor: "\u2014", supplier: "Kostal", asil: "QM", deviceClass: "Tailgate / rear-closure control unit (liftgate, benchgate/splitgate, rear-window regulator, cinching, central locking) \u2014 NOT a side door", scope: "Rear-window / tailgate closure, locking, lighting, seat and comfort functions on the CZM Door CAN", codes: ["RRDCU"], kind: "peripheral", subtype: "Door control unit" },
     { id: "ECU-SRCU", name: "Sliding-/Tilt-Roof Control Unit (TiltRoof)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Sunroof / tilt-roof (TiltRoof) control unit \u2014 drives roof motors, Hall feedback and operating panel", scope: "Sunroof / tilt-roof (TiltRoof) actuation and roller-blind control on the CZM Center Roof CAN/LIN", codes: ["SRCU"], kind: "peripheral", subtype: "Roof control unit" },
     { id: "ECU-PSCU", name: "Powered-Sunshade Control Unit (SlidingRoof)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Powered sunshade / sliding-roof-blind control unit on the CZM Center Roof (Sunshade) LIN", scope: "Powered sunshade / sliding-roof-blind control on the CZM Center Roof LIN", codes: ["PSCU"], kind: "peripheral", subtype: "Sunshade control unit" },
@@ -354,12 +354,12 @@ const NETWORK = {
     { id: "ECU-APHB", name: "Aux Power Hub \u2014 Back (205_937_517_A)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Accessory power distribution hub (rear) \u2014 AUX outlets B/C/D + lighting echoes", scope: "Rear accessory power hub \u2014 LIN-controlled, fed by PDU Rear; PWM/switched feeds to AUX outlets B/C/D, on CZM Rear/Trunk LIN", codes: ["APHB"], kind: "peripheral", subtype: "Accessory power hub" },
   ],
   links: [
-    { id: "NT-001-ETH-BASIC", a: "ECU-CCU", b: "ECU-ADAS", cls: "ECU-to-compute", proto: "Automotive Ethernet", net: "ADAS Basic", rate: "1000BASE-T1", basis: "ADAS data & service path (J4, CCU-IF-034)", dir: "Bidirectional" },
+    { id: "NT-001-ETH-BASIC", a: "ECU-CCU", b: "ECU-ADAS", cls: "ECU-to-compute", proto: "Automotive Ethernet", net: "XMM_ADAS_Basic_ETH01", rate: "1000BASE-T1", basis: "ADAS data & service path (J4, CCU-IF-034); bus name per Switchmap Arch Mapping (was \"ADAS Basic\")", dir: "Bidirectional" },
     { id: "NT-001-ETH-SV62", a: "ECU-CCU", b: "ECU-ADAS", cls: "ECU-to-compute", proto: "Automotive Ethernet", net: "ADAS SV62", rate: "1000BASE-T1", basis: "ADAS surround-view path (J4, CCU-IF-035)", dir: "Bidirectional" },
     { id: "NT-001-GMSL", a: "ECU-CCU", b: "ECU-ADAS", cls: "ECU-to-compute", proto: "GMSL2/3", rate: "Serialized video", basis: "ADAS cameras & pre-rendered views (J4, CCU-IF-031/032/033)", dir: "ADAS → CCU" },
     { id: "NT-002-CAN", a: "ECU-CCU", b: "ECU-CZM", cls: "ECU-to-zone", proto: "CAN FD", net: "Platform CAN", rate: "1 Mbps", basis: "Platform CAN, reconciled from pin-outs (CCU-IF-010 ↔ CZM-IF-017/Backbone)", dir: "Bidirectional" },
-    { id: "NT-002-ETH", a: "ECU-CCU", b: "ECU-CZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "Center Zone", rate: "100M", basis: "Center-zone Ethernet (CCU-IF-023)", dir: "Bidirectional" },
-    { id: "NT-RRDCU-DOORCAN", a: "ECU-CZM", b: "ECU-RRDCU", cls: "zone-to-peripheral", proto: "CAN FD", net: "Center Door CAN", rate: "1 Mbps", basis: "Rear-door control unit on CZM Door CAN (CZM-IF-010 ↔ RRDCU K-CAN-FD B14/B15)", dir: "Bidirectional" },
+    { id: "NT-002-ETH", a: "ECU-CCU", b: "ECU-CZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "XMM_Center_ETH01", rate: "100M", basis: "Center-zone Ethernet (CCU-IF-023 ↔ CZM-IF-006); bus name per Switchmap Arch Mapping (was \"Center Zone\")", dir: "Bidirectional" },
+    { id: "NT-RRDCU-DOORCAN", a: "ECU-CZM", b: "ECU-RRDCU", cls: "zone-to-peripheral", proto: "CAN FD", net: "Center_DOOR_CAN01", rate: "1 Mbps", basis: "Rear-door control unit on CZM Door CAN (CZM-IF-010 ↔ RRDCU K-CAN-FD B14/B15)", dir: "Bidirectional" },
     { id: "NT-SRCU-ROOFCAN", a: "ECU-CZM", b: "ECU-SRCU", cls: "zone-to-peripheral", proto: "CAN FD", net: "Center Roof CAN", rate: "1 Mbps", basis: "TiltRoof roof control unit on CZM Center Roof CAN01 + Roof LIN (CZM-IF-022 ↔ J878.1 A2/A3/A4)", dir: "Bidirectional" },
     { id: "NT-PSCU-ROOFLIN", a: "ECU-CZM", b: "ECU-PSCU", cls: "zone-to-peripheral", proto: "LIN", net: "Center Roof / Sunshade LIN", rate: "19.2 Kbps", basis: "Powered-sunshade control unit on CZM Roof/Sunshade LIN (J246.1 A3 LIN0)", dir: "Bidirectional" },
     { id: "NT-PDUF-CZM", a: "ECU-PDUF", b: "ECU-CZM", cls: "power-feed", proto: "KL30", net: "Center KL30_S1", rate: "12V", basis: "Front PDU feeds CZM KL30 rail S1 (SA.1 F1 → V.30_CZ_ECU_A1)", dir: "PDU → ECU" },
@@ -376,7 +376,7 @@ const NETWORK = {
     { id: "NT-003-A2B", a: "ECU-CCU", b: "ECU-CCM", cls: "ECU-to-compute", proto: "A2B", net: "Mic / CCM audio", rate: "A2B", basis: "Digital audio bus to CCM (CCU-IF-021)", dir: "Bidirectional" },
     { id: "NT-004-A", a: "ECU-CZM", b: "ECU-BEC", cls: "ECU-to-zone", proto: "CAN FD 1", rate: "1 Mbps", basis: "Energy, charging, status, diagnostics and control path", dir: "Bidirectional" },
     { id: "NT-004-B", a: "ECU-CZM", b: "ECU-BEC", cls: "ECU-to-zone", proto: "CAN FD 2", rate: "1 Mbps", basis: "Redundant energy, charging, status, diagnostics and control path", dir: "Bidirectional" },
-    { id: "NT-005-ETH", a: "ECU-CZM", b: "ECU-FZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "Center-Front", rate: "100BASE-T1", basis: "Center-Front Ethernet, reconciled both sides (CZM-IF-001 ↔ FZM-IF-001)", dir: "Bidirectional" },
+    { id: "NT-005-ETH", a: "ECU-CZM", b: "ECU-FZM", cls: "ECU-to-zone", proto: "Automotive Ethernet", net: "Center_Front_ETH01", rate: "100BASE-T1", basis: "Center-Front Ethernet, reconciled both sides (CZM-IF-001 ↔ FZM-IF-001); bus name per Switchmap Arch Mapping", dir: "Bidirectional" },
     { id: "NT-010", a: "ECU-CCU", b: "ECU-FZM", cls: "ECU-to-zone", proto: "CAN FD", net: "Platform CAN", rate: "1 Mbps", basis: "Platform CAN reaches FZM (FZM-IF-017)", dir: "Bidirectional" },
     { id: "NT-008-ETH1", a: "ECU-CCU", b: "DLC", cls: "Service link", proto: "Automotive Ethernet", net: "Ethernet 1", rate: "1 Gbps", basis: "Diagnostics and service access", dir: "Bidirectional" },
     { id: "NT-008-ETH2", a: "ECU-CCU", b: "DLC", cls: "Service link", proto: "Automotive Ethernet", net: "Ethernet 2", rate: "100 Mbps", basis: "Service / legacy diagnostics access", dir: "Bidirectional" },
@@ -418,14 +418,47 @@ const NETWORK = {
    Center_Door_CAN01. Control window regulation, locking/unlocking, mirror fold, child locks and
    related body functions. (Rear-window / tailgate is the existing ECU-RRDCU.) */
 [
-  ["ECU-DCM-FL", "Front Left (driver)", "driver front door"],
-  ["ECU-DCM-FR", "Front Right (passenger)", "passenger front door"],
-  ["ECU-DCM-RL", "Rear Left", "rear-left door"],
-  ["ECU-DCM-RR", "Rear Right", "rear-right door"],
-].forEach(([id, pos, scope]) => {
-  NETWORK.ecus.push({ id, name: `Door Control Module — ${pos}`, vendor: "—", processor: "—", supplier: "Kostal", asil: "QM", deviceClass: "Door control module (window regulator, central locking, mirror fold, child lock, courtesy lighting)", scope: `Body/access functions for the ${scope} on the CZM Center_Door_CAN01`, codes: [id.replace("ECU-", "")], kind: "peripheral", subtype: "Door control unit" });
-  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-DOORCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN", net: "Center Door CAN01", rate: "500 Kbps", basis: `Door body functions (window, lock, mirror, child lock) for the ${scope} on the CZM Center_Door_CAN01 — supplier Kostal.`, dir: "Bidirectional" });
+  ["ECU-DCM-FL", "Front Left (driver)", "driver front door", "TSG_FS"],
+  ["ECU-DCM-FR", "Front Right (passenger)", "passenger front door", "TSG_BFS"],
+  ["ECU-DCM-RL", "Rear Left", "rear-left door", "TSG_HFS"],
+  ["ECU-DCM-RR", "Rear Right", "rear-right door", "TSG_HBFS"],
+].forEach(([id, pos, scope, tsg]) => {
+  NETWORK.ecus.push({ id, name: `Door Control Module — ${pos}`, vendor: "—", processor: "—", supplier: "Kostal", asil: "QM", deviceClass: "Door control module (window regulator, central locking, mirror fold, child lock, courtesy lighting)", scope: `Body/access functions for the ${scope} on the CZM Center_DOOR_CAN01 (${tsg})`, codes: [id.replace("ECU-", ""), tsg], kind: "peripheral", subtype: "Door control unit" });
+  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-DOORCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN", net: "Center_DOOR_CAN01", rate: "500 Kbps", basis: `Door body functions (window, lock, mirror, child lock) for the ${scope} on the CZM Center_Door_CAN01 — supplier Kostal.`, dir: "Bidirectional" });
 });
+/* Switchmap Arch Mapping (2025-08-18): modules behind the vehicle switches and the buses they sit on.
+   Rear Zonal (Center_Rear_ETH01) is NOT added — the rear zone (BZC) is integrated into the CZM.
+   Bus names are the switch-map names; rates not shown on the slides are "TBD". */
+const SWITCHMAP_PERIPHERALS = [
+  // [id, name, code(s), deviceClass, host, bus, proto, rate, slide]
+  ["ECU-SES", "SES", ["SES"], "Module on the Center HV CAN (switch-map node SES)", "ECU-CZM", "Center_HV_CAN01", "CAN", "TBD", "Driver Door"],
+  ["ECU-SITZMEM-FS", "Seat Memory Module — Driver (SitzMem_FS)", ["SITZMEM_FS"], "Seat memory / adjustment control unit (12-way, memory, massage) on CAN", "ECU-CZM", "Center_Seat_CAN01", "CAN", "TBD", "Seat adjustment Buttons Driver"],
+  ["ECU-SITZMEM-BFS", "Seat Memory Module — Passenger (SitzMem_BFS)", ["SITZMEM_BFS"], "Seat memory / adjustment control unit (12-way, massage) on CAN", "ECU-CZM", "Center_Seat_CAN01", "CAN", "TBD", "Seat adjustment Buttons Passenger"],
+  ["ECU-IVB1-FS", "IVB1 — Driver seat (IVB1_FS)", ["IVB1_FS"], "Seat sub-module on the driver seat-memory private LIN", "ECU-SITZMEM-FS", "SitzMem_FS_pLIN1", "LIN", "19.2 Kbps", "Seat adjustment Buttons Driver"],
+  ["ECU-IVB1-BFS", "IVB1 — Passenger seat (IVB1_BFS)", ["IVB1_BFS"], "Seat sub-module on the passenger seat-memory private LIN", "ECU-SITZMEM-BFS", "SitzMem_BFS_pLIN1", "LIN", "19.2 Kbps", "Seat adjustment Buttons Passenger"],
+  ["ECU-MFL", "Multifunction Steering Wheel (MFL)", ["MFL"], "Steering-wheel button module on CAN (heated-wheel switch hard-wired to the CZM)", "ECU-CZM", "Center_MFL_CAN01", "CAN", "TBD", "Steering Wheel Button Module"],
+  ["ECU-LTM", "Light Switch Module (LTM)", ["LTM"], "Light switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Lightswitch Module"],
+  ["ECU-SMOD-ANBT", "Accessory Switches (Smod_AnbT)", ["SMOD_ANBT"], "AUX 1-4 accessory switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Accessory Switches"],
+  ["ECU-TBC-S", "Trailer Brake Control Switch (TBC_S)", ["TBC_S"], "Trailer brake boost / gain switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Trailer Brake Boost Module"],
+  ["ECU-SL01", "Overhead Console Switch Row (SL_01)", ["SL_01"], "Overhead console lower switch row (off-road / expedition) — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Overhead Console"],
+  ["ECU-LIM01", "Overhead Console (LIM_01)", ["LIM_01"], "Overhead console (lights, airbag lamp, hazard, SOS) — LIN slave", "ECU-CZM", "Center_Roof_LIN01", "LIN", "19.2 Kbps", "Overhead Console"],
+  ["ECU-ECMIRROR", "Auto-dim Interior Mirror + Garage Door Opener (EC_Mirror)", ["EC_MIRROR"], "Electrochromic interior mirror with garage-door-opener buttons — LIN slave", "ECU-CZM", "Center_Roof_LIN01", "LIN", "19.2 Kbps", "Garage Door Opener"],
+  ["ECU-ISMWLS", "Steering Column Switch Module (iSMWLS)", ["ISMWLS"], "Steering-column stalk module on FlexRay", "ECU-FZM", "FZ_FR_A", "FlexRay", "10 Mbps", "Stearing Stalk Module"],
+  ["ECU-SIH01", "2nd-Row Seat Heat Switch 1 (SIH_Taster_01)", ["SIH_TASTER_01"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
+  ["ECU-SIH02", "2nd-Row Seat Heat Switch 2 (SIH_Taster_02)", ["SIH_TASTER_02"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
+  ["ECU-BKE", "HVAC Switchbar (BKE)", ["BKE"], "HVAC switch bar (heated / ventilated seat variants) on CAN", "ECU-CCU", "XMM_IVI_CAN01", "CAN", "TBD", "HVAC Switchbar"],
+];
+SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, rate, slide]) => {
+  NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on ${bus} (Switchmap Arch Mapping, slide "${slide}")`, codes, kind: "peripheral", subtype: proto === "LIN" ? "LIN switch module" : "Switch module" });
+  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-${bus.replace(/_/g, "").toUpperCase()}`, a: host, b: id, cls: "zone-to-peripheral", proto, net: bus, rate, basis: `Switchmap Arch Mapping, slide "${slide}"`, dir: "Bidirectional" });
+});
+/* Displays per the switch map: video over LVDS from the CCU (XMM); control over CAN. */
+NETWORK.links.push(
+  { id: "NT-CID-LVDS01", a: "ECU-CCU", b: "ECU-CID", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },
+  { id: "NT-CID-IVICAN01", a: "ECU-CCU", b: "ECU-CID", cls: "ECU-to-display", proto: "CAN", net: "XMM_IVI_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Center Display\"", dir: "Bidirectional" },
+  { id: "NT-FID-LVDS04", a: "ECU-CCU", b: "ECU-FID", cls: "ECU-to-display", proto: "LVDS", net: "XMM_LVDS_Display_Out_LVDS04", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi; replaces H-MTD)", dir: "CCU → Display" },
+  { id: "NT-FID-DASHCAN01", a: "ECU-CZM", b: "ECU-FID", cls: "zone-to-peripheral", proto: "CAN", net: "Center_Dashboard_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi)", dir: "Bidirectional" },
+);
 const CODE_TO_ECU = {};
 NETWORK.ecus.forEach((e) => e.codes.forEach((c) => (CODE_TO_ECU[c] = e.id)));
 const ECU_BY_ID = Object.fromEntries(NETWORK.ecus.map((e) => [e.id, e]));
@@ -1329,13 +1362,13 @@ const GROUNDS = [
 ];
 /* ===== SECTION: CID I/O (SDV-ICD-CID-007) ===== */
 const CID_IO = [
-  { id: "CID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "GMSL3 (over H-MTD)", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S H-MTD shield", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "CID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
   { id: "CID-IF-002", conn: "A", name: "Display CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
   { id: "CID-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
 ];
 /* ===== SECTION: FID I/O (SDV-ICD-FID-008) ===== */
 const FID_IO = [
-  { id: "FID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "GMSL3 (over H-MTD)", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S H-MTD shield", sw: "HMI sink", diag: "No", arch: "Displays" },
+  { id: "FID-IF-001", conn: "A", name: "Display Video In", cls: "VID-DISP", proto: "LVDS", dir: "In", pins: 3, endpoint: "Central Compute Unit (CCU)", ecuIf: "A1 Video Rx+; A2 Video Rx-; A1S shield", sw: "HMI sink", diag: "No", arch: "Displays" },
   { id: "FID-IF-002", conn: "A", name: "Display CAN-FD", cls: "BUS-CAN", proto: "CAN-FD", dir: "Bidir", pins: 2, endpoint: "Central Compute Unit (CCU)", ecuIf: "A2X CAN-FD Low; A5X CAN-FD High", sw: "HMI sink", diag: "No", arch: "Displays" },
   { id: "FID-IF-003", conn: "A", name: "Display Power", cls: "PWR", proto: "KL30 / KL31", dir: "In", pins: 2, endpoint: "Vehicle power net (KL30)", ecuIf: "A1X KL30; A4X KL31 (A3X/A6X n.c.) \u2014 powered by CCU", sw: "Power", diag: "No", arch: "Power net" },
 ];
