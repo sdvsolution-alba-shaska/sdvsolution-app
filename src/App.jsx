@@ -4004,7 +4004,27 @@ function IcdTool({ ecuId, tag = "", derivedGroups = [], canWrite = false, onChan
 /* Ethernet backbone K-Matrix (ETH) — nodes, PDUs, frames, signals. Built up over time: partial released workbooks are
    merged (conflicts reported, nothing overwritten), signals are added as Behavior Models define what crosses the backbone.
    Logic lives in src/lib/ethKmatrix.js (window.__sdvEthKm); the data is the ETH_STORE part of the workspace. */
-const ETH_CHIP_OPTIONS = [["", "—"], ["ECU-CZM|A", "CZM · Chip A (network & safety)"], ["ECU-CZM|B", "CZM · Chip B (body application)"], ["ECU-CZM|SW", "CZM · Ethernet switch"], ["ECU-FZM|", "FZM"], ["ECU-CCU|", "CCU"], ["ECU-ADAS|", "ADAS"], ["ECU-CCM|", "CCM"], ["ECU-BEC|", "BEC"]];
+/* The backbone is the Topology's Ethernet links (NETWORK.links). K-Matrix nodes map onto Topology ECUs (and chips of
+   multi-chip ECUs); PDUs are checked for an Ethernet path between sender and receivers. */
+const ethTopology = () => {
+  const ethLinks = NETWORK.links.filter((l) => /ethernet/i.test(l.proto || "")).map((l) => [l.a, l.b, (l.net || "") + (l.rate ? " · " + l.rate : "")]);
+  const names = Object.fromEntries(NETWORK.ecus.map((e) => [e.id, e.id.replace(/^ECU-/, "")])); names.DLC = "DLC";
+  return { ethLinks, names };
+};
+const ethNodeOptions = () => {
+  const { ethLinks, names } = ethTopology(), ids = Array.from(new Set(ethLinks.flatMap(([a, b]) => [a, b])));
+  const opts = [["|", "—"]];
+  ids.forEach((id) => { const e = NETWORK.ecus.find((x) => x.id === id);
+    if (e && e.mcus) { e.mcus.forEach((m) => opts.push([id + "|" + m.id, names[id] + " · " + m.name])); opts.push([id + "|SW", names[id] + " · Ethernet switch"]); }
+    else opts.push([id + "|", (e && e.name ? names[id] + " — " + e.name : names[id] === "DLC" ? "DLC — Data Link Connector (tester)" : names[id])]); });
+  return opts;
+};
+/* Name rules that map released K-Matrix node names onto the Topology (only used to fill a blank mapping). */
+const ETH_NODE_ALIASES = [
+  { re: /^XMM$/i, ecu: "ECU-CCU" },                       // XMM is the CCU in the SDVsolution model
+  { re: /^CZC_1$/i, ecu: "ECU-CZM", mcu: "A" }, { re: /^CZC_2$/i, ecu: "ECU-CZM", mcu: "B" }, { re: /^CZC_Switch$/i, ecu: "ECU-CZM", mcu: "SW" },
+  { re: /^FZC$/i, ecu: "ECU-FZM" }, { re: /^ADAS(_|$)/i, ecu: "ECU-ADAS" }, { re: /^TestTool$/i, ecu: "DLC" },
+];
 function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
   const [, setV] = useState(0); const bump = () => setV((v) => v + 1);
@@ -4012,7 +4032,8 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const fileRef = useRef(null);
   if (!EK) return <div className="flex-1 p-8" style={{ color: "#667085", fontSize: 13 }}>The Ethernet K-Matrix module isn't loaded in this runtime. Open the app from the main site.</div>;
   const D = ETH_STORE.data; D.nodes = D.nodes || []; D.pdus = D.pdus || [];
-  const findings = EK.checkEth(D), st = EK.ethStats(D), errs = findings.filter((f) => f.sev === "error").length;
+  const topo = ethTopology(), nodeOpts = ethNodeOptions();
+  const findings = EK.checkEth(D, topo), st = EK.ethStats(D), errs = findings.filter((f) => f.sev === "error").length;
   const th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "#98A2B3", fontWeight: 700, whiteSpace: "nowrap", background: "#F9FAFB", borderBottom: "1px solid #EAECF0" };
   const td = { padding: "3px 6px", borderTop: "1px solid #F2F4F7", fontSize: 11.5, verticalAlign: "top" };
   const cell = (val, on, w, mono) => canWrite ? <input value={val == null ? "" : val} onChange={(e) => { on(e.target.value); bump(); }} style={{ width: w || "100%", fontSize: 11.5, padding: "2px 5px", border: "1px solid #E4E7EC", borderRadius: 5, fontFamily: mono ? "ui-monospace,monospace" : "inherit" }} /> : <span style={{ fontFamily: mono ? "ui-monospace,monospace" : "inherit" }}>{val == null ? "" : String(val)}</span>;
@@ -4023,7 +4044,8 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
       const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
       const sheets = {}; wb.SheetNames.forEach((n) => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "", raw: true }); });
       const { eth, warnings } = EK.parseWorkbook(sheets), { eth: merged, report } = EK.mergeEth(D, eth);
-      ETH_STORE.data = merged; setRep({ file: file.name, warnings, ...report }); bump(); notify("Merged " + file.name);
+      const mapped = EK.applyAliases(merged, ETH_NODE_ALIASES);
+      ETH_STORE.data = merged; setRep({ file: file.name, warnings, mapped, ...report }); bump(); notify("Merged " + file.name);
     } catch (e) { setRep({ file: file.name, error: e.message }); } finally { setBusy(false); }
   };
   const doExport = async () => {
@@ -4053,11 +4075,17 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
       {rep && (<div style={{ marginTop: 10, border: "1px solid " + (rep.error ? "#FECDCA" : "#D1E9FF"), background: rep.error ? "#FFFBFA" : "#F5FAFF", borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "#344054" }}>
         <div className="flex"><b>{rep.file}</b><button onClick={() => setRep(null)} style={{ marginLeft: "auto", color: "#98A2B3" }}>✕</button></div>
         {rep.error ? <div style={{ color: "#B42318" }}>Import failed: {rep.error}</div> : <>
-          <div>Added {rep.added.nodes} nodes, {rep.added.pdus} PDUs, {rep.added.signals} signals; filled blanks in {rep.filled} existing entries.</div>
+          <div>Added {rep.added.nodes} nodes, {rep.added.pdus} PDUs, {rep.added.signals} signals; filled blanks in {rep.filled} existing entries{rep.mapped ? "; mapped " + rep.mapped + " nodes to Topology ECUs by name (check them on the Nodes tab)" : ""}.</div>
           {rep.warnings.map((w, i) => <div key={i} style={{ color: "#B54708" }}>• {w}</div>)}
           {rep.conflicts.length > 0 && <div style={{ marginTop: 4 }}><b style={{ color: "#B54708" }}>{rep.conflicts.length} conflicts — existing values kept:</b>{rep.conflicts.slice(0, 12).map((c, i) => <div key={i} style={{ fontFamily: "ui-monospace,monospace", fontSize: 10.5 }}>{c.where} · {c.field}: kept {JSON.stringify(c.kept)}, file has {JSON.stringify(c.incoming)}</div>)}{rep.conflicts.length > 12 && <div>…and {rep.conflicts.length - 12} more</div>}</div>}
         </>}
       </div>)}
+      <div style={{ marginTop: 12, border: "1px solid #EAECF0", borderRadius: 8, padding: "8px 12px", background: "#FCFCFD" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.4, marginBottom: 4 }}>BACKBONE = TOPOLOGY ETHERNET LINKS</div>
+        <div className="flex flex-wrap gap-2">{topo.ethLinks.map(([a, b, l], i) => <span key={i} style={{ fontSize: 11, color: "#344054", border: "1px solid #E4E7EC", borderRadius: 999, padding: "1px 9px", background: "#fff" }}><b>{topo.names[a] || a}</b> ↔ <b>{topo.names[b] || b}</b> <span style={{ color: "#98A2B3" }}>{l}</span></span>)}</div>
+        <div style={{ fontSize: 10.5, color: "#98A2B3", marginTop: 4 }}>Each node maps to a Topology ECU (or a CZM chip); every message is checked for an Ethernet path from its sender to each receiver. Change the Topology and the checks follow.</div>
+        {canWrite && D.nodes.some((n) => !n.ecu) && <button onClick={() => { const k = EK.applyAliases(D, ETH_NODE_ALIASES); notify(k ? "Mapped " + k + " nodes by name" : "No name rule matched the unmapped nodes"); bump(); }} style={{ fontSize: 11, color: "#175CD3", marginTop: 4 }}>Map unmapped nodes by name rules</button>}
+      </div>
       <div className="flex gap-5" style={{ marginTop: 14, borderBottom: "1px solid #EAECF0" }}>{tabBtn("pdus", "Messages & signals")}{tabBtn("nodes", "Nodes")}{tabBtn("checks", "Checks (" + findings.length + ")")}</div>
       {tab === "nodes" && (<div style={{ marginTop: 10 }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "MAC address", "IPv4 address", "IPv6 address", "Rx port", "Tx port", "ECU / chip", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
@@ -4065,7 +4093,8 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
             <td style={td}>{cell(n.name, (v) => { const old = n.name; n.name = v; D.pdus.forEach((p) => { if (p.sender === old) p.sender = v; p.receivers = (p.receivers || []).map((r) => (r === old ? v : r)); p.signals.forEach((s) => { if (s.roles && s.roles[old]) { s.roles[v] = s.roles[old]; delete s.roles[old]; } }); }); }, 140)}</td>
             <td style={td}>{cell(n.mac, (v) => { n.mac = v.toUpperCase(); }, 150, true)}</td><td style={td}>{cell(n.ipv4, (v) => { n.ipv4 = v; }, 120, true)}</td><td style={td}>{cell(n.ipv6, (v) => { n.ipv6 = v.toLowerCase(); }, 200, true)}</td>
             <td style={td}>{cell(n.rxPort, (v) => { n.rxPort = num(v); }, 70, true)}</td><td style={td}>{cell(n.txPort, (v) => { n.txPort = num(v); }, 70, true)}</td>
-            <td style={td}>{canWrite ? <select value={(n.ecu || "") + "|" + (n.mcu || "")} onChange={(e) => { const [ecu, mcu] = e.target.value.split("|"); n.ecu = ecu || undefined; n.mcu = mcu || undefined; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5, padding: "2px 4px" }}>{ETH_CHIP_OPTIONS.map(([v, l]) => <option key={v} value={v === "" ? "|" : v}>{l}</option>)}</select> : <span>{(ETH_CHIP_OPTIONS.find(([v]) => v === (n.ecu || "") + "|" + (n.mcu || "")) || ["", "—"])[1]}</span>}</td>
+            <td style={td}>{canWrite ? <select value={(n.ecu || "") + "|" + (n.mcu || "")} onChange={(e) => { const [ecu, mcu] = e.target.value.split("|"); n.ecu = ecu || undefined; n.mcu = mcu || undefined; delete n.ecuSource; bump(); }} style={{ fontSize: 11.5, border: "1px solid " + (n.ecu ? "#E4E7EC" : "#FEC84B"), borderRadius: 5, padding: "2px 4px", maxWidth: 260 }}>{nodeOpts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}{n.ecu && !nodeOpts.some(([v]) => v === n.ecu + "|" + (n.mcu || "")) && <option value={n.ecu + "|" + (n.mcu || "")}>{n.ecu} (not on the Ethernet topology)</option>}</select> : <span>{(nodeOpts.find(([v]) => v === (n.ecu || "") + "|" + (n.mcu || "")) || ["", "—"])[1]}</span>}
+              {n.ecuSource === "alias" && <div style={{ fontSize: 9.5, color: "#98A2B3" }}>from name rule — confirm</div>}</td>
             <td style={td}>{canWrite && <button onClick={() => { D.nodes.splice(i, 1); bump(); }} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td>
           </tr>))}
           {!D.nodes.length && <tr><td colSpan={8} style={{ ...td, color: "#98A2B3", padding: 12 }}>No nodes yet — import a workbook or add one.</td></tr>}

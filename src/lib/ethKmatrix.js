@@ -133,8 +133,25 @@ export function mergeEth(base, incoming) {
   return { eth: out, report };
 }
 
+/* ---------- topology ----------
+   The backbone is the Topology's Ethernet links: topo = { ethLinks: [[ecuA, ecuB, label], ...], names: { ecuId: "CCU" } }.
+   Every K-Matrix node is mapped to a Topology ECU (and, for multi-chip ECUs, a chip); every PDU must be able to travel
+   from its sender's ECU to each receiver's ECU over Topology Ethernet links. */
+export function applyAliases(eth, aliases) { // fills node.ecu / node.mcu from name rules where they are still blank
+  let n = 0;
+  (eth.nodes || []).forEach((node) => { if (node.ecu) return; const a = (aliases || []).find((x) => x.re.test(node.name)); if (a) { node.ecu = a.ecu; if (a.mcu) node.mcu = a.mcu; node.ecuSource = "alias"; n++; } });
+  return n;
+}
+export function ethPath(topo, from, to) { // BFS over Topology Ethernet links; returns the ECU path or null
+  if (from === to) return [from];
+  const adj = {}; (topo.ethLinks || []).forEach(([a, b]) => { (adj[a] = adj[a] || new Set()).add(b); (adj[b] = adj[b] || new Set()).add(a); });
+  const prev = { [from]: null }, q = [from];
+  while (q.length) { const x = q.shift(); for (const y of adj[x] || []) if (!(y in prev)) { prev[y] = x; if (y === to) { const path = [y]; let c = x; while (c != null) { path.unshift(c); c = prev[c]; } return path; } q.push(y); } }
+  return null;
+}
+
 /* ---------- consistency checks ---------- */
-export function checkEth(eth) {
+export function checkEth(eth, topo) {
   const f = [], E = (msg) => f.push({ sev: "error", msg }), W = (msg) => f.push({ sev: "warning", msg });
   const nodes = eth.nodes || [], pdus = eth.pdus || [], names = new Set(nodes.map((n) => n.name));
   const dup = (key, label) => { const by = {}; nodes.forEach((n) => { const v = str(n[key]).toLowerCase(); if (v) (by[v] = by[v] || []).push(n.name); }); Object.entries(by).forEach(([v, ns]) => { if (ns.length > 1) W(label + " " + (key === "mac" ? v.toUpperCase() : v) + " is used by " + ns.join(", ") + " — confirm this is the same device, or correct it."); }); };
@@ -158,6 +175,14 @@ export function checkEth(eth) {
     for (let i = 1; i < sorted.length; i++) if (sorted[i].startBit < sorted[i - 1].startBit + sorted[i - 1].length) E(tag + ": signals " + sorted[i - 1].name + " and " + sorted[i].name + " overlap.");
     (p.signals || []).forEach((s) => { const senders = Object.entries(s.roles || {}).filter(([, r]) => r === "S").map(([n]) => n); if (senders.length > 1) E(tag + " / " + s.name + ": sent (S) by " + senders.join(" and ") + "."); });
   });
+  if (topo) {
+    const onEth = new Set((topo.ethLinks || []).flatMap(([a, b]) => [a, b])), nm = (id) => (topo.names && topo.names[id]) || String(id).replace(/^ECU-/, "");
+    const ecuOf = {}; nodes.forEach((n) => { ecuOf[n.name] = n.ecu || null; });
+    nodes.forEach((n) => { if (!n.ecu) W("Node " + n.name + " is not mapped to a Topology ECU."); else if (!onEth.has(n.ecu)) E("Node " + n.name + " is mapped to " + nm(n.ecu) + ", which has no Ethernet link in the Topology."); });
+    pdus.forEach((p) => { const from = ecuOf[p.sender]; if (!from) return;
+      (p.receivers || []).forEach((r) => { const to = ecuOf[r]; if (!to || !onEth.has(from) || !onEth.has(to)) return;
+        if (!ethPath(topo, from, to)) E("PDU " + fmtId(p.id) + " " + p.name + ": no Ethernet path in the Topology from " + p.sender + " (" + nm(from) + ") to " + r + " (" + nm(to) + ")."); }); });
+  }
   return f;
 }
 

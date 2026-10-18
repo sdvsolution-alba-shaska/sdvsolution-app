@@ -1,6 +1,6 @@
 // Run: node tests/eth-kmatrix.test.mjs
 // Ethernet backbone K-Matrix: reading the released workbook layout, merging partial workbooks, checks, and round trip.
-import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats } from "../src/lib/ethKmatrix.js";
+import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath } from "../src/lib/ethKmatrix.js";
 
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
 
@@ -59,5 +59,19 @@ const back = parseWorkbook(wb).eth;
 ok(JSON.stringify(ethStats(back)) === JSON.stringify(ethStats(merged)), "export → import keeps every node, PDU and signal (" + JSON.stringify(ethStats(merged)) + ")");
 const sb = back.pdus.find((p) => p.id === 1).signals.find((s) => s.name === "mode");
 ok(sb && sb.startBit === 16 && sb.length === 8 && sb.roles.NodeA === "S", "signal layout and roles survive the round trip");
+
+// --- topology: nodes map to Topology ECUs; PDUs must have an Ethernet path
+const topo = { ethLinks: [["ECU-CCU", "ECU-CZM"], ["ECU-CZM", "ECU-FZM"], ["ECU-CCU", "ECU-ADAS"]], names: { "ECU-CCU": "CCU", "ECU-CZM": "CZM", "ECU-FZM": "FZM", "ECU-ADAS": "ADAS", "ECU-BEC": "BEC" } };
+ok(JSON.stringify(ethPath(topo, "ECU-ADAS", "ECU-FZM")) === JSON.stringify(["ECU-ADAS", "ECU-CCU", "ECU-CZM", "ECU-FZM"]), "an Ethernet path is found through the Topology (ADAS \u2192 CCU \u2192 CZM \u2192 FZM)");
+const t1 = JSON.parse(JSON.stringify(eth));
+const n = applyAliases(t1, [{ re: /^NodeA$/, ecu: "ECU-CZM", mcu: "A" }, { re: /^NodeB$/, ecu: "ECU-CCU" }, { re: /^NodeC$/, ecu: "ECU-BEC" }]);
+ok(n === 3 && t1.nodes[0].ecu === "ECU-CZM" && t1.nodes[0].mcu === "A" && t1.nodes[0].ecuSource === "alias", "name rules map nodes to Topology ECUs and chips");
+const ft = checkEth(t1, topo).map((x) => x.msg).join("\n");
+ok(/NodeC is mapped to BEC, which has no Ethernet link in the Topology/.test(ft), "a node on an ECU without an Ethernet link is an error");
+ok(!/no Ethernet path/.test(ft.split("\n").filter((l) => /Status_A/.test(l)).join()), "a PDU whose sender and receivers are connected passes");
+t1.nodes.push({ name: "NodeE", ecu: "ECU-DLC" }); t1.pdus[0].receivers.push("NodeE"); const topo2 = { ...topo, ethLinks: [...topo.ethLinks, ["ECU-X", "ECU-DLC"]] };
+ok(/no Ethernet path in the Topology from NodeA \(CZM\) to NodeE/.test(checkEth(t1, topo2).map((x) => x.msg).join("\n")), "a receiver the sender cannot reach over Topology Ethernet links is an error");
+ok(checkEth(eth, topo).some((x) => /is not mapped to a Topology ECU/.test(x.msg)), "unmapped nodes are flagged");
+applyAliases(t1, [{ re: /^NodeA$/, ecu: "ECU-CCU" }]); ok(t1.nodes[0].ecu === "ECU-CZM", "rules never overwrite a mapping that is already set");
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
