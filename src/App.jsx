@@ -400,18 +400,18 @@ const NETWORK = {
       can: ["Wheel-speed sensors", "Damper actuators", "Steering-angle sensor", "Brake actuators"] },
   ],
 };
-/* KESSY / RSAD UWB(+BLE) antennas — 6 Secondary ECUs on the CZM Center Vehicle-Access CAN
+/* Vehicle Access System (VAS) — 6 KESSY/RSAD UWB(+BLE) antenna Secondary ECUs (supplier Flextronics) on the CZM Center Vehicle-Access CAN
    (85H.962.133; anti-theft "Einbruchschutz" + Mobile Device Key). RSAD_IN1/IN2/VR/VL/HL/HR.
    ⚠ J1192.4 & J1193.5 both read "vorne rechts"; one is almost certainly front-left (VL) — flagged. */
 [
-  ["ECU-RSAD-FRF", "RSAD_IN1 — front roof", "J1191.2"],
-  ["ECU-RSAD-RRF", "RSAD_IN2 — rear roof", "J1309.2"],
-  ["ECU-RSAD-FR",  "RSAD_VR — front right", "J1192.4"],
-  ["ECU-RSAD-FL",  "RSAD_VL — front left ⚠", "J1193.5"],
-  ["ECU-RSAD-RL",  "RSAD_HL — rear left", "J1194.5"],
-  ["ECU-RSAD-RR",  "RSAD_HR — rear right", "J1196.4"],
-].forEach(([id, loc, conn]) => {
-  NETWORK.ecus.push({ id, name: `KESSY UWB+BLE antenna ${loc}`, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass: "KESSY ADVANCED / MDK UWB(+BLE) antenna control unit (RSAD, anti-theft)", scope: "Keyless access & anti-theft UWB/BLE localisation on the CZM Center Vehicle-Access CAN", codes: [id.replace("ECU-", "")], kind: "peripheral", subtype: "KESSY UWB antenna", rsadConn: conn });
+  ["ECU-VAS-INF", "VAS_INF", "interior, front roof (RSAD_IN1)", "J1191.2"],
+  ["ECU-VAS-INL", "VAS_INL", "interior, rear roof (RSAD_IN2)", "J1309.2"],
+  ["ECU-VAS-FR",  "VAS_FR",  "front right (RSAD_VR)", "J1192.4"],
+  ["ECU-VAS-FL",  "VAS_FL",  "front left (RSAD_VL) ⚠", "J1193.5"],
+  ["ECU-VAS-RL",  "VAS_RL",  "rear left (RSAD_HL)", "J1194.5"],
+  ["ECU-VAS-RR",  "VAS_RR",  "rear right (RSAD_HR)", "J1196.4"],
+].forEach(([id, vas, loc, conn]) => {
+  NETWORK.ecus.push({ id, name: `${vas} — Vehicle Access System antenna, ${loc}`, vendor: "—", processor: "—", supplier: "Flextronics", asil: "QM", deviceClass: "KESSY ADVANCED / MDK UWB(+BLE) antenna control unit (RSAD, anti-theft)", scope: "Keyless access & anti-theft UWB/BLE localisation on the CZM Center Vehicle-Access CAN", codes: [vas], kind: "peripheral", subtype: "KESSY UWB antenna", rsadConn: conn });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-VACAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "Center Vehicle-Access CAN", rate: "1 Mbps", basis: `KESSY/RSAD UWB antenna (${conn}) on CZM Center Vehicle-Access CAN01`, dir: "Bidirectional" });
 });
 /* Door Control Modules (DCM, supplier Kostal) — front-left/right + rear-left door ECUs on the CZM
@@ -1400,7 +1400,7 @@ const ecuOf = (n) => { if (!n) return "";
   if (n.type === "Requirement" && /L1/.test(n.subtype || "")) { const e = ecuFor(n); return e ? e.replace("ECU-", "") : ""; }
   return ""; };
 /* Design Responsible Engineer (DRE) — placeholder per-ECU assignment, proposed pending real allocation. */
-const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CID: "D. Koch", FID: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "RSAD-FRF": "N. Vogel", "RSAD-RRF": "N. Vogel", "RSAD-FR": "N. Vogel", "RSAD-FL": "N. Vogel", "RSAD-RL": "N. Vogel", "RSAD-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
+const DRE_BY_ECU = { CCU: "A. Becker", CCM: "M. Klein", CZM: "S. Wagner", FZM: "T. Fischer", ADAS: "L. Hoffmann", BEC: "J. Schulz", RTM: "R. Braun", BST: "P. Weber", CID: "D. Koch", FID: "D. Koch", RRDCU: "N. Vogel", SRCU: "N. Vogel", PSCU: "N. Vogel", "VAS-INF": "N. Vogel", "VAS-INL": "N. Vogel", "VAS-FR": "N. Vogel", "VAS-FL": "N. Vogel", "VAS-RL": "N. Vogel", "VAS-RR": "N. Vogel", PDUF: "K. Schmitt", PDUR: "K. Schmitt", OUTA: "K. Schmitt", OUTB: "K. Schmitt", OUTC: "K. Schmitt", OUTD: "K. Schmitt", APHB: "K. Schmitt" };
 const dreFor = (n) => (n && n.props && n.props.dre) || DRE_BY_ECU[ecuOf(n)] || "";
 
 /* The full V for ONE L1, generated on demand the first time it's opened. */
@@ -2032,12 +2032,12 @@ const resolveEcuId = (t) => {
   if (/\brrdcu\b|rear.?door control|tailgate control|heckklappe/.test(t)) return "ECU-RRDCU";
   if (/\bsrcu\b|ausstelldach|tilt.?roof control|sliding.?roof control|cabana roof/.test(t)) return "ECU-SRCU";
   if (/\bpscu\b|powered.?sunshade|sunshade control/.test(t)) return "ECU-PSCU";
-  if (/rsad_in1/.test(t)) return "ECU-RSAD-FRF";
-  if (/rsad_in2/.test(t)) return "ECU-RSAD-RRF";
-  if (/rsad_vr/.test(t)) return "ECU-RSAD-FR";
-  if (/rsad_vl/.test(t)) return "ECU-RSAD-FL";
-  if (/rsad_hl/.test(t)) return "ECU-RSAD-RL";
-  if (/rsad_hr/.test(t)) return "ECU-RSAD-RR";
+  if (/rsad_in1|vas_inf/.test(t)) return "ECU-VAS-INF";
+  if (/rsad_in2|vas_inl/.test(t)) return "ECU-VAS-INL";
+  if (/rsad_vr|vas_fr/.test(t)) return "ECU-VAS-FR";
+  if (/rsad_vl|vas_fl/.test(t)) return "ECU-VAS-FL";
+  if (/rsad_hl|vas_rl/.test(t)) return "ECU-VAS-RL";
+  if (/rsad_hr|vas_rr/.test(t)) return "ECU-VAS-RR";
   if (/fuse box a\b|pdu_30_s1|pdu.*front|front \(fuse box a\)/.test(t)) return "ECU-PDUF";
   if (/fuse box b\b|pdu_30_s2|pdu.*rear|rear \(fuse box b\)/.test(t)) return "ECU-PDUR";
   if (/aux power outlet a\b|outlet a\b/.test(t)) return "ECU-OUTA";
@@ -13126,7 +13126,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
           {/* ---- TOPOLOGY VIEW: governed physical E/E network — ECUs + approved bus links (CAN/Ethernet/GMSL), ASIL badges and mismatch flags ---- */}
           {view === "deploy" && (() => {
             const total = Object.values(deployment).reduce((s, a) => s + a.length, 0) || 1;
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-RSAD-FRF": "#7A5AF8", "ECU-RSAD-RRF": "#7A5AF8", "ECU-RSAD-FR": "#7A5AF8", "ECU-RSAD-FL": "#7A5AF8", "ECU-RSAD-RL": "#7A5AF8", "ECU-RSAD-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INL": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const sel2 = ECU_BY_ID[deployEcu];
             const fns = deployment[deployEcu] || [];
             /* scene layout — CCM sits on top of CCU; DLC left of CCU; cloud outside the vehicle */
@@ -13496,7 +13496,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
               const protos = [...new Set(items.map((i) => i.props?.protocol).filter(Boolean))];
               return protos.slice(0, 3).join(" · ");
             };
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-RSAD-FRF": "#7A5AF8", "ECU-RSAD-RRF": "#7A5AF8", "ECU-RSAD-FR": "#7A5AF8", "ECU-RSAD-FL": "#7A5AF8", "ECU-RSAD-RL": "#7A5AF8", "ECU-RSAD-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INL": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             return (
               <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
                 <div className="px-6 pt-5 pb-2">
@@ -13801,7 +13801,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             /* ===== SECTION: Schematics view - connector pin-out diagrams ===== */
             const ECUS = NETWORK.ecus;
             const ioNodes = Object.values(nodes).filter((n) => n.type === "ECUSmartNode" && /I\/O list$/.test(n.props?.source || ""));
-            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-RSAD-FRF": "#7A5AF8", "ECU-RSAD-RRF": "#7A5AF8", "ECU-RSAD-FR": "#7A5AF8", "ECU-RSAD-FL": "#7A5AF8", "ECU-RSAD-RL": "#7A5AF8", "ECU-RSAD-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
+            const ecuColor = { "ECU-CCU": "#175CD3", "ECU-ADAS": "#7F56D9", "ECU-CZM": "#0E7090", "ECU-CCM": "#B54708", "ECU-FZM": "#C4320A", "ECU-BEC": "#4E8A00", "ECU-RTM": "#9E77ED", "ECU-CID": "#0BA5EC", "ECU-FID": "#12B76A", "ECU-BST": "#DD2590", "ECU-RRDCU": "#3E4784", "ECU-SRCU": "#5925DC", "ECU-PSCU": "#155EEF", "ECU-VAS-INF": "#7A5AF8", "ECU-VAS-INL": "#7A5AF8", "ECU-VAS-FR": "#7A5AF8", "ECU-VAS-FL": "#7A5AF8", "ECU-VAS-RL": "#7A5AF8", "ECU-VAS-RR": "#7A5AF8", "ECU-PDUF": "#DC6803", "ECU-PDUR": "#DC6803", "ECU-OUTA": "#DD2590", "ECU-OUTB": "#DD2590", "ECU-OUTC": "#DD2590", "ECU-OUTD": "#DD2590", "ECU-APHB": "#B54708" };
             const wc = (cls) => { const c = (cls || "").toUpperCase();
               if (c.indexOf("ETH") >= 0 || c.indexOf("NET") === 0) return "#175CD3";
               if (c.indexOf("CAN") >= 0 || c.indexOf("LIN") >= 0 || c.indexOf("BUS") === 0) return "#C4320A";
