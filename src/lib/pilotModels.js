@@ -6,6 +6,7 @@ const sig = (name, dir, baseType, min, max, unit, init, extra = {}) => ({ name, 
 const cal = (name, baseType, value, unit, source) => ({ name, baseType, value, unit, source });
 const SRC = "Proposed starting value — confirm with heater/mirror supplier datasheet";
 const SRC2 = "Proposed starting value — confirm with mirror fold-motor supplier datasheet";
+const SRC3 = "Proposed starting value — confirm with mirror-glass adjust-motor supplier datasheet";
 
 export const PILOT_MODELS = {
   "L2-BODY-00194-MODE": {
@@ -104,5 +105,63 @@ export const PILOT_MODELS = {
       ],
     },
     status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00193-MODE", template: true,
+  },
+  "L2-BODY-00187-MODE": {
+    id: "BM-L2-BODY-00187", function: "L2-BODY-00187-FUN", title: "ADJUSTING EXTERIOR MIRRORS",
+    implements: ["L2-BODY-00187-FUN", "L2-BODY-00187-IF", "L2-BODY-00187-PERF", "L2-BODY-00187-MODE", "L2-BODY-00187-DIAG", "L2-BODY-00187-SEC"],
+    target: { ecu: "ECU-CZM", swc: "MirrorAdjust" },
+    notes: "Same hosting as Fold Down (CZM chip B): the CZM decides and commands; the addressed door module (DCM) drives the mirror-glass motor and reports position, current and status on Center_DOOR_CAN01. Hold-to-run: the motor moves only while the switch is held (OV-MIR-01); a stall or over-current stops it and requests a DTC (OV-MIR-02).",
+    signals: [
+      sig("power_mode", "in", "uint8", 0, 3, "enum", 0, { invalid: 0, note: "0 Sleep · 1 Standby · 2 Active · 3 Retained accessory (post-run). A failed read counts as Sleep (adjustment rejected)." }),
+      sig("adjust_axis_req", "in", "uint8", 0, 4, "enum", 0, { invalid: 0, note: "Mirror-adjust switch, held: 0 none · 1 up · 2 down · 3 left · 4 right" }),
+      sig("mirror_select", "in", "uint8", 0, 2, "enum", 0, { invalid: 0, note: "L/R selector: 0 none · 1 driver (left) · 2 passenger (right)" }),
+      sig("request_authentic", "in", "boolean", 0, 1, "", 0, { invalid: 0, note: "Request passed authentication / freshness (SecOC on Center_DOOR_CAN01). A failed read counts as NOT authentic." }),
+      sig("mirror_fitted", "in", "boolean", 0, 1, "", 0, { invalid: 0, note: "The selected mirror has an adjust motor (variant coding); otherwise 'no mirror to adjust'" }),
+      sig("position_valid", "in", "boolean", 0, 1, "", 1, { invalid: 0, note: "Mirror-glass position feedback is plausible. A failed read counts as INVALID (safe)." }),
+      sig("axis_at_limit", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "The selected axis reached its travel end in the requested direction. A failed read counts as AT LIMIT (motor stops)." }),
+      sig("motor_current_mA", "in", "uint16", 0, 20000, "mA", 0, { invalid: 0 }),
+      sig("motor_overtemp", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Motor / driver thermal protection active (reported by the DCM). A failed read counts as OVER-TEMP (safe)." }),
+      sig("door_can_timeout", "in", "boolean", 0, 1, "", 0, { invalid: 1, note: "Center_DOOR_CAN01 feedback from the DCM missing beyond its timeout (E2E / alive supervision). A failed read counts as TIMED OUT (safe)." }),
+      sig("motor_cmd", "out", "uint8", 0, 4, "enum", 0, { note: "0 stop · 1 up · 2 down · 3 left · 4 right (to the addressed DCM)" }),
+      sig("mirror_target", "out", "uint8", 0, 2, "enum", 0, { note: "0 none · 1 driver (left) · 2 passenger (right)" }),
+      sig("adjust_status", "out", "uint8", 0, 4, "enum", 0, { note: "0 idle · 1 checking · 2 adjusting · 3 blocked · 4 fault" }),
+      sig("adjust_fault", "out", "boolean", 0, 1, "", 0, { note: "Request to log a DTC (stall / over-current / over-temp / feedback loss / bus timeout)" }),
+    ],
+    calibrations: [
+      cal("CAL_MIN_POWER_MODE", "uint8", 2, "enum", "Configuration — adjustment allowed in Active (2) and Retained accessory (3) (L2-BODY-00187-MODE)"),
+      cal("CAL_AUTH_TIMEOUT_MS", "uint32", 200, "ms", "Proposed — time allowed for the request to authenticate before it is denied"),
+      cal("CAL_STALL_CURRENT_MA", "uint16", 1500, "mA", SRC3),
+      cal("CAL_STALL_DEBOUNCE_MS", "uint32", 150, "ms", SRC3 + " (debounce before a stall is confirmed)"),
+      cal("CAL_MAX_ADJUST_MS", "uint32", 10000, "ms", SRC3 + " (longest continuous drive before the motor is protected)"),
+      cal("CAL_RECOVER_MS", "uint32", 2000, "ms", SRC3 + " (cool-down after a block)"),
+      cal("CAL_FAULT_RETRY_MS", "uint32", 3000, "ms", SRC3),
+    ],
+    runnable: { name: "Run", periodMs: 10 },
+    stateMachine: {
+      init: "IDLE",
+      states: [
+        { id: "IDLE", label: "Idle", outputs: { motor_cmd: "0", mirror_target: "0", adjust_status: "0", adjust_fault: "false" } },
+        { id: "AUTH", label: "Authenticating", outputs: { motor_cmd: "0", mirror_target: "0", adjust_status: "1", adjust_fault: "false" } },
+        { id: "VALID", label: "Validating", outputs: { motor_cmd: "0", mirror_target: "0", adjust_status: "1", adjust_fault: "false" } },
+        { id: "ADJ", label: "Adjusting", outputs: { motor_cmd: "adjust_axis_req", mirror_target: "mirror_select", adjust_status: "2", adjust_fault: "false" } },
+        { id: "DEGR", label: "Degraded / Blocked", outputs: { motor_cmd: "0", mirror_target: "0", adjust_status: "3", adjust_fault: "true" } },
+        { id: "FAULT", label: "Fault → Safe", outputs: { motor_cmd: "0", mirror_target: "0", adjust_status: "4", adjust_fault: "true" } },
+      ],
+      // Order = priority within a state. In ADJ: feedback loss / timeout first, then a normal stop (release or travel end — the
+      // current rises AT the end stop, so reaching the limit must beat the stall check), then stall / over-current / over-temp.
+      transitions: [
+        { from: "IDLE", to: "AUTH", label: "adjust request", guard: "adjust_axis_req != 0 && mirror_select != 0 && power_mode >= CAL_MIN_POWER_MODE" },
+        { from: "AUTH", to: "VALID", label: "granted", guard: "request_authentic && adjust_axis_req != 0" },
+        { from: "AUTH", to: "IDLE", label: "denied", guard: "(!request_authentic && state_time_ms >= CAL_AUTH_TIMEOUT_MS) || adjust_axis_req == 0 || power_mode < CAL_MIN_POWER_MODE" },
+        { from: "VALID", to: "ADJ", label: "valid", guard: "mirror_fitted && position_valid && !door_can_timeout && !axis_at_limit && adjust_axis_req != 0 && power_mode >= CAL_MIN_POWER_MODE" },
+        { from: "VALID", to: "IDLE", label: "invalid / no mirror", guard: "!mirror_fitted || !position_valid || door_can_timeout || axis_at_limit || adjust_axis_req == 0 || power_mode < CAL_MIN_POWER_MODE" },
+        { from: "ADJ", to: "FAULT", label: "feedback loss / timeout", guard: "door_can_timeout || !position_valid" },
+        { from: "ADJ", to: "IDLE", label: "complete / release", guard: "adjust_axis_req == 0 || axis_at_limit || power_mode < CAL_MIN_POWER_MODE" },
+        { from: "ADJ", to: "DEGR", label: "stall / over-current", guard: "(motor_current_mA > CAL_STALL_CURRENT_MA && state_time_ms >= CAL_STALL_DEBOUNCE_MS) || motor_overtemp || state_time_ms >= CAL_MAX_ADJUST_MS" },
+        { from: "DEGR", to: "IDLE", label: "recovered", guard: "adjust_axis_req == 0 && !motor_overtemp && state_time_ms >= CAL_RECOVER_MS" },
+        { from: "FAULT", to: "IDLE", label: "cleared", guard: "!door_can_timeout && position_valid && state_time_ms >= CAL_FAULT_RETRY_MS" },
+      ],
+    },
+    status: "proposed", rev: 1, testIds: {}, seededFrom: "L2-BODY-00187-MODE", template: true,
   }
 };

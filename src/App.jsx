@@ -5277,6 +5277,7 @@ const STATE_MACHINES = {
     { from: "IDLE", to: "AUTH", label: "adjust request" },
     { from: "AUTH", to: "VALID", label: "granted" },
     { from: "VALID", to: "ADJ", label: "valid" },
+    { from: "VALID", to: "IDLE", label: "invalid / no mirror", bend: 80 },
     { from: "ADJ", to: "IDLE", label: "complete / release", bend: -60 },
     { from: "AUTH", to: "IDLE", label: "denied", bend: 40 },
     { from: "ADJ", to: "DEGR", label: "stall / over-current" },
@@ -7395,6 +7396,14 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
     } catch (e) { notify("Generation failed: " + (e && e.message ? e.message : e)); } finally { setBusy(""); }
   };
   const download = () => { try { const bytes = CG.zipStore(gen.files); const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" })); const a = document.createElement("a"); a.href = url; a.download = CG.swcName(draft) + "_rev" + (draft.rev || 1) + "_" + gen.manifest.model.hash + ".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500); } catch (e) { notify("Download failed."); } };
+  /* Load the curated pilot template into an existing model (kept: id, rev history, QM confirmation). Marks it proposed; a person reviews, saves and approves. */
+  const tplKey = draft ? (draft.seededFrom || sel) : null; const tplFor = tplKey && CG && CG.pilots ? CG.pilots[tplKey] : null;
+  const applyTemplate = () => {
+    if (!tplFor || !window.confirm("Load the pilot template into this model? It replaces signals, calibrations, guards and outputs with the template's PROPOSED values. Review them, then Save.")) return;
+    edit((m) => { const t = cl(tplFor); ["function", "title", "implements", "target", "notes", "signals", "calibrations", "runnable", "stateMachine"].forEach((k) => { if (t[k] !== undefined) m[k] = t[k]; }); m.status = "proposed"; m.seededFrom = tplKey; });
+    audit("Loaded pilot template", draft.id, "proposed values from the curated template (unreviewed)", false);
+    notify("Pilot template loaded into the editor (proposed values). Review it, then Save.");
+  };
   const propose = async () => {
     if (!window.confirm("Ask the Assistant to PROPOSE signals, thresholds, guards and outputs for this function? It overwrites the items it returns; the model is marked 'proposed' and must still be reviewed and approved by a person.")) return;
     setBusy("ai");
@@ -7488,6 +7497,7 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
           <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 10 }}>
             {canWrite && <button disabled={!dirty} onClick={save} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: dirty ? "#175CD3" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>Save</button>}
             {canWrite && dirty && <button onClick={() => { setDraft(cl(models[draft.id])); setDirty(false); }} style={{ fontSize: 12, color: "#475467", border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 12px" }}>Discard</button>}
+            {canWrite && tplFor && <button onClick={applyTemplate} disabled={!!busy} title="Curated proposal for this function: signals, calibrations, guards and outputs" style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", borderRadius: 7, padding: "5px 12px" }}>Load pilot proposal</button>}
             {canWrite && <button onClick={propose} disabled={!!busy} style={{ fontSize: 12, fontWeight: 600, color: "#7A5AF8", border: "1px solid #D9D6FE", borderRadius: 7, padding: "5px 12px" }}>{busy === "ai" ? "Asking…" : "✨ Propose with Assistant"}</button>}
             <button onClick={generate} disabled={!!busy || !(val && val.ready)} title={val && !val.ready ? "Fix the blocking issues first" : "Generate C code and unit tests"} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: val && val.ready ? "#12B76A" : "#98A2B3", borderRadius: 7, padding: "5px 12px" }}>{busy === "gen" ? "Generating…" : "Generate code + tests"}</button>
             {canWrite && draft.status !== "approved" && <button onClick={() => setStatus("approved")} style={{ fontSize: 12, fontWeight: 600, color: "#067647", border: "1px solid #ABEFC6", borderRadius: 7, padding: "5px 12px" }}>Approve…</button>}
