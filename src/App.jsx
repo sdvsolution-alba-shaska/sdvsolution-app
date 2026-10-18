@@ -4058,6 +4058,7 @@ const ETH_NODE_ALIASES = [
   { re: /^FZC$/i, ecu: "ECU-FZM" }, { re: /^ADAS(_|$)/i, ecu: "ECU-ADAS" }, { re: /^TestTool$/i, ecu: "DLC" },
   { re: /^RFM$/i, ecu: "ECU-CCM" },                       // RFM is the CCM (Connectivity Control Module)
   { re: /^BZC$/i, ecu: "ECU-CZM" },                       // Back Zonal Controls are integrated into the CZM (chip to be set)
+  { re: /^(TVM|PVM_PLX|XMM3_SAIL|XMMDROID|zDML)$/i, ecu: "ECU-CCU" }, // CCU-hosted endpoints (confirmed by George)
 ];
 function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
