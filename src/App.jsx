@@ -13132,7 +13132,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             const NW = 150, NH = 52;
             const pos = { "ECU-CCM": [372, 168], "ECU-ADAS": [120, 268], "ECU-CCU": [372, 268],
               "ECU-CZM": [372, 396], "ECU-FZM": [630, 396], "ECU-BEC": [120, 396],
-              "ECU-CDM": [120, 168], "ECU-DDM": [630, 168] }; /* Secondary display ECUs (switch map) */
+              "ECU-DDM": [120, 168], "ECU-CDM": [630, 168] }; /* Secondary display ECUs (switch map); DDM on the driver side (front left) */
             const DLC = [630, 268];
             const cx = (id) => pos[id][0] + NW / 2, cy = (id) => pos[id][1] + NH / 2;
             const dcx = DLC[0] + NW / 2, dcy = DLC[1] + NH / 2;
@@ -13254,14 +13254,16 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
 
                       {/* Display ECUs (Switchmap Arch Mapping): video over LVDS from the CCU; control over CAN.
                           CDM: CCU_LVDS_Display_Out_LVDS01 + CCU_IVI_CAN01 (CCU). DDM (Kombi): CCU_LVDS_Display_Out_LVDS04 (CCU) + Center_Dashboard_CAN01 (CZM). */}
+                      {/* DDM (left, driver side): LVDS04 to the CCU; Center_Dashboard_CAN01 down the left side to the CZM */}
                       <path d="M 230 220 L 230 232 L 412 232 L 412 268" fill="none" stroke={CLVDS} strokeWidth={2.4} strokeLinejoin="round" />
-                      <path d="M 160 220 L 160 244 L 392 244 L 392 268" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
-                      <text x={236} y={228} fontSize={8} fill={CLVDS} fontWeight={700}>LVDS01</text>
-                      <text x={166} y={240} fontSize={8} fill={CCAN} fontWeight={700}>CCU_IVI_CAN01</text>
+                      <path d="M 160 220 L 160 244 L 280 244 L 280 380 L 392 380 L 392 396" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
+                      <text x={236} y={228} fontSize={8} fill={CLVDS} fontWeight={700}>LVDS04</text>
+                      <text x={166} y={240} fontSize={8} fill={CCAN} fontWeight={700}>Dashboard CAN01</text>
+                      {/* CDM (right, center stack): LVDS01 and CCU_IVI_CAN01, both to the CCU */}
                       <path d="M 630 186 L 592 186 L 592 236 L 518 236 L 518 268" fill="none" stroke={CLVDS} strokeWidth={2.4} strokeLinejoin="round" />
-                      <path d="M 646 220 L 646 250 L 578 250 L 578 380 L 506 380 L 506 396" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
-                      <text x={596} y={182} fontSize={8} fill={CLVDS} fontWeight={700} textAnchor="end">LVDS04</text>
-                      <text x={582} y={262} fontSize={8} fill={CCAN} fontWeight={700}>Dashboard CAN01</text>
+                      <path d="M 646 220 L 646 252 L 560 252 L 560 280 L 522 280" fill="none" stroke={CCAN} strokeWidth={2} strokeLinejoin="round" />
+                      <text x={596} y={182} fontSize={8} fill={CLVDS} fontWeight={700} textAnchor="end">LVDS01</text>
+                      <text x={566} y={264} fontSize={8} fill={CCAN} fontWeight={700}>CCU_IVI_CAN01</text>
 
                       {/* ECU modules — one node each; ASIL badge */}
                       {NETWORK.ecus.filter((e) => pos[e.id]).map((e) => {
