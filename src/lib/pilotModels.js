@@ -154,7 +154,7 @@ export const PILOT_MODELS = {
         { from: "AUTH", to: "VALID", label: "granted", guard: "request_authentic && adjust_axis_req != 0" },
         { from: "AUTH", to: "IDLE", label: "denied", guard: "(!request_authentic && state_time_ms >= CAL_AUTH_TIMEOUT_MS) || adjust_axis_req == 0 || power_mode < CAL_MIN_POWER_MODE" },
         { from: "VALID", to: "ADJ", label: "valid", guard: "mirror_fitted && position_valid && !door_can_timeout && !axis_at_limit && adjust_axis_req != 0 && power_mode >= CAL_MIN_POWER_MODE" },
-        { from: "VALID", to: "IDLE", label: "invalid / no mirror", guard: "!mirror_fitted || !position_valid || door_can_timeout || axis_at_limit || adjust_axis_req == 0 || power_mode < CAL_MIN_POWER_MODE" },
+        { from: "VALID", to: "IDLE", label: "invalid / no mirror", guard: "true" }, // otherwise: exactly the negation of "valid", so Validating always exits in one cycle (no unreachable branch)
         { from: "ADJ", to: "FAULT", label: "feedback loss / timeout", guard: "door_can_timeout || !position_valid" },
         { from: "ADJ", to: "IDLE", label: "complete / release", guard: "adjust_axis_req == 0 || axis_at_limit || power_mode < CAL_MIN_POWER_MODE" },
         { from: "ADJ", to: "DEGR", label: "stall / over-current", guard: "(motor_current_mA > CAL_STALL_CURRENT_MA && state_time_ms >= CAL_STALL_DEBOUNCE_MS) || motor_overtemp || state_time_ms >= CAL_MAX_ADJUST_MS" },
