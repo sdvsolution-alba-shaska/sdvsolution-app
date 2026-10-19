@@ -179,6 +179,28 @@ export default function AuthGate({ children }) {
           setRole: async (userId, newRole) => { const { error } = await supabase.from("memberships").update({ role: newRole }).eq("user_id", userId); if (error) throw error; return true; },
           removeMember: async (userId) => { const { error } = await supabase.from("memberships").delete().eq("user_id", userId); if (error) throw error; return true; },
         },
+        // Shared files (e.g. ARXML .zip packages) — private bucket "shared-files", one folder per company.
+        // Everyone in the company can list/download; only owner/admin or granted emails can upload (RLS, phase6_shared_files.sql).
+        files: {
+          canUpload: async () => { const { data, error } = await supabase.rpc("can_upload_files"); if (error) throw error; return !!data; },
+          list: async () => { const { data, error } = await supabase.from("shared_files").select("*").order("created_at", { ascending: false }); if (error) throw error; return data || []; },
+          upload: async (file, note) => {
+            if (!orgId) throw new Error("Your company workspace isn't ready yet — try again in a moment.");
+            const safe = String(file.name || "file").replace(/[^A-Za-z0-9._-]+/g, "_");
+            const path = orgId + "/" + (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)) + "/" + safe;
+            let sha = null; try { const buf = await file.arrayBuffer(); const h = await crypto.subtle.digest("SHA-256", buf); sha = Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join(""); } catch (e) { /* hash is informational */ }
+            const up = await supabase.storage.from("shared-files").upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+            if (up.error) throw up.error;
+            const { error } = await supabase.from("shared_files").insert({ org_id: orgId, path, name: file.name, bytes: file.size, sha256: sha, note: note || null, uploaded_by: myId, uploader_email: session.user?.email || null });
+            if (error) { await supabase.storage.from("shared-files").remove([path]); throw error; }
+            return path;
+          },
+          download: async (row) => { const { data, error } = await supabase.storage.from("shared-files").download(row.path); if (error) throw error; return data; },
+          remove: async (row) => { const s = await supabase.storage.from("shared-files").remove([row.path]); if (s.error) throw s.error; const { error } = await supabase.from("shared_files").delete().eq("id", row.id); if (error) throw error; return true; },
+          listGrants: async () => { const { data, error } = await supabase.from("upload_grants").select("id, email, created_at").order("created_at", { ascending: true }); if (error) throw error; return data || []; },
+          grant: async (email) => { const clean = String(email || "").trim().toLowerCase(); if (!clean || clean.indexOf("@") < 1) throw new Error("Enter a valid email address."); const { error } = await supabase.from("upload_grants").upsert({ org_id: orgId, email: clean, granted_by: myId }, { onConflict: "org_id,email" }); if (error) throw error; return true; },
+          revokeGrant: async (id) => { const { error } = await supabase.from("upload_grants").delete().eq("id", id); if (error) throw error; return true; },
+        },
       };
     }
     return <>{children}</>;

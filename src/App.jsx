@@ -4059,6 +4059,78 @@ const ETH_NODE_ALIASES = [
   { re: /^BZC$/i, ecu: "ECU-CZM" },                       // Back Zonal Controls are integrated into the CZM (chip to be set)
   { re: /^(TVM|PVM_PLX|XMM3_SAIL|XMMDROID|zDML)$/i, ecu: "ECU-CCU" }, // CCU-hosted endpoints (confirmed by George)
 ];
+/* Shared files — company-private file drop (e.g. ARXML .zip packages). Everyone in the company can download;
+   owners/admins and the emails on the upload list can upload. Enforced server-side by RLS (supabase/phase6_shared_files.sql). */
+function SharedFilesPanel({ notify = () => {} }) {
+  const auth = typeof window !== "undefined" ? window.__sdvAuth : null; const F = auth && auth.files; const isAdm = !!(auth && auth.team && auth.team.isAdmin);
+  const [rows, setRows] = useState([]); const [grants, setGrants] = useState([]); const [canUp, setCanUp] = useState(false);
+  const [busy, setBusy] = useState(""); const [msg, setMsg] = useState(""); const [note, setNote] = useState(""); const [gEmail, setGEmail] = useState(""); const fileRef = useRef(null);
+  const load = async () => {
+    if (!F) return; setMsg("");
+    try { const [r, c, g] = await Promise.all([F.list(), F.canUpload(), F.listGrants()]); setRows(r); setCanUp(c); setGrants(g); }
+    catch (e) { setMsg(/relation|does not exist|schema cache|function/i.test(e.message || "") ? "Shared files aren't set up yet — run supabase/phase6_shared_files.sql in the Supabase SQL Editor." : (e.message || String(e))); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!F) return <div className="flex-1 p-8" style={{ color: "#667085", fontSize: 13 }}>Sign in to use shared files.</div>;
+  const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const onPick = async (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+    if (f.size > 52428800) { setMsg("That file is larger than the 50 MB limit."); return; }
+    setBusy("up"); setMsg("");
+    try { await F.upload(f, note.trim()); setNote(""); notify("Uploaded " + f.name); await load(); } catch (er) { setMsg("Upload failed: " + (er.message || er)); } finally { setBusy(""); }
+  };
+  const dl = async (r) => { try { const blob = await F.download(r); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = r.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 4000); } catch (er) { setMsg("Download failed: " + (er.message || er)); } };
+  const del = async (r) => { if (!window.confirm("Delete " + r.name + " for everyone in the company?")) return; try { await F.remove(r); await load(); } catch (er) { setMsg("Delete failed: " + (er.message || er)); } };
+  const addGrant = async () => { try { await F.grant(gEmail); setGEmail(""); await load(); } catch (er) { setMsg(er.message || String(er)); } };
+  const rmGrant = async (g) => { if (!window.confirm("Stop " + g.email + " from uploading?")) return; try { await F.revokeGrant(g.id); await load(); } catch (er) { setMsg(er.message || String(er)); } };
+  const box = { background: "#fff", border: "1px solid #E4E7EC", borderRadius: 12, padding: 16, marginTop: 14 };
+  return (
+    <div className="flex-1 overflow-auto" style={{ background: "#F9FAFB" }}>
+      <div className="px-6 py-5" style={{ maxWidth: 980 }}>
+        <h2 style={{ fontSize: 17, fontWeight: 700, color: "#101828" }}>Shared files</h2>
+        <p style={{ fontSize: 12.5, color: "#667085", marginTop: 2 }}>Company-private files such as ARXML <b>.zip</b> packages. Everyone in your company can download; only owners, admins and the people on the upload list can upload. Max 50 MB per file.</p>
+        {msg && <div style={{ marginTop: 10, fontSize: 12, color: "#B42318", background: "#FEF3F2", border: "1px solid #FECDCA", borderRadius: 8, padding: "6px 10px" }}>{msg}</div>}
+        <div style={box}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#101828", flex: 1 }}>Files ({rows.length})</span>
+            {canUp ? (<>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional, e.g. CZM ARXML v0.3)" style={{ fontSize: 12, border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 9px", width: 260 }} />
+              <input ref={fileRef} type="file" accept=".zip,.arxml,.xml" style={{ display: "none" }} onChange={onPick} />
+              <button onClick={() => fileRef.current && fileRef.current.click()} disabled={!!busy} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#175CD3", borderRadius: 7, padding: "6px 14px" }}>{busy === "up" ? "Uploading…" : "Upload file"}</button>
+            </>) : <span style={{ fontSize: 11.5, color: "#98A2B3" }}>You can download. Ask an owner or admin to add you to the upload list.</span>}
+          </div>
+          <table className="w-full" style={{ marginTop: 10, fontSize: 12, borderCollapse: "collapse" }}>
+            <thead><tr style={{ color: "#667085", textAlign: "left", borderBottom: "1px solid #EAECF0" }}><th style={{ padding: "6px 4px" }}>File</th><th>Size</th><th>Uploaded by</th><th>When</th><th></th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} style={{ borderBottom: "1px solid #F2F4F7" }}>
+                  <td style={{ padding: "7px 4px" }}><div style={{ fontWeight: 600, color: "#101828" }}>{r.name}</div>{r.note && <div style={{ fontSize: 11, color: "#667085" }}>{r.note}</div>}{r.sha256 && <div style={{ fontSize: 10, color: "#98A2B3", fontFamily: "monospace" }}>sha256 {r.sha256.slice(0, 16)}…</div>}</td>
+                  <td>{kb(Number(r.bytes) || 0)}</td><td>{r.uploader_email || "—"}</td><td>{new Date(r.created_at).toLocaleString()}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button onClick={() => dl(r)} style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", borderRadius: 7, padding: "3px 10px" }}>Download</button>
+                    {(isAdm || (auth.email && r.uploader_email === auth.email)) && <button onClick={() => del(r)} style={{ fontSize: 12, color: "#B42318", marginLeft: 8 }}>Delete</button>}
+                  </td>
+                </tr>))}
+              {!rows.length && <tr><td colSpan={5} style={{ padding: 14, color: "#98A2B3" }}>No files yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div style={box}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#101828" }}>Upload list</div>
+          <div style={{ fontSize: 11.5, color: "#667085", marginTop: 2 }}>Owners and admins can always upload. These people can upload too. A person outside your company must also be invited from the <b>Team</b> tab (Viewer is enough — read-only and not billed as an editor).</div>
+          <div className="flex flex-col gap-1" style={{ marginTop: 8 }}>
+            {grants.map((g) => <div key={g.id} className="flex items-center gap-2" style={{ fontSize: 12.5 }}><span style={{ flex: 1 }}>{g.email}</span>{isAdm && <button onClick={() => rmGrant(g)} style={{ fontSize: 11.5, color: "#B42318" }}>Remove</button>}</div>)}
+            {!grants.length && <div style={{ fontSize: 12, color: "#98A2B3" }}>Nobody besides owners and admins.</div>}
+          </div>
+          {isAdm && <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
+            <input type="email" value={gEmail} onChange={(e) => setGEmail(e.target.value)} placeholder="name@company.com" style={{ fontSize: 12, border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 9px", width: 280 }} />
+            <button onClick={addGrant} style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", borderRadius: 7, padding: "5px 12px" }}>Allow upload</button>
+          </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
   const [, setV] = useState(0); const bump = () => setV((v) => v + 1);
@@ -9745,6 +9817,12 @@ export default function App() {
                         );
                       })()}
                     </div>
+                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #EAECF0" }}>
+                      SHARED FILES
+                    </div>
+                    <div className="p-3">
+                      <button onClick={() => { setIoMenu(false); setView("files"); }} className="w-full rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", background: "#fff", textAlign: "left" }}>ARXML packages &amp; other files →</button>
+                    </div>
                   </div>
                 </>
               )}
@@ -11445,6 +11523,7 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
 
           {view === "gaps" && <GapAnalysisPanel rep={gapRep} onOpen={openCuratedReq} />}
           {view === "ethkm" && <EthKMatrixPanel canWrite={canWrite} notify={notify} />}
+          {view === "files" && <SharedFilesPanel notify={notify} />}
           {view === "behavior" && <BehaviorPanel models={behaviorModels} setModels={setBehaviorModels} sms={STATE_MACHINES} canWrite={canWrite} periodMs={MIRROR_TIMING.runnablePeriodMs} build={tcBuild.trim()}
             implFor={(smId) => { const pre = smId.replace(/-MODE$/, "-"); return Object.keys(REQ_STATEMENTS).filter((k) => k.startsWith(pre)); }}
             reqText={(id) => REQ_STATEMENTS[id] || ((getN(id) && getN(id).props && getN(id).props.statement) || "")}
