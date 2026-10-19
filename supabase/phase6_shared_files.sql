@@ -4,7 +4,8 @@
 --
 -- Adds:
 --   * A PRIVATE storage bucket "shared-files". Each company's files live under a folder named
---     after its org id, so one company can never see another's files.
+--     after its org id, so one company can never see another's files. 200 MB per file — Supabase caps Free projects at 50 MB,
+--     so on Pro also raise Storage → Settings → Global file size limit to at least 200 MB.
 --   * public.upload_grants — the emails an owner/admin has allowed to UPLOAD. Owners and admins
 --     can always upload. Everyone in the company (owner/admin/editor/viewer) can DOWNLOAD.
 --   * public.shared_files — one row per uploaded file (name, size, SHA-256, who, when, note).
@@ -68,7 +69,7 @@ grant select, insert, delete on public.shared_files to authenticated;
 
 -- ---------- private bucket + storage policies --------------------------------
 insert into storage.buckets (id, name, public, file_size_limit)
-values ('shared-files', 'shared-files', false, 52428800)   -- 50 MB per file
+values ('shared-files', 'shared-files', false, 209715200)  -- 200 MB per file (needs a Pro project with the global limit >= 200 MB)
 on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit;
 
 drop policy if exists "shared files: company can read" on storage.objects;

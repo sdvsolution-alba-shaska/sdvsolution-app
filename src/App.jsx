@@ -4075,9 +4075,9 @@ function SharedFilesPanel({ notify = () => {} }) {
   const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
   const onPick = async (e) => {
     const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
-    if (f.size > 52428800) { setMsg("That file is larger than the 50 MB limit."); return; }
+    if (f.size > 209715200) { setMsg("That file is larger than the 200 MB limit."); return; }
     setBusy("up"); setMsg("");
-    try { await F.upload(f, note.trim()); setNote(""); notify("Uploaded " + f.name); await load(); } catch (er) { setMsg("Upload failed: " + (er.message || er)); } finally { setBusy(""); }
+    try { await F.upload(f, note.trim()); setNote(""); notify("Uploaded " + f.name); await load(); } catch (er) { const m = String(er.message || er); setMsg("Upload failed: " + m + (/exceeded|too large|maximum allowed size|413/i.test(m) ? " — the Supabase project's storage limit is lower than 200 MB (Free projects are capped at 50 MB; on Pro raise Storage → Settings → Global file size limit)." : "")); } finally { setBusy(""); }
   };
   const dl = async (r) => { try { const blob = await F.download(r); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = r.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 4000); } catch (er) { setMsg("Download failed: " + (er.message || er)); } };
   const del = async (r) => { if (!window.confirm("Delete " + r.name + " for everyone in the company?")) return; try { await F.remove(r); await load(); } catch (er) { setMsg("Delete failed: " + (er.message || er)); } };
@@ -4088,7 +4088,7 @@ function SharedFilesPanel({ notify = () => {} }) {
     <div className="flex-1 overflow-auto" style={{ background: "#F9FAFB" }}>
       <div className="px-6 py-5" style={{ maxWidth: 980 }}>
         <h2 style={{ fontSize: 17, fontWeight: 700, color: "#101828" }}>Shared files</h2>
-        <p style={{ fontSize: 12.5, color: "#667085", marginTop: 2 }}>Company-private files such as ARXML <b>.zip</b> packages. Everyone in your company can download; only owners, admins and the people on the upload list can upload. Max 50 MB per file.</p>
+        <p style={{ fontSize: 12.5, color: "#667085", marginTop: 2 }}>Company-private files such as ARXML <b>.zip</b> packages. Everyone in your company can download; only owners, admins and the people on the upload list can upload. Max 200 MB per file.</p>
         {msg && <div style={{ marginTop: 10, fontSize: 12, color: "#B42318", background: "#FEF3F2", border: "1px solid #FECDCA", borderRadius: 8, padding: "6px 10px" }}>{msg}</div>}
         <div style={box}>
           <div className="flex items-center gap-2 flex-wrap">
