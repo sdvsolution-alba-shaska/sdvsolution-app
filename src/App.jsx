@@ -9726,8 +9726,14 @@ export default function App() {
                   <div className="fixed inset-0" style={{ zIndex: 40 }} onClick={() => setIoMenu(false)} />
                   <div className="absolute right-0 rounded-lg overflow-hidden"
                     style={{ top: 40, width: 288, zIndex: 50, background: "#fff", border: "1px solid #E4E7EC",
-                      boxShadow: "0 12px 28px rgba(16,24,40,0.16)" }}>
+                      boxShadow: "0 12px 28px rgba(16,24,40,0.16)", maxHeight: "calc(100vh - 140px)", overflowY: "auto" }}>
                     <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB" }}>
+                      SHARED FILES
+                    </div>
+                    <div className="p-3">
+                      <button onClick={() => { setIoMenu(false); setView("files"); }} className="w-full rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", background: "#fff", textAlign: "left" }}>ARXML packages &amp; other files →</button>
+                    </div>
+                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #EAECF0" }}>
                       DOWNLOAD
                     </div>
                     <div className="p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
@@ -9816,12 +9822,6 @@ export default function App() {
                           </>
                         );
                       })()}
-                    </div>
-                    <div className="px-3 py-1.5" style={{ fontSize: 9.5, fontWeight: 700, color: "#98A2B3", letterSpacing: 0.5, background: "#F9FAFB", borderTop: "1px solid #EAECF0" }}>
-                      SHARED FILES
-                    </div>
-                    <div className="p-3">
-                      <button onClick={() => { setIoMenu(false); setView("files"); }} className="w-full rounded px-3 py-1.5" style={{ fontSize: 12, fontWeight: 600, color: "#175CD3", border: "1px solid #B2DDFF", background: "#fff", textAlign: "left" }}>ARXML packages &amp; other files →</button>
                     </div>
                   </div>
                 </>
