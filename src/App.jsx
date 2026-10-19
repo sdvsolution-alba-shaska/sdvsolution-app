@@ -4065,6 +4065,7 @@ function SharedFilesPanel({ notify = () => {} }) {
   const auth = typeof window !== "undefined" ? window.__sdvAuth : null; const F = auth && auth.files; const isAdm = !!(auth && auth.team && auth.team.isAdmin);
   const [rows, setRows] = useState([]); const [grants, setGrants] = useState([]); const [canUp, setCanUp] = useState(false);
   const [busy, setBusy] = useState(""); const [msg, setMsg] = useState(""); const [note, setNote] = useState(""); const [gEmail, setGEmail] = useState(""); const fileRef = useRef(null);
+  const [org, setOrg] = useState(null); useEffect(() => { if (auth && auth.getOrg) auth.getOrg().then(setOrg).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const load = async () => {
     if (!F) return; setMsg("");
     try { const [r, c, g] = await Promise.all([F.list(), F.canUpload(), F.listGrants()]); setRows(r); setCanUp(c); setGrants(g); }
@@ -4087,7 +4088,7 @@ function SharedFilesPanel({ notify = () => {} }) {
   return (
     <div className="flex-1 overflow-auto" style={{ background: "#F9FAFB" }}>
       <div className="px-6 py-5" style={{ maxWidth: 980 }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, color: "#101828" }}>Shared files</h2>
+        <h2 style={{ fontSize: 17, fontWeight: 700, color: "#101828" }}>Shared files{org && <span style={{ fontSize: 12.5, fontWeight: 600, color: "#475467", marginLeft: 10, background: "#F2F4F7", borderRadius: 999, padding: "2px 10px" }}>Company: {org.name || org.domain}{org.domain && org.name ? " (" + org.domain + ")" : ""}</span>}</h2>
         <p style={{ fontSize: 12.5, color: "#667085", marginTop: 2 }}>Company-private files such as ARXML <b>.zip</b> packages. Everyone in your company can download; only owners, admins and the people on the upload list can upload. Max 200 MB per file.</p>
         {msg && <div style={{ marginTop: 10, fontSize: 12, color: "#B42318", background: "#FEF3F2", border: "1px solid #FECDCA", borderRadius: 8, padding: "6px 10px" }}>{msg}</div>}
         <div style={box}>
