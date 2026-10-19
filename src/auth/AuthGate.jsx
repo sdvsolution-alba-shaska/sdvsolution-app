@@ -113,12 +113,13 @@ export default function AuthGate({ children }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // Load the caller's membership (role + org) once signed in. RLS returns only
-  // their own row, so this is safe. Role drives write access + the Team panel.
+  // Load the caller's membership (role + org) once signed in. RLS lets a member read EVERY membership row of
+  // their company (for the Team panel), so filter to the caller's own row — without the filter a company with
+  // two or more members returns several rows, maybeSingle() errors and the app thinks there is no workspace.
   useEffect(() => {
     let alive = true;
     if (!session) { setMembership(null); return; }
-    supabase.from("memberships").select("org_id, role, email").maybeSingle()
+    supabase.from("memberships").select("org_id, role, email").eq("user_id", session.user.id).maybeSingle()
       .then(({ data }) => { if (alive) setMembership(data || null); });
     return () => { alive = false; };
   }, [session]);
@@ -149,7 +150,7 @@ export default function AuthGate({ children }) {
         getToken: async () => { const { data } = await supabase.auth.getSession(); return data.session ? data.session.access_token : null; },
         // The caller's organization row (RLS returns only their own) — plan, seats, status.
         getOrg: async () => { const { data } = await supabase.from("organizations").select("*").maybeSingle(); return data || null; },
-        getRole: async () => { const { data } = await supabase.from("memberships").select("role").maybeSingle(); const r = data ? data.role : null; return r === "member" ? "editor" : r; },
+        getRole: async () => { const { data } = await supabase.from("memberships").select("role").eq("user_id", myId).maybeSingle(); const r = data ? data.role : null; return r === "member" ? "editor" : r; },
         // Make the Stripe subscription quantity match the company's team size, so
         // the monthly bill tracks members. Safe to call from any member's app.
         syncSeats: async () => {
