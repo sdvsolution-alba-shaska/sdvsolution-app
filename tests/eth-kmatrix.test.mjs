@@ -1,6 +1,6 @@
 // Run: node tests/eth-kmatrix.test.mjs
 // Ethernet backbone K-Matrix: reading the released workbook layout, merging partial workbooks, checks, and round trip.
-import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath } from "../src/lib/ethKmatrix.js";
+import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth } from "../src/lib/ethKmatrix.js";
 
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
 
@@ -74,4 +74,36 @@ ok(/no Ethernet path in the Topology from NodeA \(CZM\) to NodeE/.test(checkEth(
 ok(checkEth(eth, topo).some((x) => /is not mapped to a Topology ECU/.test(x.msg)), "unmapped nodes are flagged");
 applyAliases(t1, [{ re: /^NodeA$/, ecu: "ECU-CCU" }]); ok(t1.nodes[0].ecu === "ECU-CZM", "rules never overwrite a mapping that is already set");
 
+
+// --- Wireshark dissector import (synthetic example in the generated-dissector style; not vehicle data)
+const LUA = [
+  'demo_protocol = Proto("Demo_UDP",  "Demo UDP")', 'local CONSTANTS = {', '    "VALS_Lamp", {', '    [0] = "off",', '    [1] = "on",', '    },', '}',
+  'Lamp_field = ProtoField.uint8("Demo_UDP.Lamp", "Lamp", base.DEC, CONSTANTS["VALS_Lamp"])',
+  'Speed_field = ProtoField.float("Demo_UDP.Speed", "Speed", base.DEC)', 'Temp_field = ProtoField.int16("Demo_UDP.Temp", "Temp", base.DEC)', 'Volt_field = ProtoField.float("Demo_UDP.Volt", "Volt", base.DEC)',
+  'Moving_field = ProtoField.uint8("Demo_UDP.Moving", "Moving", base.DEC)', 'MuxA_field = ProtoField.uint8("Demo_UDP.MuxA", "MuxA", base.DEC)', 'MuxB_field = ProtoField.uint8("Demo_UDP.MuxB", "MuxB", base.DEC)',
+  'local message_table = {}',
+  'message_table[0x00000010] = function(header_tree, pinfo, tree, buffer, byte_index)', '    -- CZC_Demo',
+  '      -- Signal Lamp', '      signals.Lamp = bit.bor(signals.Lamp, bit.rshift(bit.band(buffer(byte_index + 8, 1):uint(), 0x3), 0))', '      msg_tree:add_le(Lamp_field, signals.Lamp)',
+  '      -- Signal Speed', '      signals.Speed = bit.bor(signals.Speed, bit.rshift(bit.band(buffer(byte_index + 8, 1):uint(), 0xFC), 2))', '      signals.Speed = bit.bor(signals.Speed, bit.lshift(bit.band(buffer(byte_index + 9, 1):uint(), 0x3F), 6))',
+  '      msg_tree:add_le(Speed_field, (signals.Speed * 0.01) + -5)',
+  '      -- Signal Temp', '      signals.Temp = bit.bor(signals.Temp, bit.rshift(bit.band(buffer(byte_index + 10, 1):uint(), 0xFF), 0))', '      -- Sign extend signed integer', '      msg_tree:add_le(Temp_field, signals.Temp)',
+  '      -- Signal Volt', '      signals.Volt = bit.bor(signals.Volt, bit.rshift(bit.band(buffer(byte_index + 12, 1):uint(), 0xFF), 0))', '      signals.Volt = bit.bor(signals.Volt, bit.lshift(bit.band(buffer(byte_index + 13, 1):uint(), 0xFF), 8))',
+  '      signals.Volt = bit.bor(signals.Volt, bit.lshift(bit.band(buffer(byte_index + 14, 1):uint(), 0xFF), 16))', '      signals.Volt = bit.bor(signals.Volt, bit.lshift(bit.band(buffer(byte_index + 15, 1):uint(), 0xFF), 24))', '      -- IEEE float support', '    end',
+  'message_table[0x00000011] = function(header_tree, pinfo, tree, buffer, byte_index)', '    -- VDM_Demo',
+  '      -- Signal Moving', '      signals.Moving = bit.bor(signals.Moving, bit.lshift(bit.band(buffer(byte_index + 11, 1):uint(), 0x1), 1))', '      signals.Moving = bit.bor(signals.Moving, bit.rshift(bit.band(buffer(byte_index + 12, 1):uint(), 0x80), 7))', '      msg_tree:add(Moving_field, signals.Moving)', '    end',
+  'message_table[0x00000012] = function(header_tree, pinfo, tree, buffer, byte_index)', '    -- SMD_Mux',
+  '      -- Signal MuxA', '      signals.MuxA = bit.bor(signals.MuxA, bit.rshift(bit.band(buffer(byte_index + 9, 1):uint(), 0xFF), 0))',
+  '      -- Signal MuxB', '      signals.MuxB = bit.bor(signals.MuxB, bit.rshift(bit.band(buffer(byte_index + 9, 1):uint(), 0xFF), 0))', '    end',
+  'local udp_port = DissectorTable.get("udp.port")', 'udp_port:add(20000, demo_protocol)'].join("\n");
+const dz = parseDissector(LUA), dd = dz.eth, P = (id) => dd.pdus.find((p) => p.id === id), S = (id, n) => P(id).signals.find((x) => x.name === n);
+ok(dd.pdus.length === 3 && dd.source.udpPort === 20000 && P(0x10).name === "CZC_Demo" && P(0x10).senderHint === "CZC" && P(0x10).frame.dstPort === 20000, "dissector: PDUs, names, UDP port and the sender hint (never the sender) are read");
+ok(S(0x10, "Lamp").startBit === 0 && S(0x10, "Lamp").length === 2 && S(0x10, "Lamp").vt === "Lamp" && dd.valueTables.Lamp["1"] === "on", "dissector: bit field + value table");
+ok(S(0x10, "Speed").startBit === 2 && S(0x10, "Speed").length === 12 && S(0x10, "Speed").factor === 0.01 && S(0x10, "Speed").offset === -5 && S(0x10, "Speed").type === "unsigned", "dissector: multi-byte little-endian signal with factor/offset (a scaled integer is not an IEEE float)");
+ok(S(0x10, "Temp").type === "signed" && S(0x10, "Volt").type === "float" && S(0x10, "Volt").startBit === 32 && S(0x10, "Volt").length === 32, "dissector: signed integers and IEEE floats");
+const mv = S(0x11, "Moving"); ok(mv.byteOrder === "motorola" && mv.startBit === 24 && mv.length === 2 && signalBits(mv).join() === "24,39", "dissector: big-endian signal gets a DBC-style MSB start bit and the right bit set");
+ok(P(0x12).sharedBits === 2 && sharedBitSignals(P(0x10).signals) === 0 && dz.warnings.some((w) => /multiplexed/.test(w)), "dissector: signals sharing bits are flagged as multiplexed, not as overlap errors");
+const fz = checkEth(dd).map((x) => x.msg).join("\n"); ok(!/overlap/.test(fz) && /SMD_Mux: 2 signals share bit positions/.test(fz) && /CZC_Demo: no sender\. \(The name suggests CZC\.\)/.test(fz), "checks: shared bits reported once per PDU; missing sender shows the hint");
+const bad2 = JSON.parse(JSON.stringify(dd)); bad2.pdus[0].signals[1].startBit = 1; ok(/CZC_Demo: signals Lamp and Speed overlap/.test(checkEth(bad2).map((x) => x.msg).join("\n")), "checks: a real overlap is still an error");
+const mz = mergeEth(mergeEth(emptyEth(), dd).eth, dd); ok(mz.report.conflicts.length === 0 && mz.report.added.signals === 0 && mz.eth.valueTables.Lamp, "dissector import merges idempotently and keeps value tables");
+const packed = await packEth(dd); ok(JSON.stringify(await unpackEth(packed)) === JSON.stringify(dd) && packed.length < JSON.stringify(dd).length * 2, "compressed storage round-trips exactly");
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);

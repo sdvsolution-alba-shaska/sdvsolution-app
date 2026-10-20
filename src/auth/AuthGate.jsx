@@ -180,6 +180,11 @@ export default function AuthGate({ children }) {
           setRole: async (userId, newRole) => { const { error } = await supabase.from("memberships").update({ role: newRole }).eq("user_id", userId); if (error) throw error; return true; },
           removeMember: async (userId) => { const { error } = await supabase.from("memberships").delete().eq("user_id", userId); if (error) throw error; return true; },
         },
+        // Ethernet backbone K-Matrix — one gzip-compressed row per company (phase7_eth_kmatrix.sql), saved only when it changes.
+        ethKm: {
+          load: async () => { const { data, error } = await supabase.from("eth_kmatrix").select("data_gz, pdus, signals, updated_at").eq("org_id", orgId).maybeSingle(); if (error) throw error; return data || null; },
+          save: async (dataGz, stats) => { if (!orgId) throw new Error("Your company workspace isn't ready yet — try again in a moment."); const { error } = await supabase.from("eth_kmatrix").upsert({ org_id: orgId, data_gz: dataGz, pdus: stats ? stats.pdus : null, signals: stats ? stats.signals : null, updated_at: new Date().toISOString(), updated_by: myId }, { onConflict: "org_id" }); if (error) throw error; return true; },
+        },
         // Shared files (e.g. ARXML .zip packages) — private bucket "shared-files", one folder per company.
         // Everyone in the company can list/download; only owner/admin or granted emails can upload (RLS, phase6_shared_files.sql).
         files: {

@@ -117,16 +117,18 @@ export function mergeEth(base, incoming) {
     if (!ex) { out.nodes.push(JSON.parse(JSON.stringify(n))); report.added.nodes++; }
     else if (mergeFields(ex, n, ["mac", "ipv4", "ipv6", "rxPort", "txPort"], "Node " + n.name, report)) report.filled++;
   }
+  if (inc.valueTables) { out.valueTables = out.valueTables || {}; for (const [k, v] of Object.entries(inc.valueTables)) if (!out.valueTables[k]) out.valueTables[k] = v; }
   for (const p of inc.pdus || []) {
     const ex = out.pdus.find((x) => (p.id != null && x.id === p.id) || (p.id == null && x.name === p.name));
     if (!ex) { out.pdus.push(JSON.parse(JSON.stringify(p))); report.added.pdus++; report.added.signals += (p.signals || []).length; continue; }
     const where = "PDU " + fmtId(ex.id) + " " + ex.name;
     if (mergeFields(ex, p, ["name", "sendType", "cycleMs", "sender", "receivers"], where, report)) report.filled++;
-    ex.frame = ex.frame || {}; if (mergeFields(ex.frame, p.frame || {}, ["name", "type", "layout", "srcIp", "srcPort", "dstIp", "dstPort", "ipType", "payloadBytes"], where + " (frame)", report)) report.filled++;
+    if (!ex.senderHint && p.senderHint) ex.senderHint = p.senderHint;
+    ex.frame = ex.frame || {}; if (mergeFields(ex.frame, p.frame || {}, ["name", "type", "layout", "srcIp", "srcPort", "dstIp", "dstPort", "ipType", "payloadBytes", "minPayloadBytes"], where + " (frame)", report)) report.filled++;
     for (const s of p.signals || []) {
       const es = ex.signals.find((x) => x.name === s.name);
       if (!es) { ex.signals.push(JSON.parse(JSON.stringify(s))); report.added.signals++; continue; }
-      if (mergeFields(es, s, ["startBit", "length", "factor", "offset", "min", "max", "unit", "init"], where + " / " + s.name, report)) report.filled++;
+      if (mergeFields(es, s, ["startBit", "length", "factor", "offset", "min", "max", "unit", "init", "type", "vt", "byteOrder"], where + " / " + s.name, report)) report.filled++;
       es.roles = es.roles || {}; for (const [node, r] of Object.entries(s.roles || {})) { if (!es.roles[node]) es.roles[node] = r; else if (es.roles[node] !== r) report.conflicts.push({ where: where + " / " + s.name, field: "role " + node, kept: es.roles[node], incoming: r }); }
     }
   }
@@ -151,6 +153,20 @@ export function ethPath(topo, from, to) { // BFS over Topology Ethernet links; r
 }
 
 /* ---------- consistency checks ---------- */
+
+/* Bits a signal occupies (absolute payload bit = byte*8 + bit). Intel: start bit is the LSB, bits run upward.
+   Motorola (big-endian, DBC sawtooth): start bit is the MSB; within a byte bits run down, then continue at bit 7 of the next byte. */
+export function signalBits(s) {
+  const out = []; if (s.startBit == null || !(s.length > 0)) return out;
+  if (s.byteOrder !== "motorola") { for (let i = 0; i < s.length; i++) out.push(s.startBit + i); return out; }
+  let pos = s.startBit; for (let i = 0; i < s.length; i++) { out.push(pos); pos = pos % 8 === 0 ? pos + 15 : pos - 1; } return out;
+}
+// Number of signals in a PDU that share at least one bit with another signal (0 = clean layout).
+export function sharedBitSignals(signals) {
+  const owner = new Map(), hit = new Set();
+  (signals || []).forEach((s, i) => signalBits(s).forEach((b) => { if (owner.has(b)) { hit.add(i); hit.add(owner.get(b)); } else owner.set(b, i); }));
+  return hit.size;
+}
 export function checkEth(eth, topo) {
   const f = [], E = (msg) => f.push({ sev: "error", msg }), W = (msg) => f.push({ sev: "warning", msg });
   const nodes = eth.nodes || [], pdus = eth.pdus || [], names = new Set(nodes.map((n) => n.name));
@@ -164,15 +180,16 @@ export function checkEth(eth, topo) {
   pdus.forEach((p) => {
     const tag = "PDU " + fmtId(p.id) + " " + p.name;
     if (p.id == null) W(tag + ": no message ID.");
-    if (!p.sender) W(tag + ": no sender."); else if (!names.has(p.sender)) W(tag + ": sender " + p.sender + " is not in the Nodes sheet.");
+    if (!p.sender) W(tag + ": no sender." + (p.senderHint ? " (The name suggests " + p.senderHint + ".)" : "")); else if (!names.has(p.sender)) W(tag + ": sender " + p.sender + " is not in the Nodes sheet.");
     if (!(p.receivers || []).length) W(tag + ": no receivers.");
     (p.receivers || []).filter((r) => !names.has(r)).forEach((r) => W(tag + ": receiver " + r + " is not in the Nodes sheet."));
     if (/cyclic/.test(p.sendType || "") && !(p.cycleMs > 0)) W(tag + ": cyclic but no cycle time.");
     const sigs = (p.signals || []).filter((s) => s.startBit != null && s.length != null);
     const bits = (p.frame && p.frame.payloadBytes) ? p.frame.payloadBytes * 8 : null;
-    sigs.forEach((s) => { if (s.length <= 0) E(tag + " / " + s.name + ": length must be positive."); if (bits != null && s.startBit + s.length > bits) E(tag + " / " + s.name + ": ends at bit " + (s.startBit + s.length) + ", beyond the " + bits + "-bit payload."); });
-    const sorted = [...sigs].sort((a, b) => a.startBit - b.startBit);
-    for (let i = 1; i < sorted.length; i++) if (sorted[i].startBit < sorted[i - 1].startBit + sorted[i - 1].length) E(tag + ": signals " + sorted[i - 1].name + " and " + sorted[i].name + " overlap.");
+    sigs.forEach((s) => { if (s.length <= 0) E(tag + " / " + s.name + ": length must be positive."); const hi = Math.max(-1, ...signalBits(s)) + 1; if (bits != null && hi > bits) E(tag + " / " + s.name + ": ends at bit " + hi + ", beyond the " + bits + "-bit payload."); });
+    if (p.sharedBits) W(tag + ": " + p.sharedBits + " signals share bit positions in the imported dissector (probably multiplexed) — define the multiplexor.");
+    else { const owner = new Map(); const seen = new Set();
+      sigs.forEach((s) => signalBits(s).forEach((b) => { const o = owner.get(b); if (o && o !== s.name) { const k = o + "|" + s.name; if (!seen.has(k)) { seen.add(k); E(tag + ": signals " + o + " and " + s.name + " overlap."); } } else owner.set(b, s.name); })); }
     (p.signals || []).forEach((s) => { const senders = Object.entries(s.roles || {}).filter(([, r]) => r === "S").map(([n]) => n); if (senders.length > 1) E(tag + " / " + s.name + ": sent (S) by " + senders.join(" and ") + "."); });
   });
   if (topo) {
@@ -204,3 +221,83 @@ export function toWorkbook(eth) {
 }
 
 export const ethStats = (eth) => ({ nodes: (eth.nodes || []).length, pdus: (eth.pdus || []).length, signals: (eth.pdus || []).reduce((n, p) => n + (p.signals || []).length, 0), pdusWithSignals: (eth.pdus || []).filter((p) => (p.signals || []).length).length });
+
+/* ---------- reading a Wireshark Lua dissector (BackboneETH.lua) ----------
+   The generated dissector lists every PDU (message_table[0x..] = function … -- <PDU name>) and, for each signal, the
+   payload bytes and bit masks it is assembled from. Each UDP datagram carries PDUs as [4-byte ID][4-byte length][payload],
+   so payload byte k is buffer(byte_index + 8 + k). Bit positions here are LSB-first (start bit = lowest bit, Intel).
+   The dissector carries layout, types and value tables only — no senders, receivers, cycle times or scaling; those come
+   from the K-Matrix workbook. The PDU name prefix (CZC_, FZC_, ADAS_ …) is kept as a sender HINT, never as the sender. */
+const ctz = (m) => { let i = 0; while (i < 32 && !((m >>> i) & 1)) i++; return i; };
+const popcnt = (m) => { let c = 0; while (m) { c += m & 1; m >>>= 1; } return c; };
+const contiguous = (m) => { const lb = ctz(m), n = popcnt(m); return ((m >>> lb) & ((n >= 32 ? 0 : 1 << n) - 1 >>> 0)) === (n >= 32 ? m >>> lb : (1 << n) - 1); };
+const typeOfField = (t) => (/^float|^double/.test(t) ? "float" : /^int/.test(t) ? "signed" : /^string|^bytes/.test(t) ? "string" : "unsigned");
+
+export function parseDissector(text) {
+  const lines = String(text || "").split(/\r?\n/), warnings = [], valueTables = {}, fieldType = {}, fieldVt = {}, pdus = [];
+  let curVt = null, cur = null, sig = null, port = null, proto = null, nonIntel = 0, empty = 0, badMask = 0, badLayout = 0;
+  const finishSig = () => {
+    if (!sig || !cur) { sig = null; return; }
+    const parts = sig.parts;
+    if (!parts.length) { empty++; cur.signals.push({ name: sig.name, startBit: null, length: null, type: fieldType[sig.name] ? typeOfField(fieldType[sig.name]) : (sig.float ? "float" : "unsigned"), vt: fieldVt[sig.name] || undefined, roles: {} }); sig = null; return; }
+    const segs = parts.map((p) => { const lb = ctz(p.mask), n = popcnt(p.mask); if (!contiguous(p.mask)) badMask++; return { src: (p.byte - 8) * 8 + lb, dest: p.dir === "lshift" ? lb + p.sh : lb - p.sh, n }; }).sort((a, b) => a.dest - b.dest);
+    const intel = segs.every((s) => s.src - segs[0].src === s.dest - segs[0].dest);
+    const length = segs.reduce((t, s) => t + s.n, 0);
+    const ft = fieldType[sig.name], type = sig.float ? "float" : sig.signed ? "signed" : ft && /^string|^bytes/.test(ft) ? "string" : ft && /^int/.test(ft) ? "signed" : "unsigned"; // ProtoField.float on a scaled integer is NOT an IEEE float
+    const top = segs[segs.length - 1];
+    const s = { name: sig.name, startBit: intel ? segs[0].src : top.src + top.n - 1, length, type, roles: {} };
+    if (!intel) { s.byteOrder = "motorola"; nonIntel++;
+      const want = new Set(); segs.forEach((g) => { for (let i = 0; i < g.n; i++) want.add(g.src + i); });
+      const got = signalBits(s); if (got.length !== want.size || got.some((b) => !want.has(b))) badLayout++; }
+    if (sig.factor != null && sig.factor !== 1) s.factor = sig.factor;
+    if (sig.offset != null && sig.offset !== 0) s.offset = sig.offset;
+    if (fieldVt[sig.name]) s.vt = fieldVt[sig.name];
+    cur.signals.push(s); cur._maxByte = Math.max(cur._maxByte || 0, ...parts.map((p) => p.byte - 8 + 1)); sig = null;
+  };
+  for (const raw of lines) {
+    const line = raw;
+    if (curVt) {
+      const m = /^\s*\[(-?\d+)\]\s*=\s*"((?:[^"\\]|\\.)*)",?\s*$/.exec(line);
+      if (m) { valueTables[curVt][m[1]] = m[2]; continue; }
+      if (/^\s*\},?\s*$/.test(line)) { curVt = null; continue; }
+    }
+    let m;
+    if ((m = /^\s*"VALS_([^"]+)",\s*\{\s*$/.exec(line))) { curVt = m[1]; valueTables[curVt] = {}; continue; }
+    if ((m = /^([A-Za-z0-9_]+)_field\s*=\s*ProtoField\.([a-z0-9]+)\((.*)\)\s*$/.exec(line))) {
+      fieldType[m[1]] = m[2]; const v = /CONSTANTS\["VALS_([^"]+)"\]/.exec(m[3]); if (v) fieldVt[m[1]] = v[1]; continue; }
+    if ((m = /^message_table\[0x([0-9a-fA-F]+)\]\s*=\s*function/.exec(line))) { finishSig(); cur = { id: parseInt(m[1], 16), name: null, sendType: "", cycleMs: null, sender: "", receivers: [], frame: { layout: "UDP" }, signals: [] }; pdus.push(cur); continue; }
+    if (cur && cur.name == null && (m = /^\s*--\s*(\S+)\s*$/.exec(line))) { cur.name = m[1]; continue; }
+    if ((m = /^\s*-- Signal (\S+)\s*$/.exec(line))) { finishSig(); sig = { name: m[1], parts: [], float: false }; continue; }
+    if (sig) {
+      const b = /(rshift|lshift)\(bit\.band\(buffer\(byte_index \+ (\d+), 1\):uint\(\), 0x([0-9A-Fa-f]+)\), (\d+)\)/.exec(line);
+      if (b) { sig.parts.push({ dir: b[1], byte: Number(b[2]), mask: parseInt(b[3], 16), sh: Number(b[4]) }); continue; }
+      if (/IEEE float support/.test(line)) { sig.float = true; continue; }
+      if (/Sign extend signed integer/.test(line)) { sig.signed = true; continue; }
+      const sc = /msg_tree:add(?:_le)?\([A-Za-z0-9_]+_field,\s*\(signals\.[A-Za-z0-9_]+\s*\*\s*([-0-9.eE+]+)\)\s*\+\s*([-0-9.eE+]+)\)/.exec(line);
+      if (sc) { sig.factor = Number(sc[1]); sig.offset = Number(sc[2]); continue; }
+    }
+    if ((m = /udp_port:add\((\d+)/.exec(line))) port = Number(m[1]);
+    if ((m = /Proto\("([^"]+)"/.exec(line))) proto = m[1];
+  }
+  finishSig();
+  pdus.forEach((p) => { if (!p.name) p.name = "PDU_" + fmtId(p.id); const pre = /^([A-Za-z0-9]+)_/.exec(p.name); if (pre) p.senderHint = pre[1];
+    if (port) p.frame.dstPort = port; if (p._maxByte) p.frame.minPayloadBytes = p._maxByte; delete p._maxByte; });
+  // keep only value tables that a signal uses
+  const used = new Set(pdus.flatMap((p) => p.signals.map((s) => s.vt).filter(Boolean)));
+  const vts = {}; used.forEach((k) => { if (valueTables[k]) vts[k] = valueTables[k]; });
+  if (!pdus.length) warnings.push("No PDUs found — this does not look like a generated backbone dissector.");
+  let muxPdus = 0, muxSigs = 0;
+  pdus.forEach((p) => { const n = sharedBitSignals(p.signals); if (n) { p.sharedBits = n; muxPdus++; muxSigs += n; } });
+  if (nonIntel) warnings.push(nonIntel + " signal(s) are big-endian (Motorola); start bit = most significant bit, as in a DBC." + (badLayout ? " " + badLayout + " of them do not follow the Motorola bit order — check them." : ""));
+  if (muxPdus) warnings.push(muxPdus + " PDU(s) have signals that share bit positions (" + muxSigs + " signals) — almost certainly multiplexed in the source database; the dissector decodes every variant. Define the multiplexor when the K-Matrix arrives.");
+  if (badMask) warnings.push(badMask + " byte mask(s) have gaps — check those signals.");
+  if (empty) warnings.push(empty + " signal(s) had no bit layout in the dissector (e.g. strings) — imported without a position.");
+  return { eth: { nodes: [], pdus, valueTables: vts, source: { proto, udpPort: port } }, warnings };
+}
+
+/* ---------- compact storage: base64( gzip( JSON ) ) — ~0.5 MB for a full backbone instead of ~4.8 MB ---------- */
+const b64 = { enc: (u8) => { if (typeof Buffer !== "undefined") return Buffer.from(u8).toString("base64"); let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); },
+  dec: (t) => { if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(t, "base64")); const s = atob(t), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; } };
+async function pipe(u8, stream) { const out = new Response(new Blob([u8]).stream().pipeThrough(stream)); return new Uint8Array(await out.arrayBuffer()); }
+export async function packEth(eth) { return b64.enc(await pipe(new TextEncoder().encode(JSON.stringify(eth || emptyEth())), new CompressionStream("gzip"))); }
+export async function unpackEth(text) { if (!text) return emptyEth(); const j = JSON.parse(new TextDecoder().decode(await pipe(b64.dec(text), new DecompressionStream("gzip")))); j.nodes = j.nodes || []; j.pdus = j.pdus || []; return j; }

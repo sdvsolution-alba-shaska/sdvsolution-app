@@ -3803,7 +3803,12 @@ const HWREQ_STORE = { data: {} };
    (node edits, review status, regulation edits, baselines) to build the full
    "workspace" document that is saved per company. */
 const ETH_STORE = { data: { nodes: [], pdus: [] } }; // Ethernet backbone K-Matrix (see EthKMatrixPanel)
-const WS_STORES = { ETH_STORE, KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
+/* The ETH K-Matrix is persisted on its own (table eth_kmatrix, gzip-compressed, saved when it changes) — not in the
+   workspace document, which is re-uploaded on every edit. ETH_PERSIST.legacy holds an older workspace's ETH_STORE so it
+   can be moved across once. */
+const ETH_PERSIST = { loaded: false, loading: null, legacy: null };
+const ETH_VIEW = { list: [], total: 0, ql: "" }; // current filtered page of the PDU table (render helper)
+const WS_STORES = { KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
 function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k] = JSON.parse(JSON.stringify(WS_STORES[k].data)); } catch (e) {} } return o; }
 function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } }
 const icdRowsToAoa = (groups) => { const aoa = [["Connector", "Signal / Interface", "Pins", "Class", "Dir", "Wired to", "From"]]; (groups || []).forEach((g) => (g.rows || []).forEach((r) => aoa.push([g.conn, r.signal, r.pins, r.cls, r.dir, r.wired, r.from]))); return aoa; };
@@ -4134,8 +4139,30 @@ function SharedFilesPanel({ notify = () => {} }) {
 }
 function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
-  const [, setV] = useState(0); const bump = () => setV((v) => v + 1);
+  const API = typeof window !== "undefined" && window.__sdvAuth ? window.__sdvAuth.ethKm : null;
+  const [, setV] = useState(0); const [saveState, setSaveState] = useState(ETH_PERSIST.loaded ? "saved" : "loading");
+  const saveTimer = useRef(null);
+  const saveNow = async () => {
+    if (!API || !EK || !ETH_PERSIST.loaded) return; clearTimeout(saveTimer.current); setSaveState("saving");
+    try { await API.save(await EK.packEth(ETH_STORE.data), EK.ethStats(ETH_STORE.data)); setSaveState("saved"); }
+    catch (e) { setSaveState(/relation|does not exist|schema cache/i.test(e.message || "") ? "nosetup" : "failed"); }
+  };
+  const bump = () => { setV((v) => v + 1); if (API && ETH_PERSIST.loaded) { setSaveState("dirty"); clearTimeout(saveTimer.current); saveTimer.current = setTimeout(saveNow, 2500); } };
+  useEffect(() => {
+    if (!API || !EK) { ETH_PERSIST.loaded = true; setSaveState("local"); return; }
+    if (ETH_PERSIST.loaded) return;
+    let alive = true;
+    (ETH_PERSIST.loading = ETH_PERSIST.loading || API.load()).then(async (row) => {
+      if (row && row.data_gz) ETH_STORE.data = await EK.unpackEth(row.data_gz);
+      ETH_PERSIST.loaded = true; ETH_PERSIST.loading = null;
+      if (!row && ETH_PERSIST.legacy) { ETH_STORE.data = JSON.parse(JSON.stringify(ETH_PERSIST.legacy)); if (alive) await saveNow(); } // move an older workspace's matrix across once
+      if (alive) { setSaveState("saved"); setV((v) => v + 1); }
+    }).catch((e) => { ETH_PERSIST.loading = null; ETH_PERSIST.loaded = true; if (alive) setSaveState(/relation|does not exist|schema cache/i.test(e.message || "") ? "nosetup" : "failed"); });
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (saveTimer.current) { clearTimeout(saveTimer.current); saveNow(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useState("pdus"); const [open, setOpen] = useState(() => new Set()); const [rep, setRep] = useState(null); const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState(""); const [limit, setLimit] = useState(150);
   const fileRef = useRef(null);
   if (!EK) return <div className="flex-1 p-8" style={{ color: "#667085", fontSize: 13 }}>The Ethernet K-Matrix module isn't loaded in this runtime. Open the app from the main site.</div>;
   const D = ETH_STORE.data; D.nodes = D.nodes || []; D.pdus = D.pdus || [];
@@ -4148,11 +4175,13 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
   const doImport = async (file) => {
     if (!file) return; setBusy(true);
     try {
-      const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheets = {}; wb.SheetNames.forEach((n) => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "", raw: true }); });
-      const { eth, warnings } = EK.parseWorkbook(sheets), { eth: merged, report } = EK.mergeEth(D, eth);
+      let parsed;
+      if (/\.lua$/i.test(file.name)) parsed = EK.parseDissector(await file.text()); // Wireshark dissector: PDU + signal layout, types, value tables
+      else { const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const sheets = {}; wb.SheetNames.forEach((n) => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "", raw: true }); }); parsed = EK.parseWorkbook(sheets); }
+      const { eth, warnings } = parsed, { eth: merged, report } = EK.mergeEth(D, eth);
       const mapped = EK.applyAliases(merged, ETH_NODE_ALIASES);
-      ETH_STORE.data = merged; setRep({ file: file.name, warnings, mapped, ...report }); bump(); notify("Merged " + file.name);
+      ETH_STORE.data = merged; setRep({ file: file.name, warnings, mapped, ...report }); setV((v) => v + 1); await saveNow(); notify("Merged " + file.name);
     } catch (e) { setRep({ file: file.name, error: e.message }); } finally { setBusy(false); }
   };
   const doExport = async () => {
@@ -4173,10 +4202,11 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
       <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 12 }}>
         <span style={{ fontSize: 12, color: "#344054" }}><b>{st.nodes}</b> nodes · <b>{st.pdus}</b> PDUs · <b>{st.signals}</b> signals ({st.pdusWithSignals} of {st.pdus} PDUs have signals)</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: errs ? "#B42318" : findings.length ? "#B54708" : "#067647" }}>{errs ? errs + " errors · " : ""}{findings.length - errs} warnings</span>
+        <span style={{ fontSize: 10.5, color: saveState === "failed" || saveState === "nosetup" ? "#B42318" : "#98A2B3" }}>{{ loading: "Loading…", saving: "Saving…", dirty: "Unsaved changes…", saved: "Saved", local: "Not saved (offline)", failed: "Save failed — will retry on the next change", nosetup: "Storage not set up — run supabase/phase7_eth_kmatrix.sql" }[saveState] || ""}</span>
         <div className="flex gap-2" style={{ marginLeft: "auto" }}>
-          {canWrite && <button disabled={busy} onClick={() => fileRef.current && fileRef.current.click()} style={btn}>{busy ? "Importing…" : "Import / merge .xlsx"}</button>}
+          {canWrite && <button disabled={busy || saveState === "loading"} onClick={() => fileRef.current && fileRef.current.click()} style={btn} title="K-Matrix workbook (.xlsx) or Wireshark dissector (BackboneETH.lua)">{busy ? "Importing…" : "Import / merge .xlsx or .lua"}</button>}
           <button onClick={doExport} style={{ ...btn, color: "#fff", background: "#175CD3", border: "1px solid #175CD3" }}>Export K-Matrix_ETH.xlsx</button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.lua" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
         </div>
       </div>
       {rep && (<div style={{ marginTop: 10, border: "1px solid " + (rep.error ? "#FECDCA" : "#D1E9FF"), background: rep.error ? "#FFFBFA" : "#F5FAFF", borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "#344054" }}>
@@ -4209,15 +4239,23 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
         {canWrite && <button onClick={addNode} style={{ ...btn, marginTop: 8 }}>+ Add node</button>}
       </div>)}
       {tab === "pdus" && (<div style={{ marginTop: 10 }}>
+        {(() => { const ql = q.trim().toLowerCase(); const all = [...D.pdus].sort((a, b) => (a.id ?? 1e12) - (b.id ?? 1e12));
+          const hits = ql ? all.filter((p) => (p.name || "").toLowerCase().includes(ql) || EK.fmtId(p.id).toLowerCase() === ql || (p.senderHint || "").toLowerCase() === ql || (p.signals || []).some((x) => (x.name || "").toLowerCase().includes(ql))) : all;
+          ETH_VIEW.list = hits.slice(0, limit); ETH_VIEW.total = hits.length; ETH_VIEW.ql = ql;
+          return (<div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+            <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(150); }} placeholder="Find a message, ID (0x97) or signal…" style={{ fontSize: 12, border: "1px solid #D0D5DD", borderRadius: 7, padding: "5px 9px", width: 320 }} />
+            <span style={{ fontSize: 11.5, color: "#667085" }}>{hits.length} of {all.length} PDUs{hits.length > limit ? " · showing the first " + limit : ""}</span>
+            {hits.length > limit && <button onClick={() => setLimit((l) => l + 300)} style={{ fontSize: 11.5, color: "#175CD3" }}>Show more</button>}
+          </div>); })()}
         <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["", "Message ID", "PDU name", "Send type", "Cycle (ms)", "Sender", "Receivers", "Payload (B)", "Signals", ""].map((h, k) => <th key={k} style={th}>{h}</th>)}</tr></thead><tbody>
-          {[...D.pdus].sort((a, b) => (a.id ?? 1e12) - (b.id ?? 1e12)).map((p) => { const isOpen = open.has(p.id); const nodeNames = D.nodes.map((n) => n.name); return (<React.Fragment key={p.id + "|" + p.name}>
+          {ETH_VIEW.list.map((p) => { const isOpen = open.has(p.id); const nodeNames = D.nodes.map((n) => n.name); return (<React.Fragment key={p.id + "|" + p.name}>
             <tr>
               <td style={td}><button onClick={() => setOpen((s) => { const x = new Set(s); x.has(p.id) ? x.delete(p.id) : x.add(p.id); return x; })} style={{ color: "#98A2B3" }}>{isOpen ? "▾" : "▸"}</button></td>
               <td style={td}>{canWrite ? <input key={"id" + p.id} defaultValue={EK.fmtId(p.id)} onBlur={(e) => { const n = EK.parseId(e.target.value); if (n != null) { p.id = n; bump(); } else e.target.value = EK.fmtId(p.id); }} onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} title="Hex (0x1A) or decimal; applied when you leave the field" style={{ width: 70, fontSize: 11.5, padding: "2px 5px", border: "1px solid #E4E7EC", borderRadius: 5, fontFamily: "ui-monospace,monospace" }} /> : <span style={{ fontFamily: "ui-monospace,monospace" }}>{EK.fmtId(p.id)}</span>}</td>
               <td style={td}>{cell(p.name, (v) => { p.name = v; }, 190)}</td>
               <td style={td}>{canWrite ? <select value={p.sendType || ""} onChange={(e) => { p.sendType = e.target.value; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5 }}><option value="">—</option><option value="cyclic">cyclic</option><option value="spontaneous">spontaneous</option><option value="cyclic+spontaneous">cyclic+spontaneous</option></select> : p.sendType}</td>
               <td style={td}>{cell(p.cycleMs, (v) => { p.cycleMs = num(v); }, 60, true)}</td>
-              <td style={td}>{canWrite ? <select value={p.sender || ""} onChange={(e) => { p.sender = e.target.value; bump(); }} style={{ fontSize: 11.5, border: "1px solid #E4E7EC", borderRadius: 5, maxWidth: 130 }}><option value="">—</option>{nodeNames.map((n) => <option key={n} value={n}>{n}</option>)}{p.sender && !nodeNames.includes(p.sender) && <option value={p.sender}>{p.sender} (unknown)</option>}</select> : p.sender}</td>
+              <td style={td}>{canWrite ? <select value={p.sender || ""} onChange={(e) => { p.sender = e.target.value; bump(); }} style={{ fontSize: 11.5, border: "1px solid " + (p.sender ? "#E4E7EC" : p.senderHint ? "#FEC84B" : "#E4E7EC"), borderRadius: 5, maxWidth: 130 }}><option value="">{p.senderHint ? "— (name: " + p.senderHint + ")" : "—"}</option>{nodeNames.map((n) => <option key={n} value={n}>{n}</option>)}{p.sender && !nodeNames.includes(p.sender) && <option value={p.sender}>{p.sender} (unknown)</option>}</select> : p.sender}</td>
               <td style={td}>{cell((p.receivers || []).join(", "), (v) => { p.receivers = v.split(/[,;]+/).map((x) => x.trim()).filter(Boolean); }, 200)}</td>
               <td style={td}>{cell(p.frame && p.frame.payloadBytes, (v) => { p.frame = p.frame || {}; p.frame.payloadBytes = num(v); }, 60, true)}</td>
               <td style={{ ...td, color: p.signals.length ? "#344054" : "#B6C0CC" }}>{p.signals.length || "none yet"}</td>
@@ -4228,7 +4266,7 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
                 <div style={{ fontSize: 10.5, color: "#667085", marginBottom: 4 }}>Frame: {(p.frame && p.frame.layout) || "—"} · {(p.frame && p.frame.ipType) || "—"} · {(p.frame && p.frame.srcIp) || "src ?"}:{(p.frame && p.frame.srcPort) || "?"} → {(p.frame && p.frame.dstIp) || "dst ?"}:{(p.frame && p.frame.dstPort) || "?"}</div>
                 <table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Signal", "Start bit", "Length", "Factor", "Offset", "Min", "Max", "Unit", "Init", "Roles (S / S* / 0 / 0* / R / R*)", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
                   {p.signals.map((s, si) => (<tr key={si}>
-                    <td style={td}>{cell(s.name, (v) => { s.name = v; }, 170, true)}</td>
+                    <td style={td}>{cell(s.name, (v) => { s.name = v; }, 170, true)}{(s.type || s.byteOrder || s.vt) && <div style={{ fontSize: 9.5, color: "#98A2B3" }}>{[s.type, s.byteOrder === "motorola" ? "big-endian" : null, s.vt && D.valueTables && D.valueTables[s.vt] ? "values: " + Object.entries(D.valueTables[s.vt]).slice(0, 3).map(([k, v]) => k + "=" + v).join(", ") + (Object.keys(D.valueTables[s.vt]).length > 3 ? " …" : "") : null].filter(Boolean).join(" · ")}</div>}</td>
                     {["startBit", "length", "factor", "offset", "min", "max"].map((k) => <td key={k} style={td}>{cell(s[k], (v) => { s[k] = num(v); }, 58, true)}</td>)}
                     <td style={td}>{cell(s.unit, (v) => { s.unit = v; }, 60)}</td><td style={td}>{cell(s.init, (v) => { s.init = num(v); }, 50, true)}</td>
                     <td style={td}>{cell(Object.entries(s.roles || {}).map(([n, r]) => n + ":" + r).join(", "), (v) => { const o = {}; v.split(/[,;]+/).forEach((t) => { const [n, r] = t.split(":").map((x) => (x || "").trim()); if (n && EK.ROLE_CODES.includes((r || "").toUpperCase())) o[n] = r.toUpperCase(); }); s.roles = o; }, 240, true)}</td>
@@ -8610,6 +8648,7 @@ export default function App() {
   const applyAll = useCallback((d) => {
     if (!d) return;
     applyStores(d);
+    if (d.ETH_STORE && ((d.ETH_STORE.pdus || []).length || (d.ETH_STORE.nodes || []).length)) { ETH_PERSIST.legacy = clone(d.ETH_STORE); if (!ETH_PERSIST.loaded) ETH_STORE.data = clone(d.ETH_STORE); }
     if (d.reqStatus) setReqStatus(clone(d.reqStatus));
     if (d.regEdits) setRegEdits(clone(d.regEdits));
     if (Array.isArray(d.baselines)) setBaselines(clone(d.baselines));
