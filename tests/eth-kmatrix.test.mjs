@@ -95,8 +95,24 @@ const LUA = [
   '      -- Signal MuxA', '      signals.MuxA = bit.bor(signals.MuxA, bit.rshift(bit.band(buffer(byte_index + 9, 1):uint(), 0xFF), 0))',
   '      -- Signal MuxB', '      signals.MuxB = bit.bor(signals.MuxB, bit.rshift(bit.band(buffer(byte_index + 9, 1):uint(), 0xFF), 0))', '    end',
   'local udp_port = DissectorTable.get("udp.port")', 'udp_port:add(20000, demo_protocol)'].join("\n");
+
+// --- released-layout details: a group-heading row above the header, "Layer 4 Payload [Byte]", a PDU listed once per receiver
+const rel = parseWorkbook({
+  Nodes: [["Name", "Mac address", "IPv4 address", "IPv6 address", "Receive Port", "Transmit Port"], ["A", "02:00:00:00:00:0A", "", "fd00::a", 20000, 20000], ["B", "02:00:00:00:00:0B", "", "fd00::b", 20000, 20000], ["C", "02:00:00:00:00:0C", "", "fd00::c", 20000, 20000]],
+  Messages: [["Message ID", "PDU type", "Send type", "Cycle time", "Sender", "Receiver"], ["", "Diag_req", "", "", "A", "B"], ["", "Diag_req", "", "", "A", "C"], ["0x7", "Stat", "cyclic", 50, "A", "B"]],
+  BackboneETH: [["Frames", "", "", "", "", "", "", "", "", "", "", "PDUs", "Signal", "Comment", "", "Nodes"], ["ID", "Frame", "Frame Type", "Cycle Time", "Frame Layout", "Source IP Address", "Source Service-Port", "Dest IP Address", "Dest Service Port", "IP Address Type", "Layer 4 Payload [Byte]", "PDU", "Signal", "Comment", "", "A", "B", "C"],
+    [], ["0x7", "Stat", "Unicast", 50, "TCP", "fd00::a", 42557, "fd00::b", 42557, "IPv6", 12, "Stat", "flag", "", "", "S", "R", ""]] }).eth;
+const st7 = rel.pdus.find((p) => p.id === 7), dq = rel.pdus.find((p) => p.name === "Diag_req");
+ok(rel.pdus.length === 2 && st7.frame.layout === "TCP" && st7.frame.dstPort === 42557 && st7.frame.payloadBytes === 12 && st7.signals[0].roles.A === "S", "released layout: the real header is found under a group-heading row; Layer 4 payload and roles are read");
+ok(dq.receivers.join() === "B,C" && dq.sender === "A", "a PDU listed on several rows (one per receiver) keeps all its receivers");
+const dis = parseDissector(['message_table[0x00000007] = function(header_tree, pinfo, tree, buffer, byte_index)', '    -- A_Stat', '      -- Signal flag', '      signals.flag = bit.bor(signals.flag, bit.rshift(bit.band(buffer(byte_index + 8, 1):uint(), 0x1), 0))', '    end'].join("\n")).eth;
+const o1 = mergeEth(mergeEth(emptyEth(), dis).eth, rel), o2 = mergeEth(mergeEth(emptyEth(), rel).eth, dis);
+const s1 = o1.eth.pdus.find((p) => p.id === 7), s2 = o2.eth.pdus.find((p) => p.id === 7);
+ok(s1.name === "Stat" && s2.name === "Stat" && s1.dissectorName === "A_Stat" && s2.dissectorName === "A_Stat" && !o1.report.conflicts.length && !o2.report.conflicts.length && s1.signals[0].startBit === 0 && s2.signals[0].startBit === 0 && s1.frame.layout === "TCP", "K-Matrix name wins over the generated dissector name in either import order; layout comes from the dissector, transport from the K-Matrix");
+const same = JSON.parse(JSON.stringify(rel)); same.nodes.forEach((n) => { n.ecu = "ECU-CCU"; }); same.nodes[1].mac = same.nodes[0].mac;
+ok(!checkEth(same).some((x) => /MAC/.test(x.msg)), "a shared MAC on two endpoints of the same ECU is not flagged");
 const dz = parseDissector(LUA), dd = dz.eth, P = (id) => dd.pdus.find((p) => p.id === id), S = (id, n) => P(id).signals.find((x) => x.name === n);
-ok(dd.pdus.length === 3 && dd.source.udpPort === 20000 && P(0x10).name === "CZC_Demo" && P(0x10).senderHint === "CZC" && P(0x10).frame.dstPort === 20000, "dissector: PDUs, names, UDP port and the sender hint (never the sender) are read");
+ok(dd.pdus.length === 3 && dd.source.udpPort === 20000 && P(0x10).name === "CZC_Demo" && P(0x10).senderHint === "CZC" && P(0x10).frame.dstPort == null && P(0x10).nameSource === "dissector", "dissector: PDUs, names, UDP port and the sender hint (never the sender) are read; frame transport is left to the K-Matrix");
 ok(S(0x10, "Lamp").startBit === 0 && S(0x10, "Lamp").length === 2 && S(0x10, "Lamp").vt === "Lamp" && dd.valueTables.Lamp["1"] === "on", "dissector: bit field + value table");
 ok(S(0x10, "Speed").startBit === 2 && S(0x10, "Speed").length === 12 && S(0x10, "Speed").factor === 0.01 && S(0x10, "Speed").offset === -5 && S(0x10, "Speed").type === "unsigned", "dissector: multi-byte little-endian signal with factor/offset (a scaled integer is not an IEEE float)");
 ok(S(0x10, "Temp").type === "signed" && S(0x10, "Volt").type === "float" && S(0x10, "Volt").startBit === 32 && S(0x10, "Volt").length === 32, "dissector: signed integers and IEEE floats");

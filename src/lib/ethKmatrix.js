@@ -32,12 +32,14 @@ const NODE_COLS = { name: ["name", "node"], mac: ["macaddress", "mac"], ipv4: ["
 const MSG_COLS = { id: ["messageid", "pduid"], name: ["pduname", "pdutype", "messagename", "pdu", "name"], sendType: ["sendtype"], cycleMs: ["cycletime", "cycle"], sender: ["sender", "transmitter"], receivers: ["receiver", "receivers"] };
 const FRAME_COLS = { id: ["messageid", "pduid", "id"], frame: ["frame", "framename"], frameType: ["frametype"], cycleMs: ["cycletime"], layout: ["framelayout", "transport", "protocol"],
   srcIp: ["sourceipaddress", "sourceip"], srcPort: ["sourceserviceport", "sourceport"], dstIp: ["destipaddress", "destinationipaddress", "destip"], dstPort: ["destserviceport", "destinationserviceport", "destport"],
-  ipType: ["ipaddresstype", "iptype"], payloadBytes: ["headerpayloadbyte", "headerpayload", "payloadbyte", "payload"], pdu: ["pdus", "pdu"], signal: ["signal", "signals", "signalname"],
+  ipType: ["ipaddresstype", "iptype"], payloadBytes: ["headerpayloadbyte", "headerpayload", "layer4payloadbyte", "layer4payload", "payloadbyte", "payload"], pdu: ["pdus", "pdu"], signal: ["signal", "signals", "signalname"],
   startBit: ["startbit", "bitposition", "startbyte"], length: ["bitlength", "lengthbit", "length"], factor: ["factor", "scale"], offset: ["offset"], min: ["min", "minimum"], max: ["max", "maximum"], unit: ["unit"], init: ["initvalue", "initialvalue", "init"] };
 
 // Finds the header row (within the first rows) and maps each wanted field to a column. Exact normalized matches win
-// over prefix matches, so "Frame" does not grab "Frame Type".
+// over prefix matches, so "Frame" does not grab "Frame Type". The row with the MOST matches wins, so a group-heading
+// row above the real header ("Frames … PDUs · Signal … Nodes" in the released layout) is not mistaken for it.
 function mapHeader(aoa, spec, minHits = 2) {
+  let best = null;
   for (let r = 0; r < Math.min(aoa.length, 8); r++) {
     const row = (aoa[r] || []).map(norm), map = {}, used = new Set();
     for (const [field, aliases] of Object.entries(spec)) {
@@ -46,9 +48,9 @@ function mapHeader(aoa, spec, minHits = 2) {
       if (idx < 0) for (const a of aliases) { idx = row.findIndex((h, i) => !used.has(i) && h && h.startsWith(a)); if (idx >= 0) break; }
       if (idx >= 0) { map[field] = idx; used.add(idx); }
     }
-    if (Object.keys(map).length >= minHits) return { row: r, map, header: aoa[r] || [] };
+    if (Object.keys(map).length >= minHits && (!best || Object.keys(map).length > Object.keys(best.map).length)) best = { row: r, map, header: aoa[r] || [] };
   }
-  return null;
+  return best;
 }
 const findSheet = (sheets, re) => Object.keys(sheets).find((n) => re.test(n));
 
@@ -68,7 +70,10 @@ export function parseWorkbook(sheets) {
     const h = mapHeader(sheets[msgSheet], MSG_COLS);
     if (!h || (h.map.id == null && h.map.name == null)) warnings.push("Sheet “" + msgSheet + "”: no Message ID or PDU column found.");
     else sheets[msgSheet].slice(h.row + 1).forEach((r) => { const id = parseId(r[h.map.id]), name = str(r[h.map.name]); if (id == null && !name) return;
-      const p = pduFor(id, name); p.name = name || p.name; p.sendType = str(r[h.map.sendType]).toLowerCase(); p.cycleMs = numOrNull(r[h.map.cycleMs]); p.sender = str(r[h.map.sender]); p.receivers = splitList(r[h.map.receivers]); });
+      const p = pduFor(id, name); p.name = name || p.name; // a PDU may be listed on several rows (e.g. one per receiver): combine them
+      const stp = str(r[h.map.sendType]).toLowerCase(), cyc = numOrNull(r[h.map.cycleMs]), snd = str(r[h.map.sender]);
+      if (stp && !p.sendType) p.sendType = stp; if (cyc != null && p.cycleMs == null) p.cycleMs = cyc; if (snd && !p.sender) p.sender = snd;
+      p.receivers = [...new Set([...(p.receivers || []), ...splitList(r[h.map.receivers])])]; });
   }
   if (frameSheet && frameSheet !== msgSheet && frameSheet !== nodeSheet) {
     const aoa = sheets[frameSheet], h = mapHeader(aoa, FRAME_COLS, 3);
@@ -121,8 +126,12 @@ export function mergeEth(base, incoming) {
   for (const p of inc.pdus || []) {
     const ex = out.pdus.find((x) => (p.id != null && x.id === p.id) || (p.id == null && x.name === p.name));
     if (!ex) { out.pdus.push(JSON.parse(JSON.stringify(p))); report.added.pdus++; report.added.signals += (p.signals || []).length; continue; }
+    // A dissector's PDU name is generated (often sender-prefixed, e.g. ADAS_Basic_ADAS_DomainNotif); the K-Matrix name
+    // (ADAS_DomainNotif) is the official one. Whichever arrives first, the K-Matrix name wins and the other is kept as dissectorName.
+    if (ex.nameSource === "dissector" && p.nameSource !== "dissector" && p.name && p.name !== ex.name) { ex.dissectorName = ex.name; ex.name = p.name; delete ex.nameSource; report.renamed = (report.renamed || 0) + 1; }
+    else if (p.nameSource === "dissector" && ex.nameSource !== "dissector" && p.name !== ex.name) { if (!ex.dissectorName) ex.dissectorName = p.name; }
     const where = "PDU " + fmtId(ex.id) + " " + ex.name;
-    if (mergeFields(ex, p, ["name", "sendType", "cycleMs", "sender", "receivers"], where, report)) report.filled++;
+    if (mergeFields(ex, p, [...(p.nameSource === "dissector" || ex.dissectorName ? [] : ["name"]), "sendType", "cycleMs", "sender", "receivers"], where, report)) report.filled++;
     if (!ex.senderHint && p.senderHint) ex.senderHint = p.senderHint;
     ex.frame = ex.frame || {}; if (mergeFields(ex.frame, p.frame || {}, ["name", "type", "layout", "srcIp", "srcPort", "dstIp", "dstPort", "ipType", "payloadBytes", "minPayloadBytes"], where + " (frame)", report)) report.filled++;
     for (const s of p.signals || []) {
@@ -170,7 +179,9 @@ export function sharedBitSignals(signals) {
 export function checkEth(eth, topo) {
   const f = [], E = (msg) => f.push({ sev: "error", msg }), W = (msg) => f.push({ sev: "warning", msg });
   const nodes = eth.nodes || [], pdus = eth.pdus || [], names = new Set(nodes.map((n) => n.name));
-  const dup = (key, label) => { const by = {}; nodes.forEach((n) => { const v = str(n[key]).toLowerCase(); if (v) (by[v] = by[v] || []).push(n.name); }); Object.entries(by).forEach(([v, ns]) => { if (ns.length > 1) W(label + " " + (key === "mac" ? v.toUpperCase() : v) + " is used by " + ns.join(", ") + " — confirm this is the same device, or correct it."); }); };
+  // Shared addresses are expected when the nodes are endpoints on the SAME ECU (e.g. two services on the CCU host); only flag them otherwise.
+  const ecuByName = Object.fromEntries(nodes.map((n) => [n.name, n.ecu || null]));
+  const dup = (key, label) => { const by = {}; nodes.forEach((n) => { const v = str(n[key]).toLowerCase(); if (v) (by[v] = by[v] || []).push(n.name); }); Object.entries(by).forEach(([v, ns]) => { const ecus = new Set(ns.map((x) => ecuByName[x])); if (ns.length > 1 && !(ecus.size === 1 && !ecus.has(null))) W(label + " " + (key === "mac" ? v.toUpperCase() : v) + " is used by " + ns.join(", ") + " — confirm this is the same device, or correct it."); }); };
   dup("mac", "MAC"); dup("ipv4", "IPv4"); dup("ipv6", "IPv6");
   const nameCount = {}; nodes.forEach((n) => { nameCount[n.name] = (nameCount[n.name] || 0) + 1; }); Object.entries(nameCount).forEach(([n, c]) => { if (c > 1) E("Node " + n + " is defined " + c + " times."); });
   nodes.forEach((n) => { if (n.mac && !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(n.mac)) E("Node " + n.name + ": MAC “" + n.mac + "” is not six hex bytes.");
@@ -265,7 +276,7 @@ export function parseDissector(text) {
     if ((m = /^\s*"VALS_([^"]+)",\s*\{\s*$/.exec(line))) { curVt = m[1]; valueTables[curVt] = {}; continue; }
     if ((m = /^([A-Za-z0-9_]+)_field\s*=\s*ProtoField\.([a-z0-9]+)\((.*)\)\s*$/.exec(line))) {
       fieldType[m[1]] = m[2]; const v = /CONSTANTS\["VALS_([^"]+)"\]/.exec(m[3]); if (v) fieldVt[m[1]] = v[1]; continue; }
-    if ((m = /^message_table\[0x([0-9a-fA-F]+)\]\s*=\s*function/.exec(line))) { finishSig(); cur = { id: parseInt(m[1], 16), name: null, sendType: "", cycleMs: null, sender: "", receivers: [], frame: { layout: "UDP" }, signals: [] }; pdus.push(cur); continue; }
+    if ((m = /^message_table\[0x([0-9a-fA-F]+)\]\s*=\s*function/.exec(line))) { finishSig(); cur = { id: parseInt(m[1], 16), name: null, sendType: "", cycleMs: null, sender: "", receivers: [], frame: {}, signals: [] }; pdus.push(cur); continue; }
     if (cur && cur.name == null && (m = /^\s*--\s*(\S+)\s*$/.exec(line))) { cur.name = m[1]; continue; }
     if ((m = /^\s*-- Signal (\S+)\s*$/.exec(line))) { finishSig(); sig = { name: m[1], parts: [], float: false }; continue; }
     if (sig) {
@@ -280,8 +291,8 @@ export function parseDissector(text) {
     if ((m = /Proto\("([^"]+)"/.exec(line))) proto = m[1];
   }
   finishSig();
-  pdus.forEach((p) => { if (!p.name) p.name = "PDU_" + fmtId(p.id); const pre = /^([A-Za-z0-9]+)_/.exec(p.name); if (pre) p.senderHint = pre[1];
-    if (port) p.frame.dstPort = port; if (p._maxByte) p.frame.minPayloadBytes = p._maxByte; delete p._maxByte; });
+  pdus.forEach((p) => { if (!p.name) p.name = "PDU_" + fmtId(p.id); p.nameSource = "dissector"; const pre = /^([A-Za-z0-9]+)_/.exec(p.name); if (pre) p.senderHint = pre[1];
+    /* transport (UDP/TCP) and ports are NOT taken from the dissector: it binds one port for decoding, the K-Matrix owns the real frame */ if (p._maxByte) p.frame.minPayloadBytes = p._maxByte; delete p._maxByte; });
   // keep only value tables that a signal uses
   const used = new Set(pdus.flatMap((p) => p.signals.map((s) => s.vt).filter(Boolean)));
   const vts = {}; used.forEach((k) => { if (valueTables[k]) vts[k] = valueTables[k]; });
