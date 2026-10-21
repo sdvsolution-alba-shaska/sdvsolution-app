@@ -9,8 +9,8 @@
 --   * public.upload_grants — the emails an owner/admin has allowed to UPLOAD. Owners and admins
 --     can always upload. Everyone in the company (owner/admin/editor/viewer) can DOWNLOAD.
 --   * public.shared_files — one row per uploaded file (name, size, SHA-256, who, when, note).
---   * Seeds an upload grant + a viewer invitation for uploader@example.com in the
---     sdvsolution.com company (viewers are read-only and not billed as editors).
+--   * Upload rights for people outside the company are added on the Shared files page (Upload list),
+--     and the person is invited from the Team tab.
 -- ============================================================================
 
 -- ---------- who may upload --------------------------------------------------
@@ -84,21 +84,3 @@ drop policy if exists "shared files: admin or uploader delete" on storage.object
 create policy "shared files: admin or uploader delete" on storage.objects for delete to authenticated using (
   bucket_id = 'shared-files' and (storage.foldername(name))[1] = public.current_org_id()::text
   and (public.is_org_admin() or owner = auth.uid()));
-
--- ---------- seed: uploader@example.com may upload (sdvsolution.com company) ----------
-do $$
-declare org uuid;
-begin
-  select id into org from public.organizations where domain = 'sdvsolution.com';
-  if org is null then
-    raise notice 'No sdvsolution.com company found — add the upload grant from the app instead.';
-    return;
-  end if;
-  insert into public.upload_grants (org_id, email) values (org, 'uploader@example.com')
-    on conflict (org_id, email) do nothing;
-  -- Invite him into the company as a viewer (read-only, not a billed editor) unless he is already a member.
-  if not exists (select 1 from public.memberships where org_id = org and lower(email) = 'uploader@example.com') then
-    insert into public.invitations (org_id, email, role, status) values (org, 'uploader@example.com', 'viewer', 'pending')
-      on conflict (org_id, email) do update set status = 'pending', role = excluded.role;
-  end if;
-end $$;

@@ -122,6 +122,7 @@ export function mergeEth(base, incoming) {
     if (!ex) { out.nodes.push(JSON.parse(JSON.stringify(n))); report.added.nodes++; }
     else if (mergeFields(ex, n, ["mac", "ipv4", "ipv6", "rxPort", "txPort"], "Node " + n.name, report)) report.filled++;
   }
+  if (inc.source && !out.source) out.source = JSON.parse(JSON.stringify(inc.source));
   if (inc.valueTables) { out.valueTables = out.valueTables || {}; for (const [k, v] of Object.entries(inc.valueTables)) if (!out.valueTables[k]) out.valueTables[k] = v; }
   for (const p of inc.pdus || []) {
     const ex = out.pdus.find((x) => (p.id != null && x.id === p.id) || (p.id == null && x.name === p.name));
@@ -421,4 +422,28 @@ export function bmTypeForBus(b) {
 export function bindingStatus(eth, bus) {
   if (!bus) return null; const p = (eth.pdus || []).find((x) => x.id === bus.pduId); const s = p && (p.signals || []).find((x) => x.name === bus.signal);
   if (!s) return "missing"; if (s.startBit !== bus.startBit || s.length !== bus.length || (s.byteOrder || "intel") !== (bus.byteOrder || "intel") || (s.factor ?? 1) !== (bus.factor ?? 1) || (s.offset ?? 0) !== (bus.offset ?? 0)) return "changed"; return "ok";
+}
+
+/* ---------- brand-neutral names ----------
+   Third-party company and brand names are never kept in SDVsolution data: every imported matrix (workbook or
+   dissector) and every stored one is passed through scrubEth(). The word is replaced by a neutral "oem" token in the
+   same letter case (<brand>_fuel_pump -> oem_fuel_pump, <BRAND> -> OEM), so names stay unique and the workbook and the
+   dissector still match each other after both are scrubbed. A protocol name that only carried a brand becomes Backbone_ETH. */
+const fromB64 = (t) => (typeof atob === "function" ? atob(t) : Buffer.from(t, "base64").toString("latin1"));
+export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu"].map(fromB64); // kept encoded so the names never appear in the source
+const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.join("|"), "gi");
+const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
+export const scrubText = (s) => (typeof s === "string" ? s.replace(BRAND_RE, (m) => caseLike(m, "oem")) : s);
+export const hasBrand = (s) => typeof s === "string" && new RegExp(BRAND_RE.source, "i").test(s);
+export function scrubEth(eth) {
+  let changed = 0;
+  const walk = (v) => {
+    if (typeof v === "string") { const t = scrubText(v); if (t !== v) changed++; return t; }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") { const o = {}; for (const [k, x] of Object.entries(v)) { const nk = scrubText(k); if (nk !== k) changed++; o[nk] = walk(x); } return o; }
+    return v;
+  };
+  const out = walk(eth || emptyEth());
+  if (out.source && out.source.proto && /^oem_?udp$/i.test(out.source.proto)) out.source.proto = "Backbone_ETH";
+  return { eth: out, changed };
 }

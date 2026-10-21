@@ -1,6 +1,6 @@
 // Run: node tests/eth-kmatrix.test.mjs
 // Ethernet backbone K-Matrix: reading the released workbook layout, merging partial workbooks, checks, and round trip.
-import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth, toDissector, ecuSignals, bmTypeForBus, bindingStatus } from "../src/lib/ethKmatrix.js";
+import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth, toDissector, ecuSignals, bmTypeForBus, bindingStatus, scrubEth, scrubText, hasBrand, BRAND_WORDS } from "../src/lib/ethKmatrix.js";
 
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
 
@@ -137,5 +137,12 @@ ok(bmTypeForBus({ length: 1 }).baseType === "boolean" && bmTypeForBus({ length: 
 const bus = czIn[0]; ok(bindingStatus(bnd, bus) === "ok", "a fresh binding is ok");
 const bnd2 = JSON.parse(JSON.stringify(bnd)); bnd2.pdus[1].signals[0].startBit = 30; ok(bindingStatus(bnd2, bus) === "changed", "a binding whose signal layout changed in the K-Matrix is flagged");
 bnd2.pdus[1].signals = []; ok(bindingStatus(bnd2, bus) === "missing", "a binding whose signal left the K-Matrix is flagged");
+
+// --- brand-neutral names (test strings are built from the encoded word list, so no names appear in this file)
+const [w1, w2] = BRAND_WORDS, up = (x) => x.toUpperCase(), cap = (x) => x[0].toUpperCase() + x.slice(1);
+ok(scrubText("device_enabled_" + w1 + "_fuel_pump") === "device_enabled_oem_fuel_pump" && scrubText("EVCC_type_" + up(w2)) === "EVCC_type_OEM" && scrubText(cap(w1) + " Motors variant") === "Oem variant" && scrubText(cap(w2) + "_UDP") === "Oem_UDP", "brand names become a neutral token in the same letter case");
+const br = scrubEth({ nodes: [], source: { proto: cap(w2) + "_UDP" }, valueTables: { ["VALS_" + w1 + "_x"]: { 0: up(w1), 1: "other" } }, pdus: [{ id: 1, name: w2 + "_status", signals: [{ name: "pc_" + w1 + "_fan", vt: "VALS_" + w1 + "_x", roles: {} }] }] });
+ok(br.changed >= 5 && br.eth.source.proto === "Backbone_ETH" && br.eth.pdus[0].name === "oem_status" && br.eth.pdus[0].signals[0].name === "pc_oem_fan" && br.eth.pdus[0].signals[0].vt === "VALS_oem_x" && br.eth.valueTables.VALS_oem_x[0] === "OEM" && !hasBrand(JSON.stringify(br.eth)), "scrubEth cleans names, value-table keys and texts, references and the protocol name");
+ok(scrubEth(br.eth).changed === 0, "scrubbing is idempotent");
 const packed = await packEth(dd); ok(JSON.stringify(await unpackEth(packed)) === JSON.stringify(dd) && packed.length < JSON.stringify(dd).length * 2, "compressed storage round-trips exactly");
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
