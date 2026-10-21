@@ -3808,6 +3808,15 @@ const ETH_STORE = { data: { nodes: [], pdus: [] } }; // Ethernet backbone K-Matr
    can be moved across once. */
 const ETH_PERSIST = { loaded: false, loading: null, legacy: null };
 const ETH_VIEW = { list: [], total: 0, ql: "" }; // current filtered page of the PDU table (render helper)
+/* Load the company's ETH K-Matrix once (shared by the K-Matrix panel and Behavior Model bindings). Resolves with the stored row (or null). */
+function ethEnsureLoaded() {
+  if (ETH_PERSIST.loaded) return Promise.resolve(ETH_PERSIST.row || null);
+  const EK = typeof window !== "undefined" ? window.__sdvEthKm : null, API = typeof window !== "undefined" && window.__sdvAuth ? window.__sdvAuth.ethKm : null;
+  if (!EK || !API) { ETH_PERSIST.loaded = true; return Promise.resolve(null); }
+  if (!ETH_PERSIST.loading) ETH_PERSIST.loading = API.load().then(async (row) => { if (row && row.data_gz) ETH_STORE.data = await EK.unpackEth(row.data_gz); ETH_PERSIST.row = row || null; ETH_PERSIST.loaded = true; ETH_PERSIST.loading = null; return row || null; })
+    .catch((e) => { ETH_PERSIST.loading = null; ETH_PERSIST.loaded = true; throw e; });
+  return ETH_PERSIST.loading;
+}
 const WS_STORES = { KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
 function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k] = JSON.parse(JSON.stringify(WS_STORES[k].data)); } catch (e) {} } return o; }
 function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } }
@@ -4152,12 +4161,10 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
     if (!API || !EK) { ETH_PERSIST.loaded = true; setSaveState("local"); return; }
     if (ETH_PERSIST.loaded) return;
     let alive = true;
-    (ETH_PERSIST.loading = ETH_PERSIST.loading || API.load()).then(async (row) => {
-      if (row && row.data_gz) ETH_STORE.data = await EK.unpackEth(row.data_gz);
-      ETH_PERSIST.loaded = true; ETH_PERSIST.loading = null;
+    ethEnsureLoaded().then(async (row) => {
       if (!row && ETH_PERSIST.legacy) { ETH_STORE.data = JSON.parse(JSON.stringify(ETH_PERSIST.legacy)); if (alive) await saveNow(); } // move an older workspace's matrix across once
       if (alive) { setSaveState("saved"); setV((v) => v + 1); }
-    }).catch((e) => { ETH_PERSIST.loading = null; ETH_PERSIST.loaded = true; if (alive) setSaveState(/relation|does not exist|schema cache/i.test(e.message || "") ? "nosetup" : "failed"); });
+    }).catch((e) => { if (alive) setSaveState(/relation|does not exist|schema cache/i.test(e.message || "") ? "nosetup" : "failed"); });
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (saveTimer.current) { clearTimeout(saveTimer.current); saveNow(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -7460,6 +7467,25 @@ function OpsReqDoc({ rDoc, reqs, sel, onPick, canWrite, editId, onEdit, onSave, 
 /* Behavior Models (Phase 1) — typed signals, calibrations, guarded state machine and Moore outputs per function.
    The deterministic generator (src/lib/codegen.js, registered as window.__sdvCodegen) turns an approved model into C + tests.
    AI may PROPOSE model content here; a human reviews and approves it — the generator never sees unreviewed AI output as approved. */
+/* Search-as-you-type picker over the backbone signals an ECU receives (dir "in") or sends (dir "out"). */
+function BusPicker({ ecu, dir, onPick, disabled }) {
+  const EK = typeof window !== "undefined" ? window.__sdvEthKm : null;
+  const [q, setQ] = useState(""); const [openL, setOpenL] = useState(false); const [, setV] = useState(0);
+  useEffect(() => { if (!ETH_PERSIST.loaded) ethEnsureLoaded().then(() => setV((v) => v + 1)).catch(() => setV((v) => v + 1)); }, []);
+  if (!EK) return null;
+  const all = ETH_PERSIST.loaded ? EK.ecuSignals(ETH_STORE.data, ecu, dir) : [];
+  const ql = q.trim().toLowerCase(), hits = ql ? all.filter((x) => x.signal.toLowerCase().includes(ql) || x.pdu.toLowerCase().includes(ql) || EK.fmtId(x.pduId).toLowerCase() === ql).slice(0, 40) : [];
+  return (<div className="relative" style={{ minWidth: 150 }}>
+    <input disabled={disabled} value={q} onChange={(e) => { setQ(e.target.value); setOpenL(true); }} onFocus={() => setOpenL(true)} onBlur={() => setTimeout(() => setOpenL(false), 150)}
+      placeholder={!ETH_PERSIST.loaded ? "loading K-Matrix…" : all.length ? "bind " + (dir === "in" ? "received" : "sent") + " signal… (" + all.length + ")" : "no " + (dir === "in" ? "received" : "sent") + " signals for " + String(ecu || "").replace(/^ECU-/, "")}
+      style={{ width: "100%", fontSize: 11, border: "1px dashed #B2DDFF", borderRadius: 5, padding: "2px 5px", color: "#175CD3" }} />
+    {openL && hits.length > 0 && <div className="absolute" style={{ zIndex: 30, top: 24, left: 0, width: 360, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #E4E7EC", borderRadius: 8, boxShadow: "0 8px 20px rgba(16,24,40,0.14)" }}>
+      {hits.map((x) => <button key={x.key} onMouseDown={(e) => { e.preventDefault(); onPick(x); setQ(""); setOpenL(false); }} className="w-full" style={{ display: "block", textAlign: "left", padding: "5px 9px", borderBottom: "1px solid #F2F4F7", fontSize: 11 }}>
+        <div style={{ fontWeight: 700, color: "#101828", fontFamily: "ui-monospace,monospace" }}>{x.signal}</div>
+        <div style={{ color: "#667085" }}>{EK.fmtId(x.pduId)} {x.pdu} · {dir === "in" ? "from " + (x.sender || "?") : "to " + (x.receivers.join(", ") || "?")}{x.cycleMs ? " · " + x.cycleMs + " ms" : ""} · {x.length} bit{x.factor !== 1 || x.offset !== 0 ? " · ×" + x.factor + (x.offset ? (x.offset > 0 ? "+" : "") + x.offset : "") : ""}</div></button>)}
+    </div>}
+  </div>);
+}
 function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, audit, notify, build, periodMs, baselines = [], tcRuns = [], onImportResults, onCaptureBaseline, selId, onSel, hideList }) {
   const CG = typeof window !== "undefined" ? window.__sdvCodegen : null;
   const [sel, setSel] = useState(null); const [draft, setDraft] = useState(null); const [dirty, setDirty] = useState(false);
@@ -7643,7 +7669,7 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
             <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>TARGET ECU</div>{inp(draft.target && draft.target.ecu, (v) => edit((m) => { m.target = { ...(m.target || {}), ecu: v }; }))}{(() => { const h = mcuHosting(sel); const l1 = String(sel || "").replace(/^L2-/, "L1-").replace(/-MODE$/, ""), pa = h && (h.mcu.partitions || []).find((x) => x.asil !== "QM" && (x.fns || []).includes(l1)); return h ? <div style={{ fontSize: 10.5, color: "#175CD3", marginTop: 3 }}>Runs on {h.ecu.id.replace("ECU-", "")} · {h.mcu.name}{pa ? <span style={{ color: "#B54708" }}> · part in {pa.name}</span> : null}</div> : null; })()}</div>
             <div><div style={{ color: "#98A2B3", fontWeight: 700, fontSize: 9.5 }}>RUNNABLE PERIOD (ms)</div>{inp(draft.runnable && draft.runnable.periodMs, (v) => edit((m) => { m.runnable = { ...(m.runnable || { name: "Run" }), periodMs: v }; }), 90)}{mark("runnable.periodMs")}</div>
           </div>))}
-          {sec("SIGNALS", "Typed inputs and outputs. Ranges bound the generated tests; the initial value is also the fallback when a read fails (or the invalid-substitute, if set).", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "Dir", "Type", "Min", "Max", "Unit", "Init", "Invalid →", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+          {sec("SIGNALS", "Typed inputs and outputs. Ranges bound the generated tests; the initial value is also the fallback when a read fails (or the invalid-substitute, if set).", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "Dir", "Type", "Min", "Max", "Unit", "Init", "Invalid →", "Backbone (ETH K-Matrix)", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
             {draft.signals.map((s, i) => (<tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
               <td style={{ padding: 3, minWidth: 130 }}>{inp(s.name, (v) => edit((m) => { m.signals[i].name = v; }), null, true)}{mark("signals[" + i + "].name")}</td>
               <td style={{ padding: 3, width: 62 }}>{selBox(s.dir, (v) => edit((m) => { m.signals[i].dir = v; }), ["in", "out"])}</td>
@@ -7651,9 +7677,23 @@ function BehaviorPanel({ models, setModels, sms, canWrite, implFor, reqText, aud
               <td style={{ padding: 3, width: 70 }}>{inp(s.min, (v) => edit((m) => { m.signals[i].min = v; }))}</td><td style={{ padding: 3, width: 70 }}>{inp(s.max, (v) => edit((m) => { m.signals[i].max = v; }))}{mark("signals[" + i + "].range")}</td>
               <td style={{ padding: 3, width: 80 }}>{inp(s.unit, (v) => edit((m) => { m.signals[i].unit = v; }))}</td><td style={{ padding: 3, width: 64 }}>{inp(s.init, (v) => edit((m) => { m.signals[i].init = v; }))}{mark("signals[" + i + "].init")}</td>
               <td style={{ padding: 3, width: 64 }}>{s.dir === "in" ? inp(s.invalid, (v) => edit((m) => { m.signals[i].invalid = v; })) : null}</td>
+              <td style={{ padding: 3, minWidth: 170 }}>{s.bus ? (() => { const EKx = window.__sdvEthKm, st = ETH_PERSIST.loaded && EKx ? EKx.bindingStatus(ETH_STORE.data, s.bus) : null;
+                  return (<div style={{ fontSize: 10.5, lineHeight: 1.35 }}>
+                    <div style={{ fontFamily: "ui-monospace,monospace", color: "#175CD3", fontWeight: 700 }}>⇄ {s.bus.signal}</div>
+                    <div style={{ color: "#667085" }}>{"0x" + Number(s.bus.pduId).toString(16).toUpperCase()} {s.bus.pdu} · {s.dir === "in" ? "from " + (s.bus.sender || "?") : "to " + ((s.bus.receivers || []).join(", ") || "?")}{s.bus.cycleMs ? " · " + s.bus.cycleMs + " ms" : ""}{s.bus.factor !== 1 || s.bus.offset ? " · raw ×" + s.bus.factor + (s.bus.offset ? (s.bus.offset > 0 ? "+" : "") + s.bus.offset : "") : ""}</div>
+                    {st && st !== "ok" && <div style={{ color: "#B54708", fontWeight: 600 }}>{st === "missing" ? "⚠ no longer in the K-Matrix" : "⚠ layout changed in the K-Matrix — re-bind"}</div>}
+                    {canWrite && <button onClick={() => edit((m) => { delete m.signals[i].bus; })} style={{ color: "#98A2B3", fontSize: 10 }}>unbind</button>}</div>); })()
+                : canWrite && draft.target && draft.target.ecu ? <BusPicker ecu={draft.target.ecu} dir={s.dir} onPick={(x) => {
+                    const t = window.__sdvEthKm.bmTypeForBus(x); if (!t.baseType) { notify("Can't bind " + x.signal + ": " + t.why + "."); return; }
+                    edit((m) => { const g = m.signals[i]; g.bus = { pduId: x.pduId, pdu: x.pdu, signal: x.signal, sender: x.sender, receivers: x.receivers, cycleMs: x.cycleMs, startBit: x.startBit, length: x.length, byteOrder: x.byteOrder, factor: x.factor, offset: x.offset };
+                      if (!g.name) g.name = x.signal.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([0-9])/, "s_$1"); g.baseType = t.baseType; g.min = t.min; g.max = t.max;
+                      if (g.init === "" || g.init == null || Number(g.init) < t.min || Number(g.init) > t.max) g.init = Math.max(t.min, Math.min(t.max, 0));
+                      const sc = x.factor !== 1 || x.offset !== 0 ? " Raw value: physical = raw × " + x.factor + (x.offset ? " + " + x.offset : "") + (x.unit ? " " + x.unit : "") + "." : "";
+                      g.note = ((g.note || "").replace(/ ?Backbone: [^|]*\|?/g, "").trim() + " Backbone: " + "0x" + x.pduId.toString(16).toUpperCase() + " " + x.pdu + " / " + x.signal + (s.dir === "in" ? " from " + x.sender : "") + (x.cycleMs ? ", " + x.cycleMs + " ms" : "") + "." + sc + " |").trim(); });
+                    notify("Bound " + (s.name || x.signal) + " to " + x.pdu + " / " + x.signal + " — type " + t.baseType + ", raw range " + t.min + "…" + t.max + "."); }} /> : null}</td>
               <td style={{ padding: 3 }}>{canWrite && <button onClick={() => edit((m) => { m.signals.splice(i, 1); })} style={{ color: "#B42318", fontSize: 11 }}>✕</button>}</td></tr>))}
-            {draft.signals.length === 0 && <tr><td colSpan={9} style={{ padding: 10, color: "#98A2B3", fontSize: 11 }}>No signals yet — add them, or ask the Assistant to propose them.</td></tr>}
-            {canWrite && <tr><td colSpan={9} style={{ padding: 6 }}><button onClick={() => edit((m) => { m.signals.push({ name: "", dir: "in", baseType: "", min: "", max: "", unit: "", init: "", invalid: "" }); })} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3" }}>+ Add signal</button></td></tr>}</tbody></table>))}
+            {draft.signals.length === 0 && <tr><td colSpan={10} style={{ padding: 10, color: "#98A2B3", fontSize: 11 }}>No signals yet — add them, or ask the Assistant to propose them.</td></tr>}
+            {canWrite && <tr><td colSpan={10} style={{ padding: 6 }}><button onClick={() => edit((m) => { m.signals.push({ name: "", dir: "in", baseType: "", min: "", max: "", unit: "", init: "", invalid: "" }); })} style={{ fontSize: 11, fontWeight: 700, color: "#175CD3" }}>+ Add signal</button></td></tr>}</tbody></table>))}
           {sec("CALIBRATIONS", "Every threshold and timeout is a named parameter (one definition, with its unit and source) — never a literal inside a guard.", (<table style={{ borderCollapse: "collapse", width: "100%" }}><thead><tr>{["Name", "Type", "Value", "Unit", "Source / justification", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
             {draft.calibrations.map((c, i) => (<tr key={i} style={{ borderTop: "1px solid #F2F4F7" }}>
               <td style={{ padding: 3, minWidth: 170 }}>{inp(c.name, (v) => edit((m) => { m.calibrations[i].name = v; }), null, true)}{mark("calibrations[" + i + "].name")}</td>

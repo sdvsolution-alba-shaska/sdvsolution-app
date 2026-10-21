@@ -392,3 +392,33 @@ export function toDissector(eth, opts = {}) {
   if (tcp.length) { L.push("local tcp_port = DissectorTable.get(\"tcp.port\")"); tcp.forEach((x) => L.push("tcp_port:add(" + x + ", " + P + ")")); }
   return L.join("\n") + "\n";
 }
+
+/* ---------- Behavior Model ↔ backbone binding ----------
+   For an ECU (e.g. ECU-CZM, i.e. every K-Matrix node mapped to it: CZC_1, CZC_2, CZC_Switch, BZC), list the backbone
+   signals it RECEIVES (candidate Behavior Model inputs) or SENDS (candidate outputs), and map one to a Behavior Model
+   signal type. Behavior Models are integer-only, so a binding carries the RAW value; factor/offset/unit stay on the
+   binding (and in the note) for the engineer to apply in calibrations. */
+export function ecuSignals(eth, ecu, dir) {
+  const mine = new Set((eth.nodes || []).filter((n) => n.ecu === ecu).map((n) => n.name)), out = [];
+  for (const p of eth.pdus || []) {
+    if (p.id == null) continue;
+    const sends = mine.has(p.sender), recvs = (p.receivers || []).filter((r) => mine.has(r));
+    if (dir === "out" ? !sends : !recvs.length) continue;
+    for (const s of p.signals || []) if (s.startBit != null && s.length > 0)
+      out.push({ key: p.id + "/" + s.name, pduId: p.id, pdu: p.name, signal: s.name, sender: p.sender || "", receivers: p.receivers || [], node: dir === "out" ? p.sender : recvs.join(","), cycleMs: p.cycleMs ?? null,
+        startBit: s.startBit, length: s.length, byteOrder: s.byteOrder || "intel", type: s.type || "unsigned", factor: s.factor ?? 1, offset: s.offset ?? 0, unit: s.unit || "", vt: s.vt || null });
+  }
+  return out;
+}
+export function bmTypeForBus(b) {
+  if (b.type === "float") return { baseType: null, why: "IEEE float — Behavior Models are integer-only; bind it through an integer quantity instead" };
+  if (b.length === 1) return { baseType: "boolean", min: 0, max: 1 };
+  if (b.type === "signed") { const t = b.length <= 8 ? "sint8" : b.length <= 16 ? "sint16" : b.length <= 32 ? "sint32" : null; if (!t) return { baseType: null, why: "signed wider than 32 bits" }; return { baseType: t, min: -(2 ** (b.length - 1)), max: 2 ** (b.length - 1) - 1 }; }
+  const t = b.length <= 8 ? "uint8" : b.length <= 16 ? "uint16" : b.length <= 32 ? "uint32" : null; if (!t) return { baseType: null, why: "wider than 32 bits" };
+  return { baseType: t, min: 0, max: 2 ** b.length - 1 };
+}
+// Is a stored binding still present (same PDU id + signal name) and unchanged in layout?
+export function bindingStatus(eth, bus) {
+  if (!bus) return null; const p = (eth.pdus || []).find((x) => x.id === bus.pduId); const s = p && (p.signals || []).find((x) => x.name === bus.signal);
+  if (!s) return "missing"; if (s.startBit !== bus.startBit || s.length !== bus.length || (s.byteOrder || "intel") !== (bus.byteOrder || "intel") || (s.factor ?? 1) !== (bus.factor ?? 1) || (s.offset ?? 0) !== (bus.offset ?? 0)) return "changed"; return "ok";
+}

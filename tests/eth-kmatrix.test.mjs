@@ -1,6 +1,6 @@
 // Run: node tests/eth-kmatrix.test.mjs
 // Ethernet backbone K-Matrix: reading the released workbook layout, merging partial workbooks, checks, and round trip.
-import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth, toDissector } from "../src/lib/ethKmatrix.js";
+import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth, toDissector, ecuSignals, bmTypeForBus, bindingStatus } from "../src/lib/ethKmatrix.js";
 
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
 
@@ -127,5 +127,15 @@ const genLua = toDissector(dd), backL = parseDissector(genLua).eth, keyS = (s) =
 ok(dd.pdus.every((p) => p.signals.filter((s) => s.startBit != null).every((s) => { const b = backL.pdus.find((x) => x.id === p.id).signals.find((x) => x.name === s.name); return b && keyS(b) === keyS(s); })), "generated dissector round-trips every signal (position, byte order, type, scaling, value table)");
 ok(/udp_port:add\(20000/.test(genLua) && /-- Sign extend signed integer/.test(genLua) && /ieee754_single\(v\)/.test(genLua) && /F\["Lamp"\] = ProtoField\.uint8\("Demo_UDP\.Lamp", "Lamp", base\.DEC, VALS\["Lamp"\]\)/.test(genLua), "generated dissector: port binding, sign extension, IEEE floats and value tables");
 ok(JSON.stringify(backL.valueTables) === JSON.stringify(dd.valueTables), "generated dissector keeps the value tables");
+
+// --- Behavior Model binding: what an ECU receives / sends on the backbone
+const bnd = JSON.parse(JSON.stringify(dd)); bnd.nodes = [{ name: "CZC_1", ecu: "ECU-CZM" }, { name: "XMM", ecu: "ECU-CCU" }];
+bnd.pdus[0].sender = "CZC_1"; bnd.pdus[0].receivers = ["XMM"]; bnd.pdus[1].sender = "XMM"; bnd.pdus[1].receivers = ["CZC_1"];
+const czIn = ecuSignals(bnd, "ECU-CZM", "in"), czOut = ecuSignals(bnd, "ECU-CZM", "out");
+ok(czIn.map((x) => x.signal).join() === "Moving" && czOut.some((x) => x.signal === "Speed" && x.factor === 0.01) && !czOut.some((x) => x.signal === "Moving"), "ECU signals: inputs = PDUs the ECU receives, outputs = PDUs it sends");
+ok(bmTypeForBus({ length: 1 }).baseType === "boolean" && bmTypeForBus({ length: 12, type: "unsigned" }).max === 4095 && bmTypeForBus({ length: 8, type: "signed" }).min === -128 && bmTypeForBus({ length: 32, type: "float" }).baseType === null, "bus signal -> Behavior Model type (raw range; floats refused)");
+const bus = czIn[0]; ok(bindingStatus(bnd, bus) === "ok", "a fresh binding is ok");
+const bnd2 = JSON.parse(JSON.stringify(bnd)); bnd2.pdus[1].signals[0].startBit = 30; ok(bindingStatus(bnd2, bus) === "changed", "a binding whose signal layout changed in the K-Matrix is flagged");
+bnd2.pdus[1].signals = []; ok(bindingStatus(bnd2, bus) === "missing", "a binding whose signal left the K-Matrix is flagged");
 const packed = await packEth(dd); ok(JSON.stringify(await unpackEth(packed)) === JSON.stringify(dd) && packed.length < JSON.stringify(dd).length * 2, "compressed storage round-trips exactly");
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
