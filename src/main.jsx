@@ -8,6 +8,7 @@ import { PILOT_MODELS } from "./lib/pilotModels.js";
 import * as reqChecks from "./lib/reqChecks.js";
 import * as reviewLifecycle from "./lib/reviewLifecycle.js";
 import * as ethKmatrix from "./lib/ethKmatrix.js";
+import * as ethArxml from "./lib/ethArxml.js";
 
 // Phase 2: expose the per-company persistence API to the (import-free) app.
 // App.jsx picks this up from window.__sdvWorkspaceApi and uses it to load/save
@@ -22,7 +23,7 @@ if (typeof window !== "undefined") {
   // Review lifecycle rules for curated requirements and Behavior Models (reviewer / approver gates, withdraw-on-edit, roll-up).
   window.__sdvReview = reviewLifecycle;
   // Ethernet backbone K-Matrix: workbook import/merge, checks and export (released layout).
-  window.__sdvEthKm = ethKmatrix;
+  window.__sdvEthKm = { ...ethKmatrix, ...ethArxml };
   // Phase 5: build jobs and runner registration (signed-in users; the server re-checks every gate).
   const buildCall = async (body) => {
     const tok = window.__sdvAuth && window.__sdvAuth.getToken ? await window.__sdvAuth.getToken() : null;
