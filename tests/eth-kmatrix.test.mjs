@@ -123,9 +123,9 @@ const bad2 = JSON.parse(JSON.stringify(dd)); bad2.pdus[0].signals[1].startBit = 
 const mz = mergeEth(mergeEth(emptyEth(), dd).eth, dd); ok(mz.report.conflicts.length === 0 && mz.report.added.signals === 0 && mz.eth.valueTables.Lamp, "dissector import merges idempotently and keeps value tables");
 
 // --- generating BackboneETH.lua: the importer reads the generated file back without loss
-const genLua = toDissector(dd), back = parseDissector(genLua).eth, keyS = (s) => [s.name, s.startBit, s.length, s.byteOrder || "intel", s.type, s.factor ?? 1, s.offset ?? 0, s.vt || ""].join("|");
-ok(dd.pdus.every((p) => p.signals.filter((s) => s.startBit != null).every((s) => { const b = back.pdus.find((x) => x.id === p.id).signals.find((x) => x.name === s.name); return b && keyS(b) === keyS(s); })), "generated dissector round-trips every signal (position, byte order, type, scaling, value table)");
+const genLua = toDissector(dd), backL = parseDissector(genLua).eth, keyS = (s) => [s.name, s.startBit, s.length, s.byteOrder || "intel", s.type, s.factor ?? 1, s.offset ?? 0, s.vt || ""].join("|");
+ok(dd.pdus.every((p) => p.signals.filter((s) => s.startBit != null).every((s) => { const b = backL.pdus.find((x) => x.id === p.id).signals.find((x) => x.name === s.name); return b && keyS(b) === keyS(s); })), "generated dissector round-trips every signal (position, byte order, type, scaling, value table)");
 ok(/udp_port:add\(20000/.test(genLua) && /-- Sign extend signed integer/.test(genLua) && /ieee754_single\(v\)/.test(genLua) && /F\["Lamp"\] = ProtoField\.uint8\("Demo_UDP\.Lamp", "Lamp", base\.DEC, VALS\["Lamp"\]\)/.test(genLua), "generated dissector: port binding, sign extension, IEEE floats and value tables");
-ok(JSON.stringify(back.valueTables) === JSON.stringify(dd.valueTables), "generated dissector keeps the value tables");
+ok(JSON.stringify(backL.valueTables) === JSON.stringify(dd.valueTables), "generated dissector keeps the value tables");
 const packed = await packEth(dd); ok(JSON.stringify(await unpackEth(packed)) === JSON.stringify(dd) && packed.length < JSON.stringify(dd).length * 2, "compressed storage round-trips exactly");
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
