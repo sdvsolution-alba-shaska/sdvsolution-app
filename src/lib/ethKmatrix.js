@@ -262,7 +262,7 @@ export function parseDissector(text) {
       const got = signalBits(s); if (got.length !== want.size || got.some((b) => !want.has(b))) badLayout++; }
     if (sig.factor != null && sig.factor !== 1) s.factor = sig.factor;
     if (sig.offset != null && sig.offset !== 0) s.offset = sig.offset;
-    if (fieldVt[sig.name]) s.vt = fieldVt[sig.name];
+    if (sig.vt || fieldVt[sig.name]) s.vt = sig.vt || fieldVt[sig.name];
     cur.signals.push(s); cur._maxByte = Math.max(cur._maxByte || 0, ...parts.map((p) => p.byte - 8 + 1)); sig = null;
   };
   for (const raw of lines) {
@@ -273,18 +273,20 @@ export function parseDissector(text) {
       if (/^\s*\},?\s*$/.test(line)) { curVt = null; continue; }
     }
     let m;
-    if ((m = /^\s*"VALS_([^"]+)",\s*\{\s*$/.exec(line))) { curVt = m[1]; valueTables[curVt] = {}; continue; }
-    if ((m = /^([A-Za-z0-9_]+)_field\s*=\s*ProtoField\.([a-z0-9]+)\((.*)\)\s*$/.exec(line))) {
-      fieldType[m[1]] = m[2]; const v = /CONSTANTS\["VALS_([^"]+)"\]/.exec(m[3]); if (v) fieldVt[m[1]] = v[1]; continue; }
+    if ((m = /^\s*"VALS_([^"]+)",\s*\{\s*$/.exec(line)) || (m = /^\s*(?:VALS)?\["([^"]+)"\]\s*=\s*\{\s*$/.exec(line))) { curVt = m[1]; valueTables[curVt] = {}; continue; }
+    if ((m = /^([A-Za-z0-9_]+)_field\s*=\s*ProtoField\.([a-z0-9]+)\((.*)\)\s*$/.exec(line)) || (m = /^F\["([^"]+)"\]\s*=\s*ProtoField\.([a-z0-9]+)\((.*)\)\s*$/.exec(line))) {
+      fieldType[m[1]] = m[2]; const v = /(?:CONSTANTS\["VALS_|VALS\[")([^"]+)"\]/.exec(m[3]); if (v) fieldVt[m[1]] = v[1]; continue; }
     if ((m = /^message_table\[0x([0-9a-fA-F]+)\]\s*=\s*function/.exec(line))) { finishSig(); cur = { id: parseInt(m[1], 16), name: null, sendType: "", cycleMs: null, sender: "", receivers: [], frame: {}, signals: [] }; pdus.push(cur); continue; }
     if (cur && cur.name == null && (m = /^\s*--\s*(\S+)\s*$/.exec(line))) { cur.name = m[1]; continue; }
+    if ((m = /^\S+ = Proto\("([^"]+)"/.exec(line))) { proto = m[1]; continue; }
     if ((m = /^\s*-- Signal (\S+)\s*$/.exec(line))) { finishSig(); sig = { name: m[1], parts: [], float: false }; continue; }
     if (sig) {
       const b = /(rshift|lshift)\(bit\.band\(buffer\(byte_index \+ (\d+), 1\):uint\(\), 0x([0-9A-Fa-f]+)\), (\d+)\)/.exec(line);
       if (b) { sig.parts.push({ dir: b[1], byte: Number(b[2]), mask: parseInt(b[3], 16), sh: Number(b[4]) }); continue; }
       if (/IEEE float support/.test(line)) { sig.float = true; continue; }
+      const vtc = /^\s*-- Value table (\S+)/.exec(line); if (vtc) { sig.vt = vtc[1]; continue; }
       if (/Sign extend signed integer/.test(line)) { sig.signed = true; continue; }
-      const sc = /msg_tree:add(?:_le)?\([A-Za-z0-9_]+_field,\s*\(signals\.[A-Za-z0-9_]+\s*\*\s*([-0-9.eE+]+)\)\s*\+\s*([-0-9.eE+]+)\)/.exec(line);
+      const sc = /(?:msg_tree|t):add(?:_le)?\((?:[A-Za-z0-9_]+_field|F\["[^"]+"\]),\s*\((?:signals\.[A-Za-z0-9_]+|v)\s*\*\s*([-0-9.eE+]+)\)\s*\+\s*([-0-9.eE+]+)\)/.exec(line);
       if (sc) { sig.factor = Number(sc[1]); sig.offset = Number(sc[2]); continue; }
     }
     if ((m = /udp_port:add\((\d+)/.exec(line))) port = Number(m[1]);
@@ -312,3 +314,81 @@ const b64 = { enc: (u8) => { if (typeof Buffer !== "undefined") return Buffer.fr
 async function pipe(u8, stream) { const out = new Response(new Blob([u8]).stream().pipeThrough(stream)); return new Uint8Array(await out.arrayBuffer()); }
 export async function packEth(eth) { return b64.enc(await pipe(new TextEncoder().encode(JSON.stringify(eth || emptyEth())), new CompressionStream("gzip"))); }
 export async function unpackEth(text) { if (!text) return emptyEth(); const j = JSON.parse(new TextDecoder().decode(await pipe(b64.dec(text), new DecompressionStream("gzip")))); j.nodes = j.nodes || []; j.pdus = j.pdus || []; return j; }
+
+/* ---------- generating BackboneETH.lua (Wireshark dissector) from the matrix ----------
+   Same wire format the backbone uses: each UDP/TCP payload carries PDUs as [4-byte ID][4-byte length][payload].
+   Signals are decoded from their bit layout (Intel or Motorola), sign-extended, scaled (factor/offset), IEEE floats
+   converted, and enumerations shown through their value tables. Only PDUs with an ID are decodable. */
+const luaStr = (s) => '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+const luaId = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_").replace(/^([0-9])/, "_$1");
+const hex = (n) => "0x" + (n >>> 0).toString(16).toUpperCase();
+// Byte/mask/shift steps that assemble a signal's raw value (dest bit 0 = LSB of the value).
+function decodeSteps(s) {
+  const bits = signalBits(s); if (!bits.length) return [];
+  const dest = s.byteOrder === "motorola" ? bits.map((_, i) => bits.length - 1 - i) : bits.map((_, i) => i);
+  const groups = [];
+  bits.forEach((b, i) => { const byte = Math.floor(b / 8), g = groups[groups.length - 1];
+    if (g && g.byte === byte) { g.lo = Math.min(g.lo, b % 8); g.hi = Math.max(g.hi, b % 8); g.dlo = Math.min(g.dlo, dest[i]); }
+    else groups.push({ byte, lo: b % 8, hi: b % 8, dlo: dest[i] }); });
+  return groups.map((g) => ({ byte: g.byte, mask: ((1 << (g.hi - g.lo + 1)) - 1) << g.lo, shift: g.lo - g.dlo })).sort((a, b) => (a.shift >= 0 ? 0 : -a.shift) - (b.shift >= 0 ? 0 : -b.shift));
+}
+const fieldKind = (s) => {
+  if (s.type === "string") return "string";
+  if (s.type === "float" || (s.factor != null && s.factor !== 1) || (s.offset != null && s.offset !== 0)) return "float";
+  const L = s.length || 8, w = L <= 8 ? 8 : L <= 16 ? 16 : L < 32 || (L === 32 && s.type === "signed") ? 32 : 64;
+  return (s.type === "signed" ? "int" : "uint") + w;
+};
+export function toDissector(eth, opts = {}) {
+  const proto = luaId(opts.protocol || (eth.source && eth.source.proto) || "Backbone_ETH"), P = "backbone_protocol";
+  const pdus = (eth.pdus || []).filter((p) => p.id != null).sort((a, b) => a.id - b.id);
+  const fields = new Map(); // field name -> signal (first definition wins; same-named signals share a field, as in the source)
+  pdus.forEach((p) => (p.signals || []).forEach((s) => { if (s.startBit != null && s.length > 0 && !fields.has(s.name)) fields.set(s.name, s); }));
+  const vts = eth.valueTables || {}, usedVt = new Set(pdus.flatMap((p) => (p.signals || []).map((s) => s.vt)).filter((v) => v && vts[v]));
+  const L = [];
+  L.push("-- BackboneETH.lua — generated by SDVsolution from the ETH K-Matrix (" + pdus.length + " PDUs, " + fields.size + " signal fields).");
+  L.push("-- Wire format: each datagram carries PDUs as [4-byte message ID][4-byte length][payload]. Do not edit by hand; regenerate from the K-Matrix.");
+  L.push(P + " = Proto(" + luaStr(proto) + ", " + luaStr(proto.replace(/_/g, " ")) + ")", "");
+  // Definitions are split into small functions so no single function exceeds a Lua constant limit (LuaJIT: 65,536).
+  L.push("local VALS = {}");
+  let vg = 0; [...usedVt].sort().forEach((k, i) => { if (i % 400 === 0) L.push((i ? "end\nvals_" + vg + "()\n" : "") + "local function vals_" + (++vg) + "()"); L.push("VALS[" + luaStr(k) + "] = {"); Object.entries(vts[k]).filter(([n]) => /^-?\d+$/.test(n)).sort((a, b) => (BigInt(a[0]) < BigInt(b[0]) ? -1 : 1)).forEach(([n, t]) => L.push("    [" + n + "] = " + luaStr(t) + ",")); /* keys written verbatim: flag values like 2^55 exceed JS number precision */ L.push("}"); });
+  if (usedVt.size) L.push("end", "vals_" + vg + "()"); L.push("");
+  L.push('local f_message_id = ProtoField.uint32("' + proto + '.message_id", "message_id", base.HEX)', 'local f_message_length = ProtoField.uint32("' + proto + '.message_length", "message_length", base.DEC)');
+  const fname = (n) => "F[" + luaStr(n) + "]"; // a table, not locals: Lua allows only 200 locals per chunk
+  L.push("local F = {}");
+  let fi = 0, fg = 0;
+  for (const [n, s] of fields) { if (fi++ % 2000 === 0) L.push((fi > 1 ? "end\nfields_" + fg + "()\n" : "") + "local function fields_" + (++fg) + "()"); const k = fieldKind(s), vt = s.vt && vts[s.vt] ? ", VALS[" + luaStr(s.vt) + "]" : "";
+    L.push(fname(n) + " = ProtoField." + (k === "float" ? "double" : k) + "(" + luaStr(proto + "." + n) + ", " + luaStr(n) + (k === "string" ? "" : ", base.DEC" + (k === "float" ? "" : vt)) + ")"); }
+  if (fields.size) L.push("end", "fields_" + fg + "()");
+  L.push("", "do", "  local list = { f_message_id, f_message_length }", "  for _, f in pairs(F) do list[#list + 1] = f end", "  " + P + ".fields = list", "end", "");
+  L.push("local function ieee754_single(u)", "  if u < 0 then u = u + 4294967296 end", "  local sign = (u >= 2147483648) and -1 or 1", "  local e = math.floor(u / 8388608) % 256", "  local m = u % 8388608",
+    "  if e == 0 then return sign * m * 2 ^ -149 end", "  if e == 255 then if m == 0 then return sign * math.huge end return 0 / 0 end", "  return sign * (1 + m / 8388608) * 2 ^ (e - 127)", "end", "");
+  L.push("local message_table = {}", "");
+  for (const p of pdus) {
+    const sigs = (p.signals || []).filter((s) => s.startBit != null && s.length > 0);
+    L.push("message_table[" + hex(p.id) + "] = function(tree, buffer, byte_index)", "  -- " + p.name, "  local t = tree:add(" + P + ", buffer(byte_index, math.min(buffer:len() - byte_index, 8 + buffer(byte_index + 4, 4):uint())), " + luaStr(p.name) + ")");
+    for (const s of sigs) {
+      const v = "v", big = s.length > 32 || (s.length === 32 && s.type !== "signed" && s.type !== "float"), /* unsigned 32-bit: 64-bit ops so bit 31 does not turn the value negative */ steps = decodeSteps(s), need = 8 + Math.max(...steps.map((x) => x.byte)) + 1;
+      L.push("  -- Signal " + s.name); if (s.vt && vts[s.vt] && fieldKind(s) === "float") L.push("  -- Value table " + s.vt + " (raw values; a scaled field cannot carry a value table in Wireshark)");
+      L.push("  if buffer:len() >= byte_index + " + need + " then", "    local " + v + " = " + (big ? "UInt64(0)" : "0"));
+      steps.forEach((x) => { const rd = "bit.band(buffer(byte_index + " + (8 + x.byte) + ", 1):uint(), " + hex(x.mask) + ")";
+        L.push("    " + v + " = " + (big ? "UInt64.bor(" + v + ", " + (x.shift >= 0 ? "UInt64.rshift(" + rd + ", " + x.shift + ")" : "UInt64.lshift(" + rd + ", " + -x.shift + ")") + ")" : "bit.bor(" + v + ", " + (x.shift >= 0 ? "bit.rshift(" + rd + ", " + x.shift + ")" : "bit.lshift(" + rd + ", " + -x.shift + ")") + ")")); });
+      if (s.type === "signed") L.push("    -- Sign extend signed integer");
+      if (s.type === "signed" && s.length < 32 && !big) L.push("    if bit.band(" + v + ", " + hex(2 ** (s.length - 1)) + ") > 0 then " + v + " = bit.bor(" + v + ", " + hex((0xFFFFFFFF << s.length) >>> 0) + ") end");
+      let val = v;
+      if (s.type === "float" && s.length === 32) { val = "ieee754_single(" + v + ")"; L.push("    -- IEEE float support"); }
+      else if ((s.factor != null && s.factor !== 1) || (s.offset != null && s.offset !== 0)) val = "(" + v + " * " + (s.factor ?? 1) + ") + " + (s.offset ?? 0);
+      L.push("    t:add(" + fname(s.name) + ", " + val + ")", "  end");
+    }
+    L.push("end", "");
+  }
+  L.push("function " + P + ".dissector(buffer, pinfo, tree)", "  local length = buffer:len()", "  if length < 8 then return end", "  pinfo.cols.protocol = " + P + ".name", "  local byte_index = 0", "  local names = {}",
+    "  while byte_index + 8 <= length do", "    local id = buffer(byte_index, 4):uint()", "    local len = buffer(byte_index + 4, 4):uint()",
+    "    local h = tree:add(" + P + ", buffer(byte_index, 8), \"PDU header\")", "    h:add(f_message_id, buffer(byte_index, 4))", "    h:add(f_message_length, buffer(byte_index + 4, 4))",
+    "    local f = message_table[id]", "    if f ~= nil then f(tree, buffer, byte_index) end", "    byte_index = byte_index + 8 + len", "  end", "end", "");
+  const ports = (layout) => [...new Set(pdus.filter((p) => (p.frame && (p.frame.layout || "").toUpperCase()) === layout).flatMap((p) => [p.frame.dstPort, p.frame.srcPort]).filter((x) => x > 0))].sort((a, b) => a - b);
+  const udp = ports("UDP"), tcp = ports("TCP"), defUdp = (eth.source && eth.source.udpPort) || 20000;
+  L.push("-- Bind to the service ports used by the backbone frames in the K-Matrix.");
+  L.push("local udp_port = DissectorTable.get(\"udp.port\")"); (udp.length ? udp : [defUdp]).forEach((x) => L.push("udp_port:add(" + x + ", " + P + ")"));
+  if (tcp.length) { L.push("local tcp_port = DissectorTable.get(\"tcp.port\")"); tcp.forEach((x) => L.push("tcp_port:add(" + x + ", " + P + ")")); }
+  return L.join("\n") + "\n";
+}

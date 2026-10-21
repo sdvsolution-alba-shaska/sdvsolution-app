@@ -4206,6 +4206,7 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
         <div className="flex gap-2" style={{ marginLeft: "auto" }}>
           {canWrite && <button disabled={busy || saveState === "loading"} onClick={() => fileRef.current && fileRef.current.click()} style={btn} title="K-Matrix workbook (.xlsx) or Wireshark dissector (BackboneETH.lua)">{busy ? "Importing…" : "Import / merge .xlsx or .lua"}</button>}
           <button onClick={doExport} style={{ ...btn, color: "#fff", background: "#175CD3", border: "1px solid #175CD3" }}>Export K-Matrix_ETH.xlsx</button>
+          <button onClick={() => { const n = D.pdus.filter((p) => p.id != null).length; if (!n) { notify("No PDUs with a message ID to decode yet."); return; } const blob = new Blob([EK.toDissector(D)], { type: "text/plain" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = "BackboneETH.lua"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }} style={btn} title="Wireshark dissector generated from this matrix">Export BackboneETH.lua</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.lua" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
         </div>
       </div>
