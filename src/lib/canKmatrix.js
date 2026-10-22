@@ -11,7 +11,22 @@ const s = (v) => (v == null ? "" : String(v).trim());
 const norm = (v) => s(v).toLowerCase().replace(/\s+/g, " ");
 
 // Released node names -> the SDVsolution names the store uses (KM_SHORT_TO_ECU maps these to Topology ECUs).
-export const CAN_NODE_MAP = { CZC_1: "CZM", CZC_2: "CZM", CZC_Switch: "CZM", BZC: "CZM", TSG_FS: "DCM_FL", TSG_BFS: "DCM_FR", TSG_HFS: "DCM_RL", TSG_HBFS: "DCM_RR", TSG_H: "RRDCU", TestTool: "Tester" };
+export const CAN_NODE_MAP = { CZC_1: "CZM", CZC_2: "CZM", CZC_Switch: "CZM", BZC: "CZM", TSG_FS: "DCM_FL", TSG_BFS: "DCM_FR", TSG_HFS: "DCM_RL", TSG_HBFS: "DCM_RR", TSG_H: "RRDCU", TestTool: "Tester",
+  // Door drive units (Tuer_Antrieb, power door drives) and their door sensors (Tuer_Sensor) — Secondary ECUs, supplier Kostal.
+  // VL/VR/HL/HR = front-left / front-right / rear-left / rear-right. Each drive also sits on the Center Door CAN.
+  Tuer_Antrieb_VL: "DDU_FL", Tuer_Antrieb_VR: "DDU_FR", Tuer_Antrieb_HL: "DDU_RL", Tuer_Antrieb_HR: "DDU_RR",
+  Tuer_Sensor_VL: "DSU_FL", Tuer_Sensor_VR: "DSU_FR", Tuer_Sensor_HL: "DSU_RL", Tuer_Sensor_HR: "DSU_RR" };
+
+// The bus a released sheet describes. Several buses reuse the same frame names and IDs (the four door sub-CANs are
+// identical apart from their nodes), so every imported frame carries its bus and merges only within it.
+const DOOR_POS = { VL: "FL", VR: "FR", HL: "RL", HR: "RR" };
+export function releasedBusName(sheet, nodes = []) {
+  const sn = s(sheet), drive = nodes.map((n) => /^Tuer_Sensor_(VL|VR|HL|HR)$/.exec(n)).find(Boolean);
+  if (drive || /SUBCAN/i.test(sn)) { const pos = drive ? DOOR_POS[drive[1]] : null; if (pos) return "DDU_" + pos + "_SUBCAN01"; }
+  const ta = /Tueraktor([1-4])/i.exec(sn); if (ta) return "DDU_" + ["FL", "FR", "RL", "RR"][ta[1] - 1] + "_SUBCAN01"; // file order 1-4 = VL, VR, HL, HR
+  if (/center_?door/i.test(sn)) return "Center_DOOR_CAN01";
+  return sn.replace(/[^A-Za-z0-9_]/g, "_") || "CAN";
+}
 
 export function isReleasedCanLayout(aoa) {
   const rows = (aoa || []).slice(0, 4).map((r) => (r || []).map(norm));
@@ -64,27 +79,37 @@ export function parseReleasedCanKm(aoa, opts = {}) {
     m.sig.push(sig);
   }
   msgs.forEach((m) => { m.dir = m.sender === "DCM_FL" ? "Tx" : "Rx"; if (m.extraSenders) warnings.push(m.name + ": more than one sender (" + [m.sender, ...m.extraSenders].join(", ") + ") — kept " + m.sender + "."); });
-  const nodes = nodeCols.map(([n]) => n);
-  return { msgs, lin, txt, nodes, renamed: nodes.filter((n) => map[n]).map((n) => n + "→" + map[n]), warnings };
+  const nodes = nodeCols.map(([n]) => n), bus = opts.bus || releasedBusName(opts.sheet || "", nodes);
+  msgs.forEach((m) => { m.bus = bus; });
+  return { msgs, lin, txt, nodes, bus, renamed: nodes.filter((n) => map[n]).map((n) => n + "→" + map[n]), warnings };
 }
 
 // Merge a parsed release into the store. The release is authoritative for the messages it contains (layout, timing,
 // sender/receivers); messages only the store has (SDVsolution-defined) are kept and listed. CM names are made unique
 // against the store, and identical CMs are reused.
-export function mergeReleasedCan(K, rel) {
+export function mergeReleasedCan(K, rel, opts = {}) {
   const out = JSON.parse(JSON.stringify(K || { msgs: [], lin: [], txt: [] })); out.msgs = out.msgs || []; out.lin = out.lin || []; out.txt = out.txt || [];
   const cmRename = new Map(), taken = new Set([...out.lin.map((x) => x[0]), ...out.txt.map((x) => x[0])]);
   const uniq = (n) => { let k = n, i = 2; while (taken.has(k)) k = n + "_" + i++; taken.add(k); return k; };
   rel.lin.forEach(([n, f, o, u]) => { const ex = out.lin.find((x) => x[1] === f && x[2] === o && x[3] === u); if (ex) cmRename.set(n, ex[0]); else { const nn = uniq(n); cmRename.set(n, nn); out.lin.push([nn, f, o, u]); } });
   rel.txt.forEach(([n, m]) => { const k = JSON.stringify(m), ex = out.txt.find((x) => JSON.stringify(x[1]) === k); if (ex) cmRename.set(n, ex[0]); else { const nn = uniq(n); cmRename.set(n, nn); out.txt.push([nn, m]); } });
-  const report = { added: 0, updated: 0, signals: 0, keptOnlyInStore: [] }, seen = new Set();
+  // Frames imported before frames carried a bus: recover it from the sheet named in their source ("file (sheet)").
+  // opts.legacyBus: { frameName: bus } for SDVsolution seed frames known to belong to a bus (no source recorded).
+  out.msgs.forEach((m) => { if (!m.bus && !m.src && opts.legacyBus && opts.legacyBus[m.name]) m.bus = opts.legacyBus[m.name]; });
+  out.msgs.forEach((m) => { if (!m.bus && m.src) { const sh = /\(([^()]+)\)\s*$/.exec(m.src); if (sh) m.bus = releasedBusName(sh[1]); } });
+  const bus = rel.bus || (rel.msgs[0] && rel.msgs[0].bus) || "", sameFrame = (m, x) => (m.id === x.id && !!m.ext === !!x.ext) || String(m.name).toLowerCase() === String(x.name).toLowerCase();
+  const report = { bus, added: 0, updated: 0, signals: 0, keptOnlyInStore: [] }, seen = new Set();
   for (const nm of rel.msgs) {
     const msg = { ...nm, sig: nm.sig.map((g) => { const c = [...g]; if (c[3]) c[3] = cmRename.get(c[3]) || c[3]; return c; }) }; report.signals += msg.sig.length;
-    const ex = out.msgs.find((m) => (m.id === msg.id && !!m.ext === !!msg.ext) || String(m.name).toLowerCase() === String(msg.name).toLowerCase());
+    // same bus: match by ID or name; a frame with no bus (SDVsolution-defined) is adopted only on an exact ID + name match
+    const ex = out.msgs.find((m) => !seen.has(m) && (m.bus || "") === bus && sameFrame(m, msg))
+      || out.msgs.find((m) => !seen.has(m) && !m.bus && m.id === msg.id && !!m.ext === !!msg.ext && String(m.name).toLowerCase() === String(msg.name).toLowerCase());
     if (ex) { const keep = { l1: ex.l1, note: ex.note }; Object.assign(ex, msg, { l1: keep.l1 || msg.l1 || "", note: keep.note || "" }); seen.add(ex); report.updated++; }
     else { out.msgs.push({ ...msg, l1: "", note: "" }); seen.add(out.msgs[out.msgs.length - 1]); report.added++; }
   }
-  report.keptOnlyInStore = out.msgs.filter((m) => !seen.has(m)).map((m) => m.name);
+  report.keptOnlyInStore = out.msgs.filter((m) => !seen.has(m) && (m.bus || "") === bus).map((m) => m.name);
+  report.otherBuses = [...new Set(out.msgs.filter((m) => !seen.has(m) && m.bus && m.bus !== bus).map((m) => m.bus))];
+  report.noBus = out.msgs.filter((m) => !m.bus).length;
   return { K: out, report };
 }
 
@@ -99,8 +124,9 @@ const ident = (v) => { let t = String(v || "x").replace(/[^A-Za-z0-9_]/g, "_"); 
 const namer = () => { const used = new Set(); return (want, alt) => { let n = ident(want); if (used.has(n) && alt) n = ident(alt); const base = n; let k = 2; while (used.has(n)) n = base.slice(0, 114) + "_" + k++; used.add(n); return n; }; };
 const hexs = (n) => "0x" + Number(n).toString(16).toUpperCase();
 
+export function canBuses(K) { return [...new Set((K.msgs || []).map((m) => m.bus).filter(Boolean))].sort(); }
 export function toCanClusterArxml(K, opts = {}) {
-  const cluster = ident(opts.cluster || "Center_Door_CANFD"), R = "/SDV_" + cluster, msgs = (K.msgs || []).filter((m) => Number.isFinite(m.id)).sort((a, b) => a.id - b.id);
+  const cluster = ident(opts.cluster || opts.bus || "CAN_Cluster"), R = "/SDV_" + cluster, msgs = (K.msgs || []).filter((m) => Number.isFinite(m.id) && (!opts.bus || m.bus === opts.bus)).sort((a, b) => a.id - b.id);
   const fd = opts.fd != null ? opts.fd : msgs.some((m) => m.fd || m.dlc > 8);
   const nodes = [...new Set(msgs.flatMap((m) => [m.sender, ...(m.recv || [])]).filter(Boolean))].sort();
   const nFr = namer(), nSig = namer(), nEcu = namer(), nCm = namer(), nUnit = namer();

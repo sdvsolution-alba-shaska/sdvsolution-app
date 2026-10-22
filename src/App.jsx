@@ -50,7 +50,7 @@
    ============================================================================ */
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml } from "./lib/canKmatrix.js";
+import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml, canBuses } from "./lib/canKmatrix.js";
 import { scrubText } from "./lib/ethKmatrix.js";
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, X, Plus, Minus, Maximize2,
@@ -427,6 +427,19 @@ const NETWORK = {
 ].forEach(([id, pos, scope, tsg]) => {
   NETWORK.ecus.push({ id, name: `Door Control Module — ${pos}`, vendor: "—", processor: "—", supplier: "Kostal", asil: "QM", deviceClass: "Door control module (window regulator, central locking, mirror fold, child lock, courtesy lighting)", scope: `Body/access functions for the ${scope} on the CZM Center_DOOR_CAN01 (${tsg})`, codes: [id.replace("ECU-", ""), tsg], kind: "peripheral", subtype: "Door control unit" });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-DOORCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN", net: "Center_DOOR_CAN01", rate: "500 Kbps", basis: `Door body functions (window, lock, mirror, child lock) for the ${scope} on the CZM Center_Door_CAN01 — supplier Kostal.`, dir: "Bidirectional" });
+});
+/* Door Drive Units (DDU, released node Tuer_Antrieb_*) and Door Sensor Units (DSU, Tuer_Sensor_*) — power-door drives and
+   their door sensors, Secondary ECUs, supplier Kostal. Each DDU is on the CZM Center_DOOR_CAN01 and is the master of a private
+   CAN FD sub-bus (DDU_xx_SUBCAN01, released files Tueraktor1-4_SUBCANFD) to its DSU; it gateways the DSU's diagnostics to the
+   Center Door CAN. VL/VR/HL/HR = FL/FR/RL/RR. */
+[
+  ["FL", "Front Left (driver)", "VL", 1], ["FR", "Front Right (passenger)", "VR", 2], ["RL", "Rear Left", "HL", 3], ["RR", "Rear Right", "HR", 4],
+].forEach(([p, pos, src, n]) => {
+  const ddu = "ECU-DDU-" + p, dsu = "ECU-DSU-" + p, sub = "DDU_" + p + "_SUBCAN01";
+  NETWORK.ecus.push({ id: ddu, name: `Door Drive Unit — ${pos}`, vendor: "—", processor: "—", supplier: "Kostal", asil: "QM", deviceClass: "Power door drive unit (door opening / closing actuator, master of the door sensor sub-bus)", scope: `Powered opening and closing of the ${pos.toLowerCase()} door on the CZM Center_DOOR_CAN01; master of ${sub} (Tuer_Antrieb_${src})`, codes: ["DDU_" + p, "Tuer_Antrieb_" + src], kind: "peripheral", subtype: "Door drive unit" });
+  NETWORK.ecus.push({ id: dsu, name: `Door Sensor Unit — ${pos}`, vendor: "—", processor: "—", supplier: "Kostal", asil: "QM", deviceClass: "Door sensor unit (door position / target-position sensing for the power door drive)", scope: `Door position and status sensing for the ${pos.toLowerCase()} door drive on ${sub} (Tuer_Sensor_${src})`, codes: ["DSU_" + p, "Tuer_Sensor_" + src], kind: "peripheral", subtype: "Door sensor unit" });
+  NETWORK.links.push({ id: `NT-DDU-${p}-DOORCAN`, a: "ECU-CZM", b: ddu, cls: "zone-to-peripheral", proto: "CAN FD", net: "Center_DOOR_CAN01", rate: "TBD", basis: `Door drive unit ${pos} (Tuer_Antrieb_${src}) on the CZM Center Door CAN FD — released CenterDoorCANFD K-Matrix.`, dir: "Bidirectional" });
+  NETWORK.links.push({ id: `NT-DSU-${p}-SUBCAN`, a: ddu, b: dsu, cls: "zone-to-peripheral", proto: "CAN FD", net: sub, rate: "TBD", basis: `Private CAN FD sub-bus between the door drive and door sensor, ${pos} — released Tueraktor${n}_SUBCANFD K-Matrix.`, dir: "Bidirectional" });
 });
 /* Switchmap Arch Mapping (2025-08-18): modules behind the vehicle switches and the buses they sit on.
    Rear Zonal (Center_Rear_ETH01) is NOT added — the rear zone (BZC) is integrated into the CZM.
@@ -2776,11 +2789,16 @@ const DCMFL_KM = {
 };
 /* Single live K-Matrix source. Every DCM-FL export (ARXML, Excel) and the in-app editor read/write this same
    object, so any edit made in the K-Matrix editor is reflected everywhere. Seeded from DCMFL_KM. */
+/* The seeded front-left door frames are the front-left door drive <-> door sensor sub-bus (released Tueraktor1_SUBCANFD).
+   Frames saved without a bus are placed on it when a release is merged. */
+const KM_LEGACY_BUS = Object.fromEntries(["BootID_TSens_VL", "SMD_TSens_VL", "DEV_TSens_VL_Req_80", "DEV_TSens_VL_Resp_BF", "DIA_TSens_VL_Req_FD", "DIA_TSens_VL_Resp_FD", "XCP_TSens_VL_CRO_01", "XCP_TSens_VL_DTO_01",
+  "Systeminfo_01", "Vehicle_Mode_01", "TAntr_Cmd_01", "TAntr_Cmd_02", "TSens_Status", "TSens_Target_Pos1", "TSens_Target_Pos2"].map((n) => [n, "DDU_FL_SUBCAN01"]));
 const KM_STORE = { data: (() => {
   const d = JSON.parse(JSON.stringify(DCMFL_KM)), DCMS = ["DCM_FL", "DCM_FR", "DCM_RL", "DCM_RR"];
   const SEND = { BootID_TSens_VL: ["DCM_FL", ["CCU"]], SMD_TSens_VL: ["DCM_FL", ["CCU"]], DEV_TSens_VL_Req_80: ["Tester", ["DCM_FL"]], DEV_TSens_VL_Resp_BF: ["DCM_FL", ["Tester"]], DIA_TSens_VL_Req_FD: ["Tester", ["DCM_FL"]], DIA_TSens_VL_Resp_FD: ["DCM_FL", ["Tester"]], XCP_TSens_VL_CRO_01: ["Tester", ["DCM_FL"]], XCP_TSens_VL_DTO_01: ["DCM_FL", ["Tester"]], Systeminfo_01: ["CCU", ["CZM", ...DCMS]], Vehicle_Mode_01: ["CCU", ["CZM", ...DCMS]], TAntr_Cmd_01: ["CCU", ["DCM_FL"]], TAntr_Cmd_02: ["CCU", ["DCM_FL"]], TSens_Status: ["DCM_FL", ["CCU"]], TSens_Target_Pos1: ["CCU", ["DCM_FL"]], TSens_Target_Pos2: ["CCU", ["DCM_FL"]], Fold_Cmd_01: ["CZM", ["DCM_FL", "DCM_FR"]], Fold_Request_01: ["DCM_FL", ["CZM"]], Fold_Status_02: ["DCM_FR", ["CZM"]], Fold_Status_01: ["DCM_FL", ["CZM"]], Heat_Cmd_01: ["CZM", ["DCM_FL", "DCM_FR"]], Heat_Request_01: ["DCM_FL", ["CZM"]], Heat_Status_02: ["DCM_FR", ["CZM"]], Ambient_Env_01: ["CCU", ["CZM"]], Heat_Status_01: ["DCM_FL", ["CZM"]], IMirror_In_01: ["CCU", ["CZM"]], IMirror_Status_01: ["CZM", ["CCU"]], IMirror_Arb_01: ["CZM", ["ECMirror"]], IMirror_MirState_01: ["ECMirror", ["CZM"]], ADimExt_Cmd_01: ["CZM", ["DCM_FL", "DCM_FR"]], ADimExt_Status_01: ["DCM_FL", ["CZM"]], Wiper_Cmd_01: ["FZM", ["WiperCU"]], Wiper_Status_01: ["WiperCU", ["FZM"]], Wiper_Master_In_01: ["CCU", ["FZM"]], RLS_Data_01: ["RLS", ["FZM"]], RLS_Cmd_01: ["FZM", ["RLS"]], Wash_Report_01: ["FZM", ["CCU"]] };
   const L1MAP = { TAntr_Cmd_01: "Adjusting Exterior Mirrors", TAntr_Cmd_02: "Adjusting Exterior Mirrors", TSens_Status: "Adjusting Exterior Mirrors", TSens_Target_Pos1: "Adjusting Exterior Mirrors", TSens_Target_Pos2: "Adjusting Exterior Mirrors", Fold_Cmd_01: "Fold Down Exterior Mirrors", Fold_Status_01: "Fold Down Exterior Mirrors", Fold_Request_01: "Fold Down Exterior Mirrors", Fold_Status_02: "Fold Down Exterior Mirrors", Heat_Cmd_01: "Heating Exterior Mirrors", Heat_Status_01: "Heating Exterior Mirrors", Heat_Request_01: "Heating Exterior Mirrors", Heat_Status_02: "Heating Exterior Mirrors", Ambient_Env_01: "Heating Exterior Mirrors", IMirror_In_01: "Auto-Dim Interior Mirror", IMirror_Status_01: "Auto-Dim Interior Mirror", IMirror_Arb_01: "Auto-Dim Interior Mirror", IMirror_MirState_01: "Auto-Dim Interior Mirror", ADimExt_Cmd_01: "Auto-Dim Exterior Mirrors", ADimExt_Status_01: "Auto-Dim Exterior Mirrors", Wiper_Cmd_01: "Wiping The Windshield", Wiper_Status_01: "Wiping The Windshield", Wiper_Master_In_01: "Wiping The Windshield", RLS_Data_01: "Wiping The Windshield", RLS_Cmd_01: "Wiping The Windshield", Wash_Report_01: "Washing The Windshield" }; // which L1 requirement each message realises (mirror-adjust signals; boot/diag/vehicle-mode are platform)
   d.msgs.forEach((m) => { const s = SEND[m.name] || [m.dir === "Tx" ? "DCM_FL" : "?", []]; if (m.sender == null) m.sender = s[0]; if (m.recv == null) m.recv = s[1]; if (m.l1 == null) m.l1 = L1MAP[m.name] || ""; });
+  d.msgs.forEach((m) => { if (KM_LEGACY_BUS[m.name] && !m.bus) m.bus = KM_LEGACY_BUS[m.name]; });
   d.swc = d.swc || { DCM_FL: "MirrorControl_FL", DCM_FR: "MirrorControl_FR", DCM_RL: "MirrorControl_RL", DCM_RR: "MirrorControl_RR", CCU: "DoorDomainGateway", CZM: "CenterZoneControl", Tester: "Diagnostic Tester (ext.)" };
   return d;
 })() };
@@ -3692,12 +3710,13 @@ function MirrorFuncDiagram({ canWrite = false, onEcu }) {
       // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
       // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
       for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
-        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")" });
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
         if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
-        const { K, report } = mergeReleasedCan(KM_STORE.data, rel); KM_STORE.data = K; kmBump();
-        alert("Merged " + file.name + " (sheet " + sn + "):\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
+        const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K; kmBump();
+        alert("Merged " + file.name + " (sheet " + sn + ") into bus " + report.bus + ":\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
           + "Node names mapped: " + (rel.renamed.join(", ") || "none") + ". Other nodes kept as named: " + rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→"))).join(", ") + ".\n"
-          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " SDVsolution-defined message(s) not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
+          + (report.otherBuses.length ? "Other buses left unchanged: " + report.otherBuses.join(", ") + ".\n" : "")
+          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " message(s) on this bus not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
           + (rel.warnings.length ? "Notes: " + rel.warnings.slice(0, 5).join(" | ") : ""));
         return; }
       const name = wb.SheetNames.find((n) => /k-?matrix/i.test(n)) || wb.SheetNames[wb.SheetNames.length - 1];
@@ -4324,6 +4343,8 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
 
 function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHandled }) {
   const [kmOpen, setKmOpen] = useState(false);
+  const [kmBus, setKmBus] = useState(""); // "" = all buses, "-" = frames without a bus (SDVsolution-defined), else a bus name
+  const onBus = (m) => !kmBus || (kmBus === "-" ? !m.bus : m.bus === kmBus);
   const [, setKmV] = useState(0);
   // Open the modal in one step when an external request targets this ECU (e.g. clicking a frame in the Impact view).
   useEffect(() => { if (openReq && openReq === ecuId) { setKmOpen(true); onOpenHandled && onOpenHandled(); } }, [openReq, ecuId]); // eslint-disable-line
@@ -4350,13 +4371,21 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
     } catch (e) { alert("Could not build the K-Matrix Excel. " + (e && e.message ? e.message : e)); }
   };
   const KM = KM_STORE.data;
-  const viewMsgs = kmMsgsForEcu(ecuId); // this ECU's Tx/Rx subset of the cluster matrix (all messages when ecuId is absent)
+  const ecuMsgsAll = kmMsgsForEcu(ecuId); // this ECU's Tx/Rx subset of the cluster matrix (all messages when ecuId is absent)
+  const busList = canBuses({ msgs: ecuMsgsAll }), hasNoBus = ecuMsgsAll.some((m) => !m.bus);
+  const viewMsgs = ecuMsgsAll.filter(onBus);
+  const busSelect = (busList.length > 0) && (
+    <select value={kmBus} onChange={(e) => setKmBus(e.target.value)} title="Show one bus — several buses reuse the same frame names and IDs" style={{ fontSize: 10, border: "1px solid #D0D5DD", borderRadius: 6, padding: "2px 4px", color: "#344054" }}>
+      <option value="">All buses ({ecuMsgsAll.length})</option>
+      {busList.map((b) => <option key={b} value={b}>{b} ({ecuMsgsAll.filter((m) => m.bus === b).length})</option>)}
+      {hasNoBus && <option value="-">No bus — SDVsolution-defined ({ecuMsgsAll.filter((m) => !m.bus).length})</option>}
+    </select>);
   const kmBump = () => setKmV((v) => v + 1);
   const setMsgField = (mi, key, v, num) => { KM.msgs[mi][key] = num ? (v === "" ? null : Number(v)) : v; kmBump(); };
   const setSigField = (mi, si, idx, v, num) => { KM.msgs[mi].sig[si][idx] = num ? (Number(v) || 0) : v; kmBump(); };
   const setSigMux = (mi, si, v) => { const t = String(v).trim(); KM.msgs[mi].sig[si][4] = t === "" ? undefined : (/^m$/i.test(t) ? "M" : (isFinite(Number(t)) ? Number(t) : t)); kmBump(); };
   const setLinField = (cm, pos, v, num) => { const e = KM.lin.find((x) => x[0] === cm); if (e) e[pos] = num ? Number(v) : v; kmBump(); };
-  const addMsg = () => { const short = KM_ECU_TO_SHORT(ecuId); const ids = new Set(KM.msgs.map((m) => m.id)); let nid = 1; while (ids.has(nid)) nid++; const names = new Set(KM.msgs.map((m) => m.name)); let nm = "New_Message", k = 1; while (names.has(nm)) nm = "New_Message_" + (++k); KM.msgs.push({ name: nm, id: nid, ext: true, dir: "Tx", cyc: null, dlc: 8, sig: [["New_Signal", 0, 8, null]], note: "", sender: short || undefined, recv: [] }); kmBump(); };
+  const addMsg = () => { const short = KM_ECU_TO_SHORT(ecuId); const ids = new Set(KM.msgs.map((m) => m.id)); let nid = 1; while (ids.has(nid)) nid++; const names = new Set(KM.msgs.map((m) => m.name)); let nm = "New_Message", k = 1; while (names.has(nm)) nm = "New_Message_" + (++k); KM.msgs.push({ name: nm, id: nid, ext: true, dir: "Tx", cyc: null, dlc: 8, sig: [["New_Signal", 0, 8, null]], note: "", sender: short || undefined, recv: [], ...(kmBus && kmBus !== "-" ? { bus: kmBus } : {}) }); kmBump(); };
   const delMsg = (mi) => { KM.msgs.splice(mi, 1); kmBump(); };
   const addSig = (mi) => { const m = KM.msgs[mi]; const used = new Set(m.sig.map((s) => s[0])); let sn = "New_Signal", k = 1; while (used.has(sn)) sn = "New_Signal_" + (++k); const last = m.sig.reduce((mx, s) => Math.max(mx, (s[1] || 0) + (s[2] || 0)), 0); m.sig.push([sn, last, 8, null]); kmBump(); };
   const delSig = (mi, si) => { const m = KM.msgs[mi]; m.sig.splice(si, 1); if (m.sig.length === 0) KM.msgs.splice(mi, 1); kmBump(); };
@@ -4384,7 +4413,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
   const nodeName = (n) => (n && String(n).replace(/[^A-Za-z0-9_]/g, "_")) || "Vector__XXX";
   const canId = (m) => ((m.ext ? (0x80000000 | (m.id || 0)) : (m.id || 0)) >>> 0);
   const exportDbc = () => {
-    const msgs = KM_STORE.data.msgs || [];
+    const msgs = (KM_STORE.data.msgs || []).filter(onBus); // one bus at a time: the door sub-buses reuse the same IDs
     const nodes = Array.from(new Set(msgs.flatMap((m) => [m.sender, ...(m.recv || [])]).filter(Boolean).map(nodeName)));
     let out = 'VERSION ""\n\n\nNS_ :\n\nBS_:\n\n';
     out += "BU_: " + (nodes.join(" ") || "Vector__XXX") + "\n\n";
@@ -4394,7 +4423,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       out += "\n";
     });
     msgs.forEach((m) => { if (m.l1) out += 'CM_ BO_ ' + canId(m) + ' "L1: ' + String(m.l1).replace(/"/g, "'") + '";\n'; });
-    dl("cluster.dbc", out, "text/plain;charset=utf-8");
+    dl((kmBus && kmBus !== "-" ? kmBus : "cluster") + ".dbc", out, "text/plain;charset=utf-8");
   };
   const exportLdf = () => {
     const msgs = KM_STORE.data.msgs || [];
@@ -4426,12 +4455,13 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
       // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
       for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
-        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")" });
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
         if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
-        const { K, report } = mergeReleasedCan(KM_STORE.data, rel); KM_STORE.data = K; kmBump();
-        alert("Merged " + file.name + " (sheet " + sn + "):\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
+        const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K; kmBump();
+        alert("Merged " + file.name + " (sheet " + sn + ") into bus " + report.bus + ":\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
           + "Node names mapped: " + (rel.renamed.join(", ") || "none") + ". Other nodes kept as named: " + rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→"))).join(", ") + ".\n"
-          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " SDVsolution-defined message(s) not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
+          + (report.otherBuses.length ? "Other buses left unchanged: " + report.otherBuses.join(", ") + ".\n" : "")
+          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " message(s) on this bus not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
           + (rel.warnings.length ? "Notes: " + rel.warnings.slice(0, 5).join(" | ") : ""));
         return; }
       const name = wb.SheetNames.find((n) => /k-?matrix/i.test(n)) || wb.SheetNames[wb.SheetNames.length - 1];
@@ -4472,7 +4502,10 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       <div className="flex items-center flex-wrap" style={{ gap: 8, marginTop: 6 }}>
         <button onClick={() => setKmOpen(true)} title="Open the aggregate K-Matrix — editable; Upload/Download inside; changes apply to the ARXML everywhere" style={btnS}>K-Matrix — open / edit</button>
         <button onClick={() => dl("complete.arxml", buildDcmFlArxml(), "application/xml")} title="Complete ARXML generated from the K-Matrix — CAN cluster, frames/PDUs with exact IDs, signals + encodings, ECU instance and SW-C" style={btnS}>Complete ARXML</button>
-        <button onClick={() => dl("Center_Door_CANFD.arxml", toCanClusterArxml(KM_STORE.data, { cluster: "Center_Door_CANFD" }).xml, "application/xml")} title="CAN FD cluster ARXML (AUTOSAR R4 system description) — every frame, PDU, signal, encoding and ECU frame port in the K-Matrix; passes strict AUTOSAR schema validation" style={btnS}>CAN cluster ARXML</button>
+        {canBuses(KM_STORE.data).length > 0 && <select value="" onChange={(e) => { const b = e.target.value; if (b) dl(b + ".arxml", toCanClusterArxml(KM_STORE.data, { bus: b }).xml, "application/xml"); }} title="CAN / CAN FD cluster ARXML (AUTOSAR R4 system description) for one bus — every frame, PDU, signal, encoding and ECU frame port; passes strict AUTOSAR schema validation" style={{ ...btnS, padding: "2px 4px" }}>
+          <option value="">CAN cluster ARXML…</option>
+          {canBuses(KM_STORE.data).map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>}
         <button onClick={mfmGenAutosar} title="Generate AUTOSAR SWC/RTE — C skeleton + ARXML SWC description" style={btnS}>Generate code · AUTOSAR SWC/RTE</button>
         <button onClick={mfmGenSimulink} title="Generate Simulink / Embedded Coder model builder" style={btnS}>Generate code · Simulink/Embedded Coder</button>
       </div>
@@ -4484,6 +4517,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
               <div className="flex items-center gap-2">
                 <input ref={kmFileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importKMatrix(f); }} />
                 <input ref={busFileRef} type="file" accept=".dbc,.ldf,.arxml,.xml" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importBus(f); }} />
+                {busSelect}
                 {canWrite && <button onClick={autoPack} title="Auto-assign every signal's start bit (base then mux groups) and grow DLC to fit — fixes overlaps, gaps and overflow" style={{ ...btnS, color: "#067647", borderColor: "#A6F4C5" }}>Auto-pack bits</button>}
                 {canWrite && <button onClick={() => busFileRef.current && busFileRef.current.click()} title="Import a real bus database — DBC, LDF or ARXML — and merge its ECUs, messages and signals into the K-Matrix. Parsed in your browser; the file is never uploaded." style={{ ...btnS, color: "#0E7090", borderColor: "#7CD4FD" }}>Import DBC/LDF/ARXML</button>}
                 {canWrite && <button onClick={() => kmFileRef.current && kmFileRef.current.click()} title="Import a K-Matrix Excel file — replaces the live data (use for major changes)" style={{ ...btnS, color: "#B54708", borderColor: "#F0C9A0" }}>Import Excel</button>}
@@ -4505,7 +4539,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
                     const TIN = (val, on) => <input disabled={!canWrite} value={val} onChange={(e) => on(e.target.value)} style={inpS} />;
                     return (
                       <tr key={mi + "-" + si} style={{ background: first ? "#F9FAFB" : (mux === "M" ? "#FEF6EE" : "#fff") }}>
-                        <td style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap" }}>{first ? m.name : ""}</td>
+                        <td style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap" }}>{first ? <>{m.name}{m.bus && <div style={{ fontWeight: 400, fontSize: 9.5, color: "#98A2B3" }}>{m.bus}{m.sender ? " · " + m.sender + " →" : ""}</div>}</> : ""}</td>
                         <td style={{ ...tdS, fontFamily: "ui-monospace, monospace", color: "#175CD3" }}>{first ? "0x" + m.id.toString(16).toUpperCase() : ""}</td>
                         <td style={{ ...tdS, width: 64 }}>{first ? NIN(m.cyc == null ? "" : m.cyc, (v) => setMsgField(mi, "cyc", v, true)) : ""}</td>
                         <td style={{ ...tdS, width: 52 }}>{first ? NIN(m.dlc, (v) => setMsgField(mi, "dlc", v, true)) : ""}</td>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs"; import os from "node:os"; import path from "node:path";
-import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml } from "../src/lib/canKmatrix.js";
+import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml, releasedBusName, canBuses } from "../src/lib/canKmatrix.js";
 
 // Same three-row heading as the released workbooks: group row, header row, Value Range sub-header row.
 const G0 = ["Messages", "", "", "", "", "Signals", "", "", "", "", "", "Value Range", "", "", "", "", "Sender - Receiver", ""];
@@ -34,7 +34,7 @@ t("parses frames, signals, mux and value tables", () => {
 t("merge keeps store-only messages and updates by id", () => {
   const K = { msgs: [{ name: "Old_Local", id: 0x7FF, dlc: 8, sig: [], recv: [] }, { name: "Door_Status_FL", id: 0x120, dlc: 8, sig: [], recv: [], l1: "L1-X" }], lin: [], txt: [] };
   const { K: M, report } = mergeReleasedCan(K, rel);
-  assert.equal(report.added, 1); assert.equal(report.updated, 1); assert.deepEqual(report.keptOnlyInStore, ["Old_Local"]);
+  assert.equal(report.added, 1); assert.equal(report.updated, 1); assert.deepEqual(report.keptOnlyInStore, []); assert.equal(report.noBus, 1, "SDVsolution-defined frame without a bus kept");
   assert.equal(M.msgs.find((m) => m.id === 0x120).l1, "L1-X");
 });
 t("CAN cluster ARXML is well formed and strict-valid when autosar_data is present", () => {
@@ -46,5 +46,33 @@ t("CAN cluster ARXML is well formed and strict-valid when autosar_data is presen
   try { execFileSync("python3", ["-c", "import autosar_data"], { stdio: "ignore" }); } catch { console.log("  (autosar_data not installed, strict check skipped)"); return; }
   const out = execFileSync("python3", ["-c", "import sys,autosar_data as a;m=a.AutosarModel();m.load_file(sys.argv[1],strict=True);print(len(m.check_references()))", f]).toString().trim();
   assert.equal(out, "0");
+});
+// Two door sub-buses with identical frames apart from their nodes: each lands on its own bus, nothing is overwritten.
+const subBus = (pos) => {
+  const h = ["Message", "Identifier [hex]", "Protocol", "Message Length [Byte]", "Cycle Time normal [ms]", "Signal", "Start Byte", "Start Bit", "Signal Length [Bits]", "MUX Signal", "MUX Group", "", "", "", "", "", "TestTool", "Tuer_Antrieb_" + pos, "Tuer_Sensor_" + pos];
+  const g0 = [...G0, ""], h2 = [...H2, ""];
+  return [g0, h, h2, ["TAntr_Cmd_01", "2F95464", "CAN FD", 8, 10, "Cmd", 1, 0, 8, 0, "", "", 0, 1, "", "", "", "S", "R"],
+    ["TSens_Status", "6F9546B", "CAN FD", 12, 40, "Pos", 1, 0, 16, 0, "", "", 0, 1, "", "", "", "R", "S"]];
+};
+t("door sub-bus names", () => {
+  assert.equal(releasedBusName("Tueraktor3_SUBCANFD"), "DDU_RL_SUBCAN01");
+  assert.equal(releasedBusName("anything", ["Tuer_Sensor_VR"]), "DDU_FR_SUBCAN01");
+  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01");
+});
+t("identical frames on different buses stay separate, in any import order", () => {
+  const a = parseReleasedCanKm(subBus("VL"), { sheet: "Tueraktor1_SUBCANFD", source: "x (Tueraktor1_SUBCANFD)" });
+  const b = parseReleasedCanKm(subBus("HR"), { sheet: "Tueraktor4_SUBCANFD", source: "x (Tueraktor4_SUBCANFD)" });
+  assert.equal(a.bus, "DDU_FL_SUBCAN01"); assert.equal(a.msgs[0].sender, "DDU_FL"); assert.deepEqual(a.msgs[0].recv, ["DSU_FL"]);
+  for (const order of [[a, b], [b, a]]) {
+    let K = { msgs: [], lin: [], txt: [] }; order.forEach((r) => { K = mergeReleasedCan(K, r).K; });
+    assert.equal(K.msgs.length, 4); assert.deepEqual(canBuses(K), ["DDU_FL_SUBCAN01", "DDU_RR_SUBCAN01"]);
+    assert.equal(K.msgs.find((m) => m.bus === "DDU_RR_SUBCAN01" && m.name === "TSens_Status").sender, "DSU_RR");
+    assert.equal(toCanClusterArxml(K, { bus: "DDU_FL_SUBCAN01" }).stats.frames, 2);
+  }
+  // a seed frame without a bus is adopted only through legacyBus or an exact ID + name match on the right bus
+  const seed = { msgs: [{ name: "TAntr_Cmd_01", id: 0x2F95464, dlc: 8, sig: [], recv: [], l1: "L1-SEED" }], lin: [], txt: [] };
+  const { K } = mergeReleasedCan(mergeReleasedCan(seed, b, { legacyBus: { TAntr_Cmd_01: "DDU_FL_SUBCAN01" } }).K, a, { legacyBus: { TAntr_Cmd_01: "DDU_FL_SUBCAN01" } });
+  assert.equal(K.msgs.find((m) => m.bus === "DDU_FL_SUBCAN01" && m.name === "TAntr_Cmd_01").l1, "L1-SEED");
+  assert.equal(K.msgs.find((m) => m.bus === "DDU_RR_SUBCAN01" && m.name === "TAntr_Cmd_01").l1, "");
 });
 console.log(`${n} passed`);
