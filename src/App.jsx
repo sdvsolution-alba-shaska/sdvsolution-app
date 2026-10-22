@@ -50,6 +50,8 @@
    ============================================================================ */
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml } from "./lib/canKmatrix.js";
+import { scrubText } from "./lib/ethKmatrix.js";
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, X, Plus, Minus, Maximize2,
   GitBranch, Table, Share2, BookOpen, AlertTriangle, Filter, Lock,
@@ -3687,6 +3689,17 @@ function MirrorFuncDiagram({ canWrite = false, onEcu }) {
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
+      // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
+      // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
+      for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")" });
+        if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
+        const { K, report } = mergeReleasedCan(KM_STORE.data, rel); KM_STORE.data = K; kmBump();
+        alert("Merged " + file.name + " (sheet " + sn + "):\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
+          + "Node names mapped: " + (rel.renamed.join(", ") || "none") + ". Other nodes kept as named: " + rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→"))).join(", ") + ".\n"
+          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " SDVsolution-defined message(s) not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
+          + (rel.warnings.length ? "Notes: " + rel.warnings.slice(0, 5).join(" | ") : ""));
+        return; }
       const name = wb.SheetNames.find((n) => /k-?matrix/i.test(n)) || wb.SheetNames[wb.SheetNames.length - 1];
       const sheet = wb.Sheets[name];
       if (!sheet) { alert("No K-Matrix sheet found in the workbook."); return; }
@@ -4410,6 +4423,17 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
+      // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
+      // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
+      for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")" });
+        if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
+        const { K, report } = mergeReleasedCan(KM_STORE.data, rel); KM_STORE.data = K; kmBump();
+        alert("Merged " + file.name + " (sheet " + sn + "):\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
+          + "Node names mapped: " + (rel.renamed.join(", ") || "none") + ". Other nodes kept as named: " + rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→"))).join(", ") + ".\n"
+          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " SDVsolution-defined message(s) not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
+          + (rel.warnings.length ? "Notes: " + rel.warnings.slice(0, 5).join(" | ") : ""));
+        return; }
       const name = wb.SheetNames.find((n) => /k-?matrix/i.test(n)) || wb.SheetNames[wb.SheetNames.length - 1];
       const sheet = wb.Sheets[name];
       if (!sheet) { alert("No K-Matrix sheet found in the workbook."); return; }
@@ -4448,6 +4472,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       <div className="flex items-center flex-wrap" style={{ gap: 8, marginTop: 6 }}>
         <button onClick={() => setKmOpen(true)} title="Open the aggregate K-Matrix — editable; Upload/Download inside; changes apply to the ARXML everywhere" style={btnS}>K-Matrix — open / edit</button>
         <button onClick={() => dl("complete.arxml", buildDcmFlArxml(), "application/xml")} title="Complete ARXML generated from the K-Matrix — CAN cluster, frames/PDUs with exact IDs, signals + encodings, ECU instance and SW-C" style={btnS}>Complete ARXML</button>
+        <button onClick={() => dl("Center_Door_CANFD.arxml", toCanClusterArxml(KM_STORE.data, { cluster: "Center_Door_CANFD" }).xml, "application/xml")} title="CAN FD cluster ARXML (AUTOSAR R4 system description) — every frame, PDU, signal, encoding and ECU frame port in the K-Matrix; passes strict AUTOSAR schema validation" style={btnS}>CAN cluster ARXML</button>
         <button onClick={mfmGenAutosar} title="Generate AUTOSAR SWC/RTE — C skeleton + ARXML SWC description" style={btnS}>Generate code · AUTOSAR SWC/RTE</button>
         <button onClick={mfmGenSimulink} title="Generate Simulink / Embedded Coder model builder" style={btnS}>Generate code · Simulink/Embedded Coder</button>
       </div>
