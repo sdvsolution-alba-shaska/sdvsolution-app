@@ -4248,6 +4248,7 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
     try {
       let parsed;
       if (/\.lua$/i.test(file.name)) parsed = EK.parseDissector(await file.text()); // Wireshark dissector: PDU + signal layout, types, value tables
+      else if (/\.dbc$/i.test(file.name)) parsed = EK.parseDbcEth(await file.text()); // Vector DBC: layout, ranges, units, start values, E2E, multiplexing, node addresses
       else { const XLSX = await ensureXLSXLib(); const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
         const sheets = {}; wb.SheetNames.forEach((n) => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "", raw: true }); }); parsed = EK.parseWorkbook(sheets); }
       const { eth: clean, changed: scrubbed } = EK.scrubEth(parsed.eth); // never keep third-party company/brand names
@@ -4277,7 +4278,7 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
         <span style={{ fontSize: 11, fontWeight: 700, color: errs ? "#B42318" : findings.length ? "#B54708" : "#067647" }}>{errs ? errs + " errors · " : ""}{findings.length - errs} warnings</span>
         <span style={{ fontSize: 10.5, color: saveState === "failed" || saveState === "nosetup" ? "#B42318" : "#98A2B3" }}>{{ loading: "Loading…", saving: "Saving…", dirty: "Unsaved changes…", saved: "Saved", local: "Not saved (offline)", failed: "Save failed — will retry on the next change", nosetup: "Storage not set up — run supabase/phase7_eth_kmatrix.sql" }[saveState] || ""}</span>
         <div className="flex gap-2" style={{ marginLeft: "auto" }}>
-          {canWrite && <button disabled={busy || saveState === "loading"} onClick={() => fileRef.current && fileRef.current.click()} style={btn} title="K-Matrix workbook (.xlsx) or Wireshark dissector (BackboneETH.lua)">{busy ? "Importing…" : "Import / merge .xlsx or .lua"}</button>}
+          {canWrite && <button disabled={busy || saveState === "loading"} onClick={() => fileRef.current && fileRef.current.click()} style={btn} title="K-Matrix workbook (.xlsx), Wireshark dissector (BackboneETH.lua) or Vector database (BackboneETH.dbc)">{busy ? "Importing…" : "Import / merge .xlsx, .lua or .dbc"}</button>}
           <button onClick={doExport} style={{ ...btn, color: "#fff", background: "#175CD3", border: "1px solid #175CD3" }}>Export K-Matrix_ETH.xlsx</button>
           <button onClick={() => { const n = D.pdus.filter((p) => p.id != null).length; if (!n) { notify("No PDUs with a message ID to decode yet."); return; } const blob = new Blob([EK.toDissector(D)], { type: "text/plain" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = "BackboneETH.lua"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }} style={btn} title="Wireshark dissector generated from this matrix">Export BackboneETH.lua</button>
           {(() => { const ecus = [...new Set(D.nodes.map((n) => n.ecu).filter((e) => e && e !== "DLC"))].sort();
@@ -4286,13 +4287,13 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
                 notify("ARXML: " + r.stats.pdus + " PDUs, " + r.stats.signals + " signals, " + r.stats.ecuInstances + " ECU instances" + (r.stats.skippedNoLayout ? " (" + r.stats.skippedNoLayout + " signals without a bit position left out)" : "")); } catch (e) { notify("ARXML export failed: " + e.message); } finally { setBusy(false); } }, 30); };
             return <select value="" disabled={busy} onChange={(e) => { const v = e.target.value; e.target.value = ""; if (v) exp(v === "*" ? null : v); }} style={{ ...btn, paddingRight: 6 }} title="AUTOSAR R4 system description of the backbone, or an extract for one ECU">
               <option value="">Export ARXML…</option><option value="*">Whole backbone</option>{ecus.map((e) => <option key={e} value={e}>{e.replace(/^ECU-/, "")} extract</option>)}</select>; })()}
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.lua" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.lua,.dbc" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; doImport(f); }} />
         </div>
       </div>
       {rep && (<div style={{ marginTop: 10, border: "1px solid " + (rep.error ? "#FECDCA" : "#D1E9FF"), background: rep.error ? "#FFFBFA" : "#F5FAFF", borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "#344054" }}>
         <div className="flex"><b>{rep.file}</b><button onClick={() => setRep(null)} style={{ marginLeft: "auto", color: "#98A2B3" }}>✕</button></div>
         {rep.error ? <div style={{ color: "#B42318" }}>Import failed: {rep.error}</div> : <>
-          <div>Added {rep.added.nodes} nodes, {rep.added.pdus} PDUs, {rep.added.signals} signals; filled blanks in {rep.filled} existing entries{rep.mapped ? "; mapped " + rep.mapped + " nodes to Topology ECUs by name (check them on the Nodes tab)" : ""}.</div>
+          <div>Added {rep.added.nodes} nodes, {rep.added.pdus} PDUs, {rep.added.signals} signals; filled blanks in {rep.filled} existing entries{rep.matchedByLayout ? "; " + rep.matchedByLayout + " signals named differently in the file were matched by their exact bit layout" : ""}{rep.mapped ? "; mapped " + rep.mapped + " nodes to Topology ECUs by name (check them on the Nodes tab)" : ""}.</div>
           {rep.warnings.map((w, i) => <div key={i} style={{ color: "#B54708" }}>• {w}</div>)}
           {rep.conflicts.length > 0 && <div style={{ marginTop: 4 }}><b style={{ color: "#B54708" }}>{rep.conflicts.length} conflicts — existing values kept:</b>{rep.conflicts.slice(0, 12).map((c, i) => <div key={i} style={{ fontFamily: "ui-monospace,monospace", fontSize: 10.5 }}>{c.where} · {c.field}: kept {JSON.stringify(c.kept)}, file has {JSON.stringify(c.incoming)}</div>)}{rep.conflicts.length > 12 && <div>…and {rep.conflicts.length - 12} more</div>}</div>}
         </>}

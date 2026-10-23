@@ -103,7 +103,13 @@ export function parseWorkbook(sheets) {
 
 /* ---------- merging a (partial) workbook into the matrix ---------- */
 const blank = (v) => v == null || v === "" || (Array.isArray(v) && !v.length);
-const same = (a, b) => (Array.isArray(a) ? JSON.stringify([...a].sort()) === JSON.stringify([...b].sort()) : String(a) === String(b));
+const v6full = (a) => { const t = String(a).toLowerCase(); if (!/^[0-9a-f:]+$/.test(t) || !t.includes(":")) return t; const [h, l = ""] = t.split("::"), hs = h ? h.split(":") : [], ls = l ? l.split(":") : [];
+  const g = t.includes("::") ? [...hs, ...Array(8 - hs.length - ls.length).fill("0"), ...ls] : hs; return g.map((x) => x.replace(/^0+(?=.)/, "")).join(":"); };
+const same = (a, b) => (Array.isArray(a) ? JSON.stringify([...a].sort()) === JSON.stringify([...b].sort()) : a && typeof a === "object" ? JSON.stringify(a) === JSON.stringify(b)
+  : /:/.test(String(a)) && /:/.test(String(b)) && /^[0-9a-f:]+$/i.test(String(a)) ? v6full(a) === v6full(b) : String(a) === String(b));
+// Same bits with the same significance (e.g. a 4-bit field written Intel-LSB 16 or Motorola-MSB 19 inside one byte).
+const sameLayout = (a, b) => { if (a.startBit == null || b.startBit == null || a.length !== b.length) return false;
+  const ord = (x) => { const bits = signalBits(x); return x.byteOrder === "motorola" ? [...bits].reverse() : bits; }; return JSON.stringify(ord(a)) === JSON.stringify(ord(b)); };
 // Fills blanks from `inc`; where both hold a value and they differ, keeps `base` and records a conflict.
 function mergeFields(base, inc, fields, where, report) {
   let changed = false;
@@ -120,25 +126,42 @@ export function mergeEth(base, incoming) {
   for (const n of inc.nodes || []) {
     const ex = out.nodes.find((x) => x.name === n.name);
     if (!ex) { out.nodes.push(JSON.parse(JSON.stringify(n))); report.added.nodes++; }
-    else if (mergeFields(ex, n, ["mac", "ipv4", "ipv6", "rxPort", "txPort"], "Node " + n.name, report)) report.filled++;
+    else if (mergeFields(ex, n, ["mac", "ipv4", "ipv6", "rxPort", "txPort", "vlan", "diagAddress", "doip"], "Node " + n.name, report)) report.filled++;
   }
   if (inc.source && !out.source) out.source = JSON.parse(JSON.stringify(inc.source));
-  if (inc.valueTables) { out.valueTables = out.valueTables || {}; for (const [k, v] of Object.entries(inc.valueTables)) if (!out.valueTables[k]) out.valueTables[k] = v; }
+  // Value tables are matched by content, not name (a dissector, a DBC and a workbook name the same table differently):
+  // an incoming table identical to one already here is referred to by the existing name.
+  const vtRename = {};
+  if (inc.valueTables) { out.valueTables = out.valueTables || {}; const ck = (t) => JSON.stringify(Object.entries(t).sort((a, b) => rawCmp(a[0], b[0])));
+    const byC = new Map(Object.entries(out.valueTables).map(([k, t]) => [ck(t), k]));
+    for (const [k, t] of Object.entries(inc.valueTables)) { const c = ck(t);
+      if (byC.has(c)) { if (byC.get(c) !== k) vtRename[k] = byC.get(c); continue; }
+      let n = k, i = 2; while (out.valueTables[n]) n = k + "_" + i++; out.valueTables[n] = t; byC.set(c, n); if (n !== k) vtRename[k] = n; } }
   for (const p of inc.pdus || []) {
     const ex = out.pdus.find((x) => (p.id != null && x.id === p.id) || (p.id == null && x.name === p.name));
-    if (!ex) { out.pdus.push(JSON.parse(JSON.stringify(p))); report.added.pdus++; report.added.signals += (p.signals || []).length; continue; }
+    if (!ex) { const np = JSON.parse(JSON.stringify(p)); np.signals.forEach((x) => { if (x.vt && vtRename[x.vt]) x.vt = vtRename[x.vt]; }); out.pdus.push(np); report.added.pdus++; report.added.signals += (p.signals || []).length; continue; }
     // A dissector's PDU name is generated (often sender-prefixed, e.g. ADAS_Basic_ADAS_DomainNotif); the K-Matrix name
     // (ADAS_DomainNotif) is the official one. Whichever arrives first, the K-Matrix name wins and the other is kept as dissectorName.
-    if (ex.nameSource === "dissector" && p.nameSource !== "dissector" && p.name && p.name !== ex.name) { ex.dissectorName = ex.name; ex.name = p.name; delete ex.nameSource; report.renamed = (report.renamed || 0) + 1; }
+    if (p.nameSource === "dbc") { if (p.dbcName && !ex.dbcName) ex.dbcName = p.dbcName; } // a DBC name is a database symbol: the K-Matrix name stays
+    else if (ex.nameSource === "dissector" && p.nameSource !== "dissector" && p.name && p.name !== ex.name) { ex.dissectorName = ex.name; ex.name = p.name; delete ex.nameSource; report.renamed = (report.renamed || 0) + 1; }
     else if (p.nameSource === "dissector" && ex.nameSource !== "dissector" && p.name !== ex.name) { if (!ex.dissectorName) ex.dissectorName = p.name; }
     const where = "PDU " + fmtId(ex.id) + " " + ex.name;
-    if (mergeFields(ex, p, [...(p.nameSource === "dissector" || ex.dissectorName ? [] : ["name"]), "sendType", "cycleMs", "sender", "receivers"], where, report)) report.filled++;
+    if (mergeFields(ex, p, [...(p.nameSource === "dissector" || p.nameSource === "dbc" || ex.dissectorName ? [] : ["name"]), "sendType", "cycleMs", "sender", "receivers", "gateway", "secured", "sharedBits"], where, report)) report.filled++;
     if (!ex.senderHint && p.senderHint) ex.senderHint = p.senderHint;
     ex.frame = ex.frame || {}; if (mergeFields(ex.frame, p.frame || {}, ["name", "type", "layout", "srcIp", "srcPort", "dstIp", "dstPort", "ipType", "payloadBytes", "minPayloadBytes"], where + " (frame)", report)) report.filled++;
-    for (const s of p.signals || []) {
-      const es = ex.signals.find((x) => x.name === s.name);
+    const claimed = new Set();
+    for (const s0 of p.signals || []) {
+      const s = s0.vt && vtRename[s0.vt] ? { ...s0, vt: vtRename[s0.vt] } : s0;
+      let es = ex.signals.find((x) => x.name === s.name);
+      // A DBC symbol may differ from the K-Matrix name (prefixed / cut to 32 characters): match it by its exact bits when
+      // exactly one unmatched signal has them (never guess between multiplexed variants that share bits).
+      if (!es && s.dbcName) { const c = ex.signals.filter((x) => !claimed.has(x) && !(p.signals || []).some((y) => y !== s && y.name === x.name) && sameLayout(x, s)); if (c.length === 1) { es = c[0]; report.matchedByLayout = (report.matchedByLayout || 0) + 1; } }
       if (!es) { ex.signals.push(JSON.parse(JSON.stringify(s))); report.added.signals++; continue; }
-      if (mergeFields(es, s, ["startBit", "length", "factor", "offset", "min", "max", "unit", "init", "type", "vt", "byteOrder"], where + " / " + s.name, report)) report.filled++;
+      claimed.add(es); if (s.dbcName && s.dbcName !== es.name && !es.dbcName) es.dbcName = s.dbcName;
+      const vtOf = (n) => n && out.valueTables && out.valueTables[n] ? JSON.stringify(out.valueTables[n]) : null;
+      const sv = es.vt && s.vt && es.vt !== s.vt && vtOf(es.vt) && vtOf(es.vt) === vtOf(s.vt) ? { ...s, vt: es.vt } : s; // same table under another name
+      const layoutFields = es.startBit != null && sameLayout(es, s) ? [] : ["startBit", "length", "byteOrder"]; // same bits written another way is not a conflict
+      if (mergeFields(es, sv, [...layoutFields, "factor", "offset", "min", "max", "unit", "init", "initRaw", "type", "vt", "mux", "muxGroup", "e2e", "comment"], where + " / " + s.name, report)) report.filled++;
       es.roles = es.roles || {}; for (const [node, r] of Object.entries(s.roles || {})) { if (!es.roles[node]) es.roles[node] = r; else if (es.roles[node] !== r) report.conflicts.push({ where: where + " / " + s.name, field: "role " + node, kept: es.roles[node], incoming: r }); }
     }
   }
@@ -199,9 +222,12 @@ export function checkEth(eth, topo) {
     const sigs = (p.signals || []).filter((s) => s.startBit != null && s.length != null);
     const bits = (p.frame && p.frame.payloadBytes) ? p.frame.payloadBytes * 8 : null;
     sigs.forEach((s) => { if (s.length <= 0) E(tag + " / " + s.name + ": length must be positive."); const hi = Math.max(-1, ...signalBits(s)) + 1; if (bits != null && hi > bits) E(tag + " / " + s.name + ": ends at bit " + hi + ", beyond the " + bits + "-bit payload."); });
-    if (p.sharedBits) W(tag + ": " + p.sharedBits + " signals share bit positions in the imported dissector (probably multiplexed) — define the multiplexor.");
-    else { const owner = new Map(); const seen = new Set();
-      sigs.forEach((s) => signalBits(s).forEach((b) => { const o = owner.get(b); if (o && o !== s.name) { const k = o + "|" + s.name; if (!seen.has(k)) { seen.add(k); E(tag + ": signals " + o + " and " + s.name + " overlap."); } } else owner.set(b, s.name); })); }
+    const hasMux = sigs.some((s) => s.mux === "M" || s.muxGroup != null);
+    if (p.sharedBits && !hasMux) W(tag + ": " + p.sharedBits + " signals share bit positions in the imported dissector (probably multiplexed) — define the multiplexor.");
+    else { // with a multiplexor defined (e.g. from the DBC), signals of different multiplexer groups may share bits
+      const coexist = (a, b) => !(a.muxGroup != null && b.muxGroup != null && a.muxGroup !== b.muxGroup);
+      const owners = new Map(), seen = new Set();
+      sigs.forEach((s) => signalBits(s).forEach((b) => { const os = owners.get(b) || []; os.forEach((o) => { if (o !== s && o.name !== s.name && coexist(o, s)) { const k = o.name + "|" + s.name; if (!seen.has(k)) { seen.add(k); E(tag + ": signals " + o.name + " and " + s.name + " overlap."); } } }); os.push(s); owners.set(b, os); })); }
     (p.signals || []).forEach((s) => { const senders = Object.entries(s.roles || {}).filter(([, r]) => r === "S").map(([n]) => n); if (senders.length > 1) E(tag + " / " + s.name + ": sent (S) by " + senders.join(" and ") + "."); });
   });
   if (topo) {
@@ -307,6 +333,56 @@ export function parseDissector(text) {
   if (badMask) warnings.push(badMask + " byte mask(s) have gaps — check those signals.");
   if (empty) warnings.push(empty + " signal(s) had no bit layout in the dissector (e.g. strings) — imported without a position.");
   return { eth: { nodes: [], pdus, valueTables: vts, source: { proto, udpPort: port } }, warnings };
+}
+
+/* ---------- Vector DBC of the backbone (BackboneETH.dbc) ----------
+   BO_ = PDU (ID, payload bytes, sender), SG_ = signal (start|length@order sign (factor,offset) [min|max] "unit" receivers).
+   Attributes add: long names past the 32-character DBC limit (SystemSignalLongSymbol / SystemMessageLongSymbol), raw
+   start values (GenSigStartValue -> initRaw), cycle time and send type, E2E CRC / counter profiles and data IDs, gateway
+   source, secured (MAP) type, node IPv4 / IPv6 / MAC / receive port / VLAN / DoIP addresses. VAL_ = value tables, CM_ =
+   signal comments, SIG_VALTYPE_ = IEEE float / double. @0 = Motorola, start bit = most significant bit (DBC numbering). */
+export function parseDbcEth(text) {
+  const lines = String(text || "").split(/\r?\n/), enums = {}, pdus = [], byId = new Map(), nodes = [], warnings = [], vts = {}, unq = (v) => v.replace(/^"|"$/g, "");
+  const sigOf = (id, n) => { const p = byId.get(id); return p && p.sigBy.get(n); };
+  let cur = null, muxed = 0;
+  for (const line of lines) {
+    let m;
+    if ((m = /^BU_:\s*(.*)$/.exec(line))) { m[1].trim().split(/\s+/).filter(Boolean).forEach((n) => nodes.push({ name: n })); continue; }
+    if ((m = /^BO_\s+(\d+)\s+(\w+)\s*:\s*(\d+)\s+(\w+)/.exec(line))) { const raw = Number(m[1]);
+      cur = { id: raw >= 0x80000000 ? raw - 0x80000000 : raw, name: m[2], dbcName: m[2], nameSource: "dbc", sendType: "", cycleMs: null, sender: m[4] === "Vector__XXX" ? "" : m[4], receivers: [], frame: { payloadBytes: Number(m[3]) }, signals: [], sigBy: new Map() };
+      pdus.push(cur); byId.set(raw, cur); continue; }
+    if (cur && (m = /^\s+SG_\s+(\w+)\s*(M|m\d+)?\s*:\s*(\d+)\|(\d+)@([01])([+-])\s*\(([^,]+),([^)]+)\)\s*\[([^|]*)\|([^\]]*)\]\s*"([^"]*)"\s*(.*)$/.exec(line))) {
+      const recv = m[12].split(",").map((x) => x.trim()).filter((x) => x && x !== "Vector__XXX"), num = (x) => { const n = Number(x); return isFinite(n) ? n : null; };
+      const sg = { name: m[1], dbcName: m[1], startBit: Number(m[3]), length: Number(m[4]), type: m[6] === "-" ? "signed" : "unsigned", min: num(m[9]), max: num(m[10]), unit: m[11], roles: {} };
+      const f = num(m[7]), o = num(m[8]); if (f != null && f !== 1) sg.factor = f; if (o) sg.offset = o;
+      if (m[5] === "0") sg.byteOrder = "motorola";
+      if (m[2] === "M") { sg.mux = "M"; muxed++; } else if (m[2]) sg.muxGroup = Number(m[2].slice(1));
+      if (cur.sender) sg.roles[cur.sender] = "S"; recv.forEach((r) => { if (!sg.roles[r]) sg.roles[r] = "R"; });
+      cur.receivers = [...new Set([...cur.receivers, ...recv])]; cur.signals.push(sg); cur.sigBy.set(m[1], sg); continue; }
+    if ((m = /^BA_DEF_\s+(?:BU_|BO_|SG_|EV_)?\s*"(\w+)"\s+ENUM\s+(.*);/.exec(line))) { enums[m[1]] = [...m[2].matchAll(/"([^"]*)"/g)].map((x) => x[1]); continue; }
+    const en = (k, v) => (enums[k] && /^\d+$/.test(v) ? enums[k][Number(v)] : v);
+    if ((m = /^BA_\s+"(\w+)"\s+BU_\s+(\w+)\s+(.+);/.exec(line))) { const n = nodes.find((x) => x.name === m[2]); if (!n) continue; const v = unq(m[3].trim());
+      const k = { Ipv6Address: "ipv6", Ipv4Address: "ipv4", MacAddress: "mac", RxPort: "rxPort", VlanId: "vlan", DiagnosticAddress: "diagAddress", DoipAddresses: "doip" }[m[1]];
+      if (k) n[k] = k === "rxPort" || k === "vlan" || k === "diagAddress" ? Number(v) : k === "ipv6" ? v.toLowerCase() : k === "mac" ? v.toUpperCase() : v; continue; }
+    if ((m = /^BA_\s+"(\w+)"\s+BO_\s+(\d+)\s+(.+);/.exec(line))) { const p = byId.get(Number(m[2])); if (!p) continue; const v = unq(m[3].trim()), val = en(m[1], v);
+      if (m[1] === "GenMsgCycleTime") p.cycleMs = Number(v) || null; else if (m[1] === "GenMsgSendType") p.sendType = String(val).toLowerCase();
+      else if (m[1] === "SystemMessageLongSymbol") p.name = v;
+      else if (m[1] === "GenMsgGatewayed" && val !== "NO") (p.gateway = p.gateway || {}).type = val; else if (m[1] === "GenMsgGatewaySrc" && v) (p.gateway = p.gateway || {}).src = v;
+      else if (m[1] === "GenMsgSecuredType" && val !== "NONE") p.secured = val; continue; }
+    if ((m = /^BA_\s+"(\w+)"\s+SG_\s+(\d+)\s+(\w+)\s+(.+);/.exec(line))) { const sg = sigOf(Number(m[2]), m[3]); if (!sg) continue; const v = unq(m[4].trim()), val = en(m[1], v);
+      if (m[1] === "SystemSignalLongSymbol") sg.name = v; else if (m[1] === "GenSigStartValue") sg.initRaw = Number(v);
+      else if (m[1] === "GenSigCrcType" && val !== "NONE") (sg.e2e = sg.e2e || {}).crc = val; else if (m[1] === "GenSigCounterType" && val !== "NONE") (sg.e2e = sg.e2e || {}).counter = val;
+      else if (m[1] === "GenSigDataIds" && v) (sg.e2e = sg.e2e || {}).dataIds = v; continue; }
+    if ((m = /^SIG_VALTYPE_\s+(\d+)\s+(\w+)\s*:\s*([12])/.exec(line))) { const sg = sigOf(Number(m[1]), m[2]); if (sg) sg.type = m[3] === "2" ? "double" : "float"; continue; }
+    if ((m = /^VAL_\s+(\d+)\s+(\w+)\s+(.*);/.exec(line))) { const sg = sigOf(Number(m[1]), m[2]); if (!sg) continue; const t = {}; for (const x of m[3].matchAll(/(-?\d+)\s+"([^"]*)"/g)) t[x[1]] = x[2]; if (Object.keys(t).length) sg._vt = t; continue; }
+    if ((m = /^CM_\s+SG_\s+(\d+)\s+(\w+)\s+"((?:[^"\\]|\\.)*)";/.exec(line))) { const sg = sigOf(Number(m[1]), m[2]); if (sg && m[3].trim()) sg.comment = m[3].trim(); continue; }
+  }
+  const byContent = new Map(); // value tables: one per distinct content, named after the first signal using it
+  for (const p of pdus) { delete p.sigBy; for (const sg of p.signals) { if (!sg._vt) continue; const k = JSON.stringify(sg._vt); let n = byContent.get(k);
+    if (!n) { n = "VT_" + sg.name; let i = 2; while (vts[n]) n = "VT_" + sg.name + "_" + i++; vts[n] = sg._vt; byContent.set(k, n); } sg.vt = n; delete sg._vt; } }
+  if (!pdus.length) warnings.push("No BO_ messages found — this does not look like a DBC.");
+  if (muxed) warnings.push(muxed + " multiplexor signal(s) defined in the DBC.");
+  return { eth: { nodes, pdus, valueTables: vts, source: { format: "dbc" } }, warnings };
 }
 
 /* ---------- compact storage: base64( gzip( JSON ) ) — ~0.5 MB for a full backbone instead of ~4.8 MB ---------- */

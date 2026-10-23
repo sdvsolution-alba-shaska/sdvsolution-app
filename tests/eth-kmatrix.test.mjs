@@ -151,4 +151,40 @@ const br = scrubEth({ nodes: [], source: { proto: cap(w2) + "_UDP" }, valueTable
 ok(br.changed >= 5 && br.eth.source.proto === "Backbone_ETH" && br.eth.pdus[0].name === "oem_status" && br.eth.pdus[0].signals[0].name === "pc_oem_fan" && br.eth.pdus[0].signals[0].vt === "VALS_oem_x" && br.eth.valueTables.VALS_oem_x[0] === "OEM" && !hasBrand(JSON.stringify(br.eth)), "scrubEth cleans names, value-table keys and texts, references and the protocol name");
 ok(scrubEth(br.eth).changed === 0, "scrubbing is idempotent");
 const packed = await packEth(dd); ok(JSON.stringify(await unpackEth(packed)) === JSON.stringify(dd) && packed.length < JSON.stringify(dd).length * 2, "compressed storage round-trips exactly");
+// ---------- Vector DBC import (synthetic, no brand names) ----------
+{
+  const { parseDbcEth, mergeEth: mg, checkEth: ck, emptyEth: em } = await import("../src/lib/ethKmatrix.js");
+  const dbc = [
+    'VERSION "T"', "", 'BU_: NodeA NodeB TestTool', "",
+    "BO_ 2147483905 node_a_status_pdu_with_a_long_name: 16 NodeA",
+    ' SG_ node_a_status_pdu_with_a_long_ : 0|8@1+ (1,0) [0|255] ""  NodeB',
+    ' SG_ Mode : 19|4@0+ (1,0) [0|15] ""  NodeB',
+    ' SG_ Speed : 32|16@1+ (0.1,-5) [-5|6548.5] "km/h"  NodeB,TestTool',
+    ' SG_ Sel M : 48|8@1+ (1,0) [0|255] ""  NodeB',
+    ' SG_ VarA m1 : 56|8@1+ (1,0) [0|255] ""  NodeB',
+    ' SG_ VarB m2 : 56|8@1+ (1,0) [0|255] ""  NodeB',
+    ' SG_ Crc : 64|8@1+ (1,0) [0|255] ""  NodeB', "",
+    'BA_DEF_ SG_  "GenSigCrcType" ENUM  "NONE","P1","P4";', 'BA_DEF_ BO_  "GenMsgSendType" ENUM  "cyclic","spontaneous";',
+    'BA_ "Ipv6Address" BU_ NodeA "fd00:1:2:0:0:0:0:10";', 'BA_ "RxPort" BU_ NodeA 42557;',
+    'BA_ "GenMsgCycleTime" BO_ 2147483905 100;', 'BA_ "GenMsgSendType" BO_ 2147483905 0;',
+    'BA_ "SystemMessageLongSymbol" BO_ 2147483905 "node_a_status_pdu_with_a_long_name";',
+    'BA_ "SystemSignalLongSymbol" SG_ 2147483905 node_a_status_pdu_with_a_long_ "node_a_status_pdu_with_a_long_name_counter";',
+    'BA_ "GenSigStartValue" SG_ 2147483905 Speed 50;', 'BA_ "GenSigCrcType" SG_ 2147483905 Crc 2;',
+    'VAL_ 2147483905 Mode 0 "off" 1 "on" ;', 'CM_ SG_ 2147483905 Speed "vehicle speed";',
+  ].join("\r\n");
+  const d = parseDbcEth(dbc), p = d.eth.pdus[0], S = (n) => p.signals.find((x) => x.name === n);
+  ok(p.id === 0x101 && p.cycleMs === 100 && p.sendType === "cyclic" && p.frame.payloadBytes === 16 && p.sender === "NodeA", "DBC: extended ID, cycle, send type, payload, sender");
+  ok(S("node_a_status_pdu_with_a_long_name_counter") && S("node_a_status_pdu_with_a_long_name_counter").dbcName === "node_a_status_pdu_with_a_long_", "DBC: long signal name past 32 characters");
+  ok(S("Mode").byteOrder === "motorola" && S("Mode").startBit === 19 && S("Speed").factor === 0.1 && S("Speed").offset === -5 && S("Speed").unit === "km/h" && S("Speed").initRaw === 50 && S("Speed").comment === "vehicle speed", "DBC: Motorola, scaling, unit, start value, comment");
+  ok(S("Sel").mux === "M" && S("VarA").muxGroup === 1 && S("Crc").e2e.crc === "P4" && d.eth.nodes[0].rxPort === 42557, "DBC: multiplexing, E2E, node attributes");
+  // merge into a K-Matrix entry: same PDU by ID, K-Matrix names kept, Intel-LSB 16 == Motorola-MSB 19 (one byte) is not a conflict,
+  // a differently named signal with identical bits is matched, IPv6 written two ways is equal, value tables match by content
+  const base = { nodes: [{ name: "NodeA", ipv6: "fd00:1:2::10" }], valueTables: { Mode_table: { 0: "off", 1: "on" } },
+    pdus: [{ id: 0x101, name: "NodeA_Status", sender: "NodeA", receivers: ["NodeB", "TestTool"], frame: {}, signals: [{ name: "Mode", startBit: 16, length: 4, vt: "Mode_table", roles: {} }, { name: "Counter", startBit: 0, length: 8, roles: {} }, { name: "Speed", startBit: 32, length: 16, roles: {} }] }] };
+  const { eth: m, report } = mg(base, d.eth), mp = m.pdus[0];
+  ok(mp.name === "NodeA_Status" && mp.dbcName === "node_a_status_pdu_with_a_long_name" && report.conflicts.length === 0, "DBC merge: K-Matrix names win, no false conflicts (" + JSON.stringify(report.conflicts) + ")");
+  ok(mp.signals.find((x) => x.name === "Counter").dbcName && report.matchedByLayout === 1 && mp.signals.find((x) => x.name === "Mode").startBit === 16 && mp.signals.find((x) => x.name === "Speed").unit === "km/h", "DBC merge: matched by layout, layout kept, blanks filled");
+  ok(ck(m).filter((f) => /overlap/.test(f.msg)).length === 0, "DBC: signals of different multiplexer groups may share bits");
+}
 console.log(fails ? "\n" + fails + " FAILED" : "\nall passed"); process.exit(fails ? 1 : 0);
+
