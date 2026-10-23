@@ -461,7 +461,7 @@ const SWITCHMAP_PERIPHERALS = [
   ["ECU-ISMWLS", "Steering Column Switch Module (iSMWLS)", ["ISMWLS"], "Steering-column stalk module on FlexRay", "ECU-FZM", "FZ_FR_A", "FlexRay", "10 Mbps", "Stearing Stalk Module"],
   ["ECU-SIH01", "2nd-Row Seat Heat Switch 1 (SIH_Taster_01)", ["SIH_TASTER_01"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
   ["ECU-SIH02", "2nd-Row Seat Heat Switch 2 (SIH_Taster_02)", ["SIH_TASTER_02"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
-  ["ECU-BKE", "HVAC Switchbar (BKE)", ["BKE"], "HVAC switch bar (heated / ventilated seat variants) on CAN", "ECU-CCU", "CCU_IVI_CAN01", "CAN", "TBD", "HVAC Switchbar"],
+  ["ECU-BKE", "HVAC Switchbar (BKE)", ["BKE"], "HVAC switch bar (heated / ventilated seat variants) on CAN", "ECU-CCU", "CCU_IVI_CAN01", "CAN FD", "TBD", "HVAC Switchbar"], // CAN FD per the released IVI CAN FD K-Matrix
 ];
 SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, rate, slide]) => {
   NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on ${bus} (Switchmap Arch Mapping, slide "${slide}")`, codes, kind: "peripheral", subtype: proto === "LIN" ? "LIN switch module" : "Switch module" });
@@ -470,7 +470,7 @@ SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, 
 /* Displays per the switch map: video over LVDS from the CCU; control over CAN. */
 NETWORK.links.push(
   { id: "NT-CDM-LVDS01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "LVDS", net: "CCU_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },
-  { id: "NT-CDM-IVICAN01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "CAN", net: "CCU_IVI_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Center Display\"", dir: "Bidirectional" },
+  { id: "NT-CDM-IVICAN01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "CAN FD", net: "CCU_IVI_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Center Display\"; CAN FD per the released IVI CAN FD K-Matrix (node CI_Disp)", dir: "Bidirectional" },
   { id: "NT-DDM-LVDS04", a: "ECU-CCU", b: "ECU-DDM", cls: "ECU-to-display", proto: "LVDS", net: "CCU_LVDS_Display_Out_LVDS04", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi; replaces H-MTD)", dir: "CCU → Display" },
   { id: "NT-DDM-DASHCAN01", a: "ECU-CZM", b: "ECU-DDM", cls: "zone-to-peripheral", proto: "CAN", net: "Center_Dashboard_CAN01", rate: "TBD", basis: "Switchmap Arch Mapping, slide \"Driver Display\" (Kombi)", dir: "Bidirectional" },
 );

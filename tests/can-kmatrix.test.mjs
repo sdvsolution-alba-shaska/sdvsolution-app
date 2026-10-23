@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs"; import os from "node:os"; import path from "node:path";
-import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml, releasedBusName, canBuses } from "../src/lib/canKmatrix.js";
+import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml, releasedBusName, canBuses, xmmToCcu } from "../src/lib/canKmatrix.js";
 
 // Same three-row heading as the released workbooks: group row, header row, Value Range sub-header row.
 const G0 = ["Messages", "", "", "", "", "Signals", "", "", "", "", "", "Value Range", "", "", "", "", "Sender - Receiver", ""];
@@ -57,7 +57,8 @@ const subBus = (pos) => {
 t("door sub-bus names", () => {
   assert.equal(releasedBusName("Tueraktor3_SUBCANFD"), "DDU_RL_SUBCAN01");
   assert.equal(releasedBusName("anything", ["Tuer_Sensor_VR"]), "DDU_FR_SUBCAN01");
-  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01"); assert.equal(releasedBusName("RearTailGateCANFD"), "Rear_TAILGATE_CAN01");
+  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01"); assert.equal(releasedBusName("RearTailGateCANFD"), "Rear_TAILGATE_CAN01"); assert.equal(releasedBusName("XMM_IVI_CANFD"), "CCU_IVI_CAN01");
+  assert.equal(xmmToCcu("XMM3_SAIL_Heartbeat"), "CCU_Heartbeat"); assert.equal(xmmToCcu("Req_XIX_XMM_IVI_CANFD"), "Req_XIX_CCU_IVI_CANFD");
 });
 t("identical frames on different buses stay separate, in any import order", () => {
   const a = parseReleasedCanKm(subBus("VL"), { sheet: "Tueraktor1_SUBCANFD", source: "x (Tueraktor1_SUBCANFD)" });
