@@ -51,7 +51,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { isReleasedCanLayout, parseReleasedCanKm, mergeReleasedCan, toCanClusterArxml, canBuses } from "./lib/canKmatrix.js";
-import { scrubText } from "./lib/ethKmatrix.js";
+import { scrubText, scrubValueTable } from "./lib/ethKmatrix.js";
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, X, Plus, Minus, Maximize2,
   GitBranch, Table, Share2, BookOpen, AlertTriangle, Filter, Lock,
@@ -3732,7 +3732,7 @@ function MirrorFuncDiagram({ canWrite = false, onEcu }) {
       // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
       // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
       for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
-        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, scrubTable: scrubValueTable, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
         if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
         const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K; kmBump();
         alert("Merged " + file.name + " (sheet " + sn + ") into bus " + report.bus + ":\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
@@ -3883,7 +3883,7 @@ const KM_NODE_RENAMES = { BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP
 function kmFixups(K) { const rn = (n) => KM_NODE_RENAMES[n] || n;
   (K && K.msgs || []).forEach((m) => { if (KM_NOT_MIRROR.has(m.name) && m.l1 === "Adjusting Exterior Mirrors") m.l1 = ""; if (m.sender) m.sender = rn(m.sender); if (m.recv) m.recv = [...new Set(m.recv.map(rn))];
     m.name = scrubText(m.name); if (m.src) m.src = scrubText(m.src); (m.sig || []).forEach((g) => { g[0] = scrubText(g[0]); }); }); // brand list grows over time
-  (K && K.txt || []).forEach((t) => { if (t[1]) for (const k in t[1]) t[1][k] = scrubText(t[1][k]); }); }
+  (K && K.txt || []).forEach((t) => { if (t[1] && Object.keys(t[1]).length > 1) t[1] = scrubValueTable(t[1]); else if (t[1]) for (const k in t[1]) t[1][k] = scrubText(t[1][k]); }); }
 const icdRowsToAoa = (groups) => { const aoa = [["Connector", "Signal / Interface", "Pins", "Class", "Dir", "Wired to", "From"]]; (groups || []).forEach((g) => (g.rows || []).forEach((r) => aoa.push([g.conn, r.signal, r.pins, r.cls, r.dir, r.wired, r.from]))); return aoa; };
 const icdAoaToGroups = (aoa) => { const H = (aoa[0] || []).map((x) => String(x).toLowerCase()); const ci = (frag) => H.findIndex((h) => h.indexOf(frag) >= 0); const iC = ci("connect"), iS = ci("signal") >= 0 ? ci("signal") : ci("interface"), iP = ci("pin"), iCl = ci("class"), iD = ci("dir"), iW = ci("wired") >= 0 ? ci("wired") : ci("to"), iF = ci("from"); const groups = []; aoa.slice(1).forEach((row) => { if (!row || !row.length) return; const conn = String(row[iC] != null ? row[iC] : "—") || "—"; let g = groups.find((x) => x.conn === conn); if (!g) { g = { conn, rows: [] }; groups.push(g); } g.rows.push({ signal: String(row[iS] != null ? row[iS] : ""), pins: Number(row[iP]) || 1, cls: String(row[iCl] != null ? row[iCl] : "—"), dir: String(row[iD] != null ? row[iD] : "—"), wired: String(row[iW] != null ? row[iW] : "—"), from: String(row[iF] != null ? row[iF] : "—") }); }); return groups.filter((g) => g.rows.length); };
 
@@ -4484,7 +4484,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
       // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
       // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
       for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
-        const rel = parseReleasedCanKm(a2, { scrub: scrubText, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
+        const rel = parseReleasedCanKm(a2, { scrub: scrubText, scrubTable: scrubValueTable, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
         if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
         const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K; kmBump();
         alert("Merged " + file.name + " (sheet " + sn + ") into bus " + report.bus + ":\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"

@@ -81,7 +81,7 @@ export function parseReleasedCanKm(aoa, opts = {}) {
     const start = (sb - 1) * 8 + bit;
     // value table: parallel "Raw Value [dec]" and "Description" lists, or "0 = text" lines
     let cm = null; const rawV = s(G(r, C.raw)), desc = s(G(r, C.desc));
-    if (rawV !== "" && desc !== "") { const ks = rawV.split(/\r?\n/).map((x) => x.trim()), vs = desc.split(/\r?\n/).map((x) => x.trim()); const vt = {}; ks.forEach((k, j) => { if (/^-?\d+$/.test(k) && vs[j] != null) vt[k] = scrub(vs[j]); }); if (Object.keys(vt).length) cm = txtCM(vt); }
+    if (rawV !== "" && desc !== "") { const ks = rawV.split(/\r?\n/).map((x) => x.trim()), vs = desc.split(/\r?\n/).map((x) => x.trim()); const vt = {}; ks.forEach((k, j) => { if (/^-?\d+$/.test(k) && vs[j] != null) vt[k] = opts.scrubTable ? xmmToCcu(vs[j]) : scrub(vs[j]); }); if (Object.keys(vt).length) cm = txtCM(opts.scrubTable ? opts.scrubTable(vt) : vt); }
     if (!cm) { const f = s(G(r, C.factor)), o = s(G(r, C.offset)), u = s(G(r, C.unit)); if (f !== "" && Number.isFinite(Number(f)) && (Number(f) !== 1 || (o !== "" && Number(o) !== 0) || u)) cm = linCM(Number(f), Number(o) || 0, u); }
     const ms = s(G(r, C.muxSig)), mg = s(G(r, C.muxGrp));
     const sig = [sn, start, len, cm]; if (ms !== "" && ms !== "0") sig[4] = "M"; else if (mg !== "" && Number.isFinite(Number(mg))) sig[4] = Number(mg);

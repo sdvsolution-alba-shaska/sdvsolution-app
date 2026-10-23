@@ -441,11 +441,28 @@ const WHOLE_RE = new RegExp("^\\s*(" + B7 + ")\\s*$", "i");
 const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
 export const scrubText = (s) => (typeof s !== "string" ? s : WHOLE_RE.test(s) ? s.replace(WHOLE_RE, (m, w) => m.replace(w, caseLike(w, "oem"))) : s.replace(BRAND_RE, (m) => caseLike(m, "oem")));
 export const hasBrand = (s) => typeof s === "string" && (new RegExp(BRAND_RE.source, "i").test(s) || WHOLE_RE.test(s) || new RegExp('"\\s*' + B7 + '\\s*"', "i").test(s)); // last test: a JSON dump holding a value that is just the brand
+/* Value tables (raw -> label): labels that end up identical after scrubbing would no longer say which value is which,
+   so they are numbered in raw-value order — a label that is only the brand becomes OEM_1, OEM_2, …, any other collision
+   gets _1, _2, … appended. Labels already reading "OEM" more than once (scrubbed before numbering existed) are numbered too. */
+const isRawKey = (k) => /^-?\d+$/.test(k);
+const rawCmp = (a, b) => { try { const x = BigInt(a), y = BigInt(b); return x < y ? -1 : x > y ? 1 : 0; } catch (e) { return Number(a) - Number(b); } };
+export const isValueTable = (v) => !!v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 1 && Object.entries(v).every(([k, x]) => isRawKey(k) && typeof x === "string");
+export function scrubValueTable(vt) {
+  const keys = Object.keys(vt).sort(rawCmp), out = {}, changed = {};
+  keys.forEach((k) => { out[k] = scrubText(vt[k]); changed[k] = out[k] !== vt[k]; });
+  const groups = new Map(); keys.forEach((k) => { const g = String(out[k]).toLowerCase(); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); });
+  for (const [g, ks] of groups) {
+    if (ks.length < 2 || !(g === "oem" || ks.some((k) => changed[k]))) continue;
+    ks.forEach((k, i) => { out[k] = g === "oem" ? "OEM_" + (i + 1) : out[k] + "_" + (i + 1); });
+  }
+  return keys.reduce((o, k) => { o[k] = out[k]; return o; }, {});
+}
 export function scrubEth(eth) {
   let changed = 0;
   const walk = (v) => {
     if (typeof v === "string") { const t = scrubText(v); if (t !== v) changed++; return t; }
     if (Array.isArray(v)) return v.map(walk);
+    if (isValueTable(v)) { const t = scrubValueTable(v); for (const k in t) if (t[k] !== v[k]) changed++; return t; }
     if (v && typeof v === "object") { const o = {}; for (const [k, x] of Object.entries(v)) { const nk = scrubText(k); if (nk !== k) changed++; o[nk] = walk(x); } return o; }
     return v;
   };

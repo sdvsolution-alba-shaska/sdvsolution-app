@@ -1,5 +1,6 @@
 // Run: node tests/eth-kmatrix.test.mjs
 // Ethernet backbone K-Matrix: reading the released workbook layout, merging partial workbooks, checks, and round trip.
+import { scrubValueTable } from "../src/lib/ethKmatrix.js";
 import { parseWorkbook, mergeEth, checkEth, toWorkbook, emptyEth, parseId, fmtId, ethStats, applyAliases, ethPath, parseDissector, signalBits, sharedBitSignals, packEth, unpackEth, toDissector, ecuSignals, bmTypeForBus, bindingStatus, scrubEth, scrubText, hasBrand, BRAND_WORDS } from "../src/lib/ethKmatrix.js";
 
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error("FAIL: " + m); } else console.log("ok   " + m); };
@@ -139,6 +140,8 @@ const bnd2 = JSON.parse(JSON.stringify(bnd)); bnd2.pdus[1].signals[0].startBit =
 bnd2.pdus[1].signals = []; ok(bindingStatus(bnd2, bus) === "missing", "a binding whose signal left the K-Matrix is flagged");
 
 // --- brand-neutral names (test strings are built from the encoded word list, so no names appear in this file)
+{ const cap = (w) => w[0].toUpperCase() + w.slice(1), vt = scrubValueTable({ "0": cap(BRAND_WORDS[4]), "1": cap(BRAND_WORDS[5]), "2": "x_" + BRAND_WORDS[3].toUpperCase(), "3": "x_OEM", "4": "none", "10": cap(BRAND_WORDS[13]) });
+  ok(vt["0"] === "OEM_1" && vt["1"] === "OEM_2" && vt["10"] === "OEM_3" && vt["2"] === "x_OEM_1" && vt["3"] === "x_OEM_2" && vt["4"] === "none" && JSON.stringify(scrubValueTable(vt)) === JSON.stringify(vt), "scrubbed value labels numbered in raw order, idempotent"); }
 ok(scrubText("Oem".replace(/[A-Za-z]+/g, (x, i) => (i ? BRAND_WORDS[11] : BRAND_WORDS[10]).replace(/^./, (c) => c.toUpperCase()))) === "Oem" && scrubText("KST_Kl_50_Startanforderung") === "KST_Kl_50_Startanforderung", "two-word name scrubbed; German -anforderung untouched");
 ok(scrubText(BRAND_WORDS[4][0].toUpperCase() + BRAND_WORDS[4].slice(1)) === "Oem" && scrubText("Audio_Volume") === "Audio_Volume" && scrubText(BRAND_WORDS[7].toUpperCase()) === "OEM" && scrubText("seat_row_2") === "seat_row_2" && scrubText("Center_Seat_CAN01") === "Center_Seat_CAN01", "group names: tokens, whole-text only for the English word");
 ok(scrubText("CeCoU_" + BRAND_WORDS[3].toUpperCase() + "_SL_HW") === "CeCoU_OEM_SL_HW" && scrubText("VDSO_VWhlSpdFrLe") === "VDSO_VWhlSpdFrLe" && scrubText(BRAND_WORDS[2]) === "oem", "two-letter abbreviation scrubbed as a token only");
