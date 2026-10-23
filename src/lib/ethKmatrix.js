@@ -432,7 +432,7 @@ export function bindingStatus(eth, bus) {
 const fromB64 = (t) => (typeof atob === "function" ? atob(t) : Buffer.from(t, "base64").toString("latin1"));
 export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc="].map(fromB64); // kept encoded so the names never appear in the source
 // The two-letter abbreviation (last word) only counts as a whole token — "<ABBR>_SL_HW" yes, "VWhlSpd" (vehicle wheel speed) no.
-const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.slice(0, -1).join("|") + "|(?<![A-Za-z])" + BRAND_WORDS[BRAND_WORDS.length - 1] + "(?![A-Za-z])", "gi");
+const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.slice(0, -1).join("|") + "|(?<![A-Za-z0-9])" + BRAND_WORDS[BRAND_WORDS.length - 1] + "(?![A-Za-z])", "gi");
 const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
 export const scrubText = (s) => (typeof s === "string" ? s.replace(BRAND_RE, (m) => caseLike(m, "oem")) : s);
 export const hasBrand = (s) => typeof s === "string" && new RegExp(BRAND_RE.source, "i").test(s);
