@@ -430,12 +430,13 @@ export function bindingStatus(eth, bus) {
    same letter case (<brand>_fuel_pump -> oem_fuel_pump, <BRAND> -> OEM), so names stay unique and the workbook and the
    dissector still match each other after both are scrubbed. A protocol name that only carried a brand becomes Backbone_ETH. */
 const fromB64 = (t) => (typeof atob === "function" ? atob(t) : Buffer.from(t, "base64").toString("latin1"));
-export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc=", "YXVkaQ==", "c2tvZGE=", "YnVnYXR0aQ==", "c2VhdA=="].map(fromB64); // kept encoded so the names never appear in the source
-// Three ways a name counts: anywhere in a word (the first three), as a whole token (next four — "<ABBR>_SL_HW" yes, "VWhlSpd"
+export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc=", "YXVkaQ==", "c2tvZGE=", "YnVnYXR0aQ==", "c2VhdA==", "bGFtYm9yZ2hpbmk=", "YmVudGxleQ==", "cm9sbHM=", "cm95Y2U=", "Zm9yZA==", "cG9yc2NoZQ==", "cXVhdHRybw=="].map(fromB64); // kept encoded so the names never appear in the source
+// Three ways a name counts: anywhere in a word (the first three), as a whole token (TOKENS — "<ABBR>_SL_HW" yes, "VWhlSpd"
 // = vehicle wheel speed and "Audio" no), or only as the entire text (the last, an everyday English word — a value label that
 // is just the brand, never seat_row / Center_Seat_CAN01).
-const [B0, B1, B2, B3, B4, B5, B6, B7] = BRAND_WORDS;
-const BRAND_RE = new RegExp(B0 + "[\\s_-]*motors|" + [B0, B1, B2].join("|") + "|(?<![A-Za-z0-9])(?:" + [B3, B4, B5, B6].join("|") + ")(?![A-Za-z])", "gi");
+const [B0, B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14] = BRAND_WORDS;
+const TOKENS = [B3, B4, B5, B6, B8, B9, B10 + "[\\s_-]*" + B11, B12, B13, B14]; // B10 + B11 is one two-word name
+const BRAND_RE = new RegExp(B0 + "[\\s_-]*motors|" + [B0, B1, B2].join("|") + "|(?<![A-Za-z0-9])(?:" + TOKENS.join("|") + ")(?![A-Za-z])", "gi");
 const WHOLE_RE = new RegExp("^\\s*(" + B7 + ")\\s*$", "i");
 const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
 export const scrubText = (s) => (typeof s !== "string" ? s : WHOLE_RE.test(s) ? s.replace(WHOLE_RE, (m, w) => m.replace(w, caseLike(w, "oem"))) : s.replace(BRAND_RE, (m) => caseLike(m, "oem")));
