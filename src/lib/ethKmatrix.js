@@ -430,8 +430,9 @@ export function bindingStatus(eth, bus) {
    same letter case (<brand>_fuel_pump -> oem_fuel_pump, <BRAND> -> OEM), so names stay unique and the workbook and the
    dissector still match each other after both are scrubbed. A protocol name that only carried a brand becomes Backbone_ETH. */
 const fromB64 = (t) => (typeof atob === "function" ? atob(t) : Buffer.from(t, "base64").toString("latin1"));
-export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu"].map(fromB64); // kept encoded so the names never appear in the source
-const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.join("|"), "gi");
+export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc="].map(fromB64); // kept encoded so the names never appear in the source
+// The two-letter abbreviation (last word) only counts as a whole token — "<ABBR>_SL_HW" yes, "VWhlSpd" (vehicle wheel speed) no.
+const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.slice(0, -1).join("|") + "|(?<![A-Za-z])" + BRAND_WORDS[BRAND_WORDS.length - 1] + "(?![A-Za-z])", "gi");
 const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
 export const scrubText = (s) => (typeof s === "string" ? s.replace(BRAND_RE, (m) => caseLike(m, "oem")) : s);
 export const hasBrand = (s) => typeof s === "string" && new RegExp(BRAND_RE.source, "i").test(s);

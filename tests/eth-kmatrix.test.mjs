@@ -139,6 +139,7 @@ const bnd2 = JSON.parse(JSON.stringify(bnd)); bnd2.pdus[1].signals[0].startBit =
 bnd2.pdus[1].signals = []; ok(bindingStatus(bnd2, bus) === "missing", "a binding whose signal left the K-Matrix is flagged");
 
 // --- brand-neutral names (test strings are built from the encoded word list, so no names appear in this file)
+ok(scrubText("CeCoU_" + BRAND_WORDS[3].toUpperCase() + "_SL_HW") === "CeCoU_OEM_SL_HW" && scrubText("VDSO_VWhlSpdFrLe") === "VDSO_VWhlSpdFrLe" && scrubText(BRAND_WORDS[2]) === "oem", "two-letter abbreviation scrubbed as a token only");
 const [w1, w2] = BRAND_WORDS, up = (x) => x.toUpperCase(), cap = (x) => x[0].toUpperCase() + x.slice(1);
 ok(scrubText("device_enabled_" + w1 + "_fuel_pump") === "device_enabled_oem_fuel_pump" && scrubText("EVCC_type_" + up(w2)) === "EVCC_type_OEM" && scrubText(cap(w1) + " Motors variant") === "Oem variant" && scrubText(cap(w2) + "_UDP") === "Oem_UDP", "brand names become a neutral token in the same letter case");
 const br = scrubEth({ nodes: [], source: { proto: cap(w2) + "_UDP" }, valueTables: { ["VALS_" + w1 + "_x"]: { 0: up(w1), 1: "other" } }, pdus: [{ id: 1, name: w2 + "_status", signals: [{ name: "pc_" + w1 + "_fan", vt: "VALS_" + w1 + "_x", roles: {} }] }] });
