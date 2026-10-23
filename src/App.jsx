@@ -479,6 +479,15 @@ SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, 
   NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on the CCU IVI CAN FD (CCU_IVI_CAN01), release node ${codes[1] || codes[0]}`, codes, kind: "peripheral", subtype });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-IVICAN01`, a: "ECU-CCU", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "CCU_IVI_CAN01", rate: "TBD", basis: "Released IVI CAN FD K-Matrix (CCU_IVI_CAN01)", dir: "Bidirectional" });
 });
+/* Rear tire / road CAN FD (released RearTireRoadCANFD) — rear-zone bus, the rear zone (BZC) being integrated into the CZM.
+   Secondary ECUs named by George 2026-10-22; supplier TBD. */
+[
+  ["ECU-TPMS", "Tire Pressure Monitoring System (TPMS)", ["TPMS", "RDK"], "Tire pressure monitoring control unit (release node RDK, tire status frame RDK_11)", "Tire pressure monitoring"],
+  ["ECU-EPL", "Electric Park Lock (EPL)", ["EPL", "ELPS_OBD", "ParkSpHigh"], "Electric park lock actuator / controller (release node ELPS_OBD, ParkSpHigh frames, park-lock status PLSA_01, immobilizer authentication)", "Park lock"],
+].forEach(([id, name, codes, deviceClass, subtype]) => {
+  NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on the CZM rear tire / road CAN FD (Rear_TIREROAD_CAN01), release node ${codes[1]}`, codes, kind: "peripheral", subtype });
+  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-TIREROADCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "Rear_TIREROAD_CAN01", rate: "TBD", basis: "Released RearTireRoadCANFD K-Matrix (rear-zone node BZC = CZM)", dir: "Bidirectional" });
+});
 /* Displays per the switch map: video over LVDS from the CCU; control over CAN. */
 NETWORK.links.push(
   { id: "NT-CDM-LVDS01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "LVDS", net: "CCU_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },

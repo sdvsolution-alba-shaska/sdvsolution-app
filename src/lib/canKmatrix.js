@@ -17,6 +17,8 @@ export const CAN_NODE_MAP = { CZC_1: "CZM", CZC_2: "CZM", CZC_Switch: "CZM", BZC
   Tuer_Antrieb_VL: "DDU_FL", Tuer_Antrieb_VR: "DDU_FR", Tuer_Antrieb_HL: "DDU_RL", Tuer_Antrieb_HR: "DDU_RR",
   // IVI CAN FD (released XMM_IVI_CANFD): XMM is the CCU in the SDVsolution model; CI_Disp is the Center Display Module.
   XMM3_SAIL: "CCU", XMM: "CCU", CI_Disp: "CDM", BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP", LSR: "LSR", HUD: "HUD",
+  // Rear tire / road CAN FD (released RearTireRoadCANFD): RDK = tire pressure monitoring, ELPS_OBD = electric park lock.
+  RDK: "TPMS", ELPS_OBD: "EPL",
   Tuer_Sensor_VL: "DSU_FL", Tuer_Sensor_VR: "DSU_FR", Tuer_Sensor_HL: "DSU_RL", Tuer_Sensor_HR: "DSU_RR" };
 
 // The bus a released sheet describes. Several buses reuse the same frame names and IDs (the four door sub-CANs are
@@ -28,6 +30,7 @@ export function releasedBusName(sheet, nodes = []) {
   const ta = /Tueraktor([1-4])/i.exec(sn); if (ta) return "DDU_" + ["FL", "FR", "RL", "RR"][ta[1] - 1] + "_SUBCAN01"; // file order 1-4 = VL, VR, HL, HR
   if (/center_?door/i.test(sn)) return "Center_DOOR_CAN01";
   if (/rear_?tail_?gate/i.test(sn)) return "Rear_TAILGATE_CAN01";
+  if (/rear_?tire_?road/i.test(sn)) return "Rear_TIREROAD_CAN01";
   if (/(XMM|CCU)_?IVI/i.test(sn)) return "CCU_IVI_CAN01";
   return sn.replace(/[^A-Za-z0-9_]/g, "_") || "CAN";
 }
