@@ -461,11 +461,23 @@ const SWITCHMAP_PERIPHERALS = [
   ["ECU-ISMWLS", "Steering Column Switch Module (iSMWLS)", ["ISMWLS"], "Steering-column stalk module on FlexRay", "ECU-FZM", "FZ_FR_A", "FlexRay", "10 Mbps", "Stearing Stalk Module"],
   ["ECU-SIH01", "2nd-Row Seat Heat Switch 1 (SIH_Taster_01)", ["SIH_TASTER_01"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
   ["ECU-SIH02", "2nd-Row Seat Heat Switch 2 (SIH_Taster_02)", ["SIH_TASTER_02"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
-  ["ECU-BKE", "HVAC Switchbar (BKE)", ["BKE"], "HVAC switch bar (heated / ventilated seat variants) on CAN", "ECU-CCU", "CCU_IVI_CAN01", "CAN FD", "TBD", "HVAC Switchbar"], // CAN FD per the released IVI CAN FD K-Matrix
+  ["ECU-FCP", "Front Climate Panel (FCP)", ["FCP", "BKE"], "Front climate control panel / HVAC switch bar (heated / ventilated seat variants) on CAN FD — release node BKE", "ECU-CCU", "CCU_IVI_CAN01", "CAN FD", "TBD", "HVAC Switchbar"], // CAN FD per the released IVI CAN FD K-Matrix
 ];
 SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, rate, slide]) => {
   NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on ${bus} (Switchmap Arch Mapping, slide "${slide}")`, codes, kind: "peripheral", subtype: proto === "LIN" ? "LIN switch module" : "Switch module" });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-${bus.replace(/_/g, "").toUpperCase()}`, a: host, b: id, cls: "zone-to-peripheral", proto, net: bus, rate, basis: `Switchmap Arch Mapping, slide "${slide}"`, dir: "Bidirectional" });
+});
+/* IVI CAN FD nodes from the released IVI CAN FD K-Matrix (CCU_IVI_CAN01) — Secondary ECUs named by George 2026-10-22.
+   Release node names kept as codes so imports and searches still match. */
+[
+  ["ECU-PDM", "Passenger Display Module (PDM)", ["PDM", "PI_Disp", "PID"], "Passenger information display (display control, display input and key input over CAN FD)", "Passenger display"],
+  ["ECU-HUD", "Head-Up Display (HUD)", ["HUD"], "Head-up display control unit (AR-HUD) on CAN FD", "Head-up display"],
+  ["ECU-CCP", "Center Console Panel (CCP)", ["CCP", "CeCoUnit", "BedienDisp_m"], "Centre-console control panel / operating unit (key input over CAN FD)", "Control panel"],
+  ["ECU-RCP", "Rear Climate Panel (RCP)", ["RCP", "KPH", "KlimaFond"], "Rear climate control panel (key input, climate status over CAN FD)", "Climate panel"],
+  ["ECU-LSR", "LSR", ["LSR", "LSR_1"], "Key-input unit on CAN FD (release node LSR_1)", "Switch module"],
+].forEach(([id, name, codes, deviceClass, subtype]) => {
+  NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on the CCU IVI CAN FD (CCU_IVI_CAN01), release node ${codes[1] || codes[0]}`, codes, kind: "peripheral", subtype });
+  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-IVICAN01`, a: "ECU-CCU", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "CCU_IVI_CAN01", rate: "TBD", basis: "Released IVI CAN FD K-Matrix (CCU_IVI_CAN01)", dir: "Bidirectional" });
 });
 /* Displays per the switch map: video over LVDS from the CCU; control over CAN. */
 NETWORK.links.push(
@@ -3858,7 +3870,9 @@ function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k]
 function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } kmFixups(KM_STORE.data); }
 /* Corrections applied to K-Matrix data saved before they were made. */
 const KM_NOT_MIRROR = new Set(["TAntr_Cmd_01", "TAntr_Cmd_02", "TSens_Status", "TSens_Target_Pos1", "TSens_Target_Pos2"]);
-function kmFixups(K) { (K && K.msgs || []).forEach((m) => { if (KM_NOT_MIRROR.has(m.name) && m.l1 === "Adjusting Exterior Mirrors") m.l1 = ""; }); }
+const KM_NODE_RENAMES = { BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP" }; // renamed after frames may have been saved
+function kmFixups(K) { const rn = (n) => KM_NODE_RENAMES[n] || n;
+  (K && K.msgs || []).forEach((m) => { if (KM_NOT_MIRROR.has(m.name) && m.l1 === "Adjusting Exterior Mirrors") m.l1 = ""; if (m.sender) m.sender = rn(m.sender); if (m.recv) m.recv = [...new Set(m.recv.map(rn))]; }); }
 const icdRowsToAoa = (groups) => { const aoa = [["Connector", "Signal / Interface", "Pins", "Class", "Dir", "Wired to", "From"]]; (groups || []).forEach((g) => (g.rows || []).forEach((r) => aoa.push([g.conn, r.signal, r.pins, r.cls, r.dir, r.wired, r.from]))); return aoa; };
 const icdAoaToGroups = (aoa) => { const H = (aoa[0] || []).map((x) => String(x).toLowerCase()); const ci = (frag) => H.findIndex((h) => h.indexOf(frag) >= 0); const iC = ci("connect"), iS = ci("signal") >= 0 ? ci("signal") : ci("interface"), iP = ci("pin"), iCl = ci("class"), iD = ci("dir"), iW = ci("wired") >= 0 ? ci("wired") : ci("to"), iF = ci("from"); const groups = []; aoa.slice(1).forEach((row) => { if (!row || !row.length) return; const conn = String(row[iC] != null ? row[iC] : "—") || "—"; let g = groups.find((x) => x.conn === conn); if (!g) { g = { conn, rows: [] }; groups.push(g); } g.rows.push({ signal: String(row[iS] != null ? row[iS] : ""), pins: Number(row[iP]) || 1, cls: String(row[iCl] != null ? row[iCl] : "—"), dir: String(row[iD] != null ? row[iD] : "—"), wired: String(row[iW] != null ? row[iW] : "—"), from: String(row[iF] != null ? row[iF] : "—") }); }); return groups.filter((g) => g.rows.length); };
 

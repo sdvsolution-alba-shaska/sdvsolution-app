@@ -16,7 +16,7 @@ export const CAN_NODE_MAP = { CZC_1: "CZM", CZC_2: "CZM", CZC_Switch: "CZM", BZC
   // VL/VR/HL/HR = front-left / front-right / rear-left / rear-right. Each drive also sits on the Center Door CAN.
   Tuer_Antrieb_VL: "DDU_FL", Tuer_Antrieb_VR: "DDU_FR", Tuer_Antrieb_HL: "DDU_RL", Tuer_Antrieb_HR: "DDU_RR",
   // IVI CAN FD (released XMM_IVI_CANFD): XMM is the CCU in the SDVsolution model; CI_Disp is the Center Display Module.
-  XMM3_SAIL: "CCU", XMM: "CCU", CI_Disp: "CDM", BKE: "BKE",
+  XMM3_SAIL: "CCU", XMM: "CCU", CI_Disp: "CDM", BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP", LSR: "LSR", HUD: "HUD",
   Tuer_Sensor_VL: "DSU_FL", Tuer_Sensor_VR: "DSU_FR", Tuer_Sensor_HL: "DSU_RL", Tuer_Sensor_HR: "DSU_RR" };
 
 // The bus a released sheet describes. Several buses reuse the same frame names and IDs (the four door sub-CANs are
