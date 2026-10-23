@@ -41,7 +41,7 @@ t("CAN cluster ARXML is well formed and strict-valid when autosar_data is presen
   const { K } = mergeReleasedCan({ msgs: [], lin: [], txt: [] }, rel);
   const { xml, stats } = toCanClusterArxml(K, { cluster: "Test_CANFD" });
   assert.equal(stats.frames, 2); assert.ok(xml.includes("<CAN-ADDRESSING-MODE>EXTENDED</CAN-ADDRESSING-MODE>"));
-  assert.ok(xml.includes("CAN-COMMUNICATION-CONNECTOR") && xml.includes("xsi:schemaLocation"));
+  assert.ok(xml.includes("CAN-COMMUNICATION-CONNECTOR") && xml.includes("xsi:schemaLocation")); assert.ok(!xml.includes("<BAUDRATE>"), "no bit rate unless given"); assert.ok(toCanClusterArxml(K, { baudrate: 500000 }).xml.includes("<BAUDRATE>500000</BAUDRATE>"));
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "canarx-")), "t.arxml"); fs.writeFileSync(f, xml);
   try { execFileSync("python3", ["-c", "import autosar_data"], { stdio: "ignore" }); } catch { console.log("  (autosar_data not installed, strict check skipped)"); return; }
   const out = execFileSync("python3", ["-c", "import sys,autosar_data as a;m=a.AutosarModel();m.load_file(sys.argv[1],strict=True);print(len(m.check_references()))", f]).toString().trim();
@@ -57,7 +57,7 @@ const subBus = (pos) => {
 t("door sub-bus names", () => {
   assert.equal(releasedBusName("Tueraktor3_SUBCANFD"), "DDU_RL_SUBCAN01");
   assert.equal(releasedBusName("anything", ["Tuer_Sensor_VR"]), "DDU_FR_SUBCAN01");
-  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01");
+  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01"); assert.equal(releasedBusName("RearTailGateCANFD"), "Rear_TAILGATE_CAN01");
 });
 t("identical frames on different buses stay separate, in any import order", () => {
   const a = parseReleasedCanKm(subBus("VL"), { sheet: "Tueraktor1_SUBCANFD", source: "x (Tueraktor1_SUBCANFD)" });
