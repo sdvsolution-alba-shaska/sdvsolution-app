@@ -430,12 +430,16 @@ export function bindingStatus(eth, bus) {
    same letter case (<brand>_fuel_pump -> oem_fuel_pump, <BRAND> -> OEM), so names stay unique and the workbook and the
    dissector still match each other after both are scrubbed. A protocol name that only carried a brand becomes Backbone_ETH. */
 const fromB64 = (t) => (typeof atob === "function" ? atob(t) : Buffer.from(t, "base64").toString("latin1"));
-export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc="].map(fromB64); // kept encoded so the names never appear in the source
-// The two-letter abbreviation (last word) only counts as a whole token — "<ABBR>_SL_HW" yes, "VWhlSpd" (vehicle wheel speed) no.
-const BRAND_RE = new RegExp(BRAND_WORDS[0] + "[\\s_-]*motors|" + BRAND_WORDS.slice(0, -1).join("|") + "|(?<![A-Za-z0-9])" + BRAND_WORDS[BRAND_WORDS.length - 1] + "(?![A-Za-z])", "gi");
+export const BRAND_WORDS = ["c2NvdXQ=", "cml2aWFu", "dm9sa3N3YWdlbg==", "dnc=", "YXVkaQ==", "c2tvZGE=", "YnVnYXR0aQ==", "c2VhdA=="].map(fromB64); // kept encoded so the names never appear in the source
+// Three ways a name counts: anywhere in a word (the first three), as a whole token (next four — "<ABBR>_SL_HW" yes, "VWhlSpd"
+// = vehicle wheel speed and "Audio" no), or only as the entire text (the last, an everyday English word — a value label that
+// is just the brand, never seat_row / Center_Seat_CAN01).
+const [B0, B1, B2, B3, B4, B5, B6, B7] = BRAND_WORDS;
+const BRAND_RE = new RegExp(B0 + "[\\s_-]*motors|" + [B0, B1, B2].join("|") + "|(?<![A-Za-z0-9])(?:" + [B3, B4, B5, B6].join("|") + ")(?![A-Za-z])", "gi");
+const WHOLE_RE = new RegExp("^\\s*(" + B7 + ")\\s*$", "i");
 const caseLike = (src, rep) => (src === src.toUpperCase() ? rep.toUpperCase() : src[0] === src[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep);
-export const scrubText = (s) => (typeof s === "string" ? s.replace(BRAND_RE, (m) => caseLike(m, "oem")) : s);
-export const hasBrand = (s) => typeof s === "string" && new RegExp(BRAND_RE.source, "i").test(s);
+export const scrubText = (s) => (typeof s !== "string" ? s : WHOLE_RE.test(s) ? s.replace(WHOLE_RE, (m, w) => m.replace(w, caseLike(w, "oem"))) : s.replace(BRAND_RE, (m) => caseLike(m, "oem")));
+export const hasBrand = (s) => typeof s === "string" && (new RegExp(BRAND_RE.source, "i").test(s) || WHOLE_RE.test(s) || new RegExp('"\\s*' + B7 + '\\s*"', "i").test(s)); // last test: a JSON dump holding a value that is just the brand
 export function scrubEth(eth) {
   let changed = 0;
   const walk = (v) => {
