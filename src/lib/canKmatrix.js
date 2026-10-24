@@ -16,7 +16,7 @@ export const CAN_NODE_MAP = { CZC_1: "CZM", CZC_2: "CZM", CZC_Switch: "CZM", BZC
   // VL/VR/HL/HR = front-left / front-right / rear-left / rear-right. Each drive also sits on the Center Door CAN.
   Tuer_Antrieb_VL: "DDU_FL", Tuer_Antrieb_VR: "DDU_FR", Tuer_Antrieb_HL: "DDU_RL", Tuer_Antrieb_HR: "DDU_RR",
   // IVI CAN FD (released XMM_IVI_CANFD): XMM is the CCU in the SDVsolution model; CI_Disp is the Center Display Module.
-  XMM3_SAIL: "CCU", XMM: "CCU", CI_Disp: "CDM", BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP", LSR: "LSR", HUD: "HUD",
+  XMM3_SAIL: "CCU", XMM: "CCU", CI_Disp: "CDM", BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP", LSR: "AVK", LSR_1: "AVK", HUD: "HUD",
   // Rear tire / road CAN FD (released RearTireRoadCANFD): RDK = tire pressure monitoring, ELPS_OBD = electric park lock.
   RDK: "TPMS", ELPS_OBD: "EPL",
   // Rear fallback CAN FD (released RearFallbackCANFD): redundant brake and steering for automated driving.

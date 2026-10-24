@@ -342,7 +342,7 @@ const NETWORK = {
     { id: "ECU-BEC", name: "Battery Energy Module", vendor: "Infineon", processor: "AURIX TC3x", supplier: "TBD", asil: "D", deviceClass: "TriCore safety MCU (ASIL D)", scope: "Energy management, battery management and charging workloads", codes: ["ENG"] },
     { id: "ECU-RTM", name: "Radio Tuner Module", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Broadcast radio tuner (AM / FM / DAB)", scope: "Broadcast radio reception, delivered to the CCU over Ethernet", codes: ["RTM"], kind: "peripheral", subtype: "Radio tuner module" },
     { id: "ECU-BST", name: "8-Channel Premium Booster", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "8-channel premium audio booster / amplifier", scope: "Digital sound package amplifier \u2014 receives an A2B stream from the CCU and drives the premium speakers", codes: ["BST"], kind: "peripheral", subtype: "Audio amplifier" },
-    { id: "ECU-CDM", name: "Center Display Module", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center display module (HMI sink, Secondary ECU)", scope: "Center display (CI_Display, +LSR) \u2014 receives video from the CCU over LVDS (CCU_LVDS_Display_Out_LVDS01), control on CCU_IVI_CAN01", codes: ["CDM", "CID", "CI_DISPLAY"], kind: "peripheral", subtype: "Display" },
+    { id: "ECU-CDM", name: "Center Display Module", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Center display module (HMI sink, Secondary ECU)", scope: "Center display (CI_Display, +Audio Volume Knob) \u2014 receives video from the CCU over LVDS (CCU_LVDS_Display_Out_LVDS01), control on CCU_IVI_CAN01", codes: ["CDM", "CID", "CI_DISPLAY"], kind: "peripheral", subtype: "Display" },
     { id: "ECU-DDM", name: "Driver Display Module", vendor: "Infineon", processor: "Traveo II (T2G)", supplier: "TBD", asil: "QM", deviceClass: "Driver display module (Kombi, HMI sink, Secondary ECU)", scope: "Driver display (Kombi) \u2014 video from the CCU over LVDS (CCU_LVDS_Display_Out_LVDS04), control on the CZM Center_Dashboard_CAN01", codes: ["DDM", "FID", "KOMBI"], kind: "peripheral", subtype: "Display" },
     { id: "ECU-RRDCU", name: "Tailgate / Rear-Closure Control Unit", vendor: "\u2014", processor: "\u2014", supplier: "Kostal", asil: "QM", deviceClass: "Tailgate / rear-closure control unit (liftgate, benchgate/splitgate, rear-window regulator, cinching, central locking) \u2014 NOT a side door", scope: "Rear-window / tailgate closure, locking, lighting, seat and comfort functions on the CZM Door CAN", codes: ["RRDCU"], kind: "peripheral", subtype: "Door control unit" },
     { id: "ECU-SRCU", name: "Sliding-/Tilt-Roof Control Unit (TiltRoof)", vendor: "\u2014", processor: "\u2014", supplier: "TBD", asil: "QM", deviceClass: "Sunroof / tilt-roof (TiltRoof) control unit \u2014 drives roof motors, Hall feedback and operating panel", scope: "Sunroof / tilt-roof (TiltRoof) actuation and roller-blind control on the CZM Center Roof CAN/LIN", codes: ["SRCU"], kind: "peripheral", subtype: "Roof control unit" },
@@ -451,14 +451,16 @@ const SWITCHMAP_PERIPHERALS = [
   ["ECU-SITZMEM-BFS", "Seat Memory Module — Passenger (SitzMem_BFS)", ["SITZMEM_BFS"], "Seat memory / adjustment control unit (12-way, massage) on CAN", "ECU-CZM", "Center_Seat_CAN01", "CAN", "TBD", "Seat adjustment Buttons Passenger"],
   ["ECU-IVB1-FS", "IVB1 — Driver seat (IVB1_FS)", ["IVB1_FS"], "Seat sub-module on the driver seat-memory private LIN", "ECU-SITZMEM-FS", "SitzMem_FS_pLIN1", "LIN", "19.2 Kbps", "Seat adjustment Buttons Driver"],
   ["ECU-IVB1-BFS", "IVB1 — Passenger seat (IVB1_BFS)", ["IVB1_BFS"], "Seat sub-module on the passenger seat-memory private LIN", "ECU-SITZMEM-BFS", "SitzMem_BFS_pLIN1", "LIN", "19.2 Kbps", "Seat adjustment Buttons Passenger"],
-  ["ECU-MFL", "Multifunction Steering Wheel (MFL)", ["MFL"], "Steering-wheel button module on CAN (heated-wheel switch hard-wired to the CZM)", "ECU-CZM", "Center_MFL_CAN01", "CAN", "TBD", "Steering Wheel Button Module"],
+  ["ECU-MSW", "Multifunction Steering Wheel (MSW)", ["MSW", "MFL"], "Steering-wheel button module on CAN (heated-wheel switch hard-wired to the CZM)", "ECU-CZM", "Center_MFL_CAN01", "CAN", "TBD", "Steering Wheel Button Module"],
   ["ECU-LTM", "Light Switch Module (LTM)", ["LTM"], "Light switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Lightswitch Module"],
   ["ECU-SMOD-ANBT", "Accessory Switches (Smod_AnbT)", ["SMOD_ANBT"], "AUX 1-4 accessory switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Accessory Switches"],
   ["ECU-TBC-S", "Trailer Brake Control Switch (TBC_S)", ["TBC_S"], "Trailer brake boost / gain switch module — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Trailer Brake Boost Module"],
-  ["ECU-SL01", "Overhead Console Switch Row (SL_01)", ["SL_01"], "Overhead console lower switch row (off-road / expedition) — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Overhead Console"],
+  ["ECU-OHC1", "Overhead Console (OHC_1)", ["OHC_1", "SL_01"], "Overhead console lower switch row (off-road / expedition) — LIN slave", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Overhead Console"],
+  // OHC_2: a second overhead-console LIN device (George, 2026-10-24) — bus assumed the same as OHC_1 until its LIN schedule is known.
+  ["ECU-OHC2", "Overhead Console (OHC_2)", ["OHC_2"], "Overhead console LIN device 2 — LIN slave (bus to confirm)", "ECU-CZM", "Center_Body_LIN02", "LIN", "19.2 Kbps", "Overhead Console"],
   ["ECU-LIM01", "Overhead Console (LIM_01)", ["LIM_01"], "Overhead console (lights, airbag lamp, hazard, SOS) — LIN slave", "ECU-CZM", "Center_Roof_LIN01", "LIN", "19.2 Kbps", "Overhead Console"],
   ["ECU-ECMIRROR", "Auto-dim Interior Mirror + Garage Door Opener (EC_Mirror)", ["EC_MIRROR"], "Electrochromic interior mirror with garage-door-opener buttons — LIN slave", "ECU-CZM", "Center_Roof_LIN01", "LIN", "19.2 Kbps", "Garage Door Opener"],
-  ["ECU-ISMWLS", "Steering Column Switch Module (iSMWLS)", ["ISMWLS"], "Steering-column stalk module on FlexRay", "ECU-FZM", "FZ_FR_A", "FlexRay", "10 Mbps", "Stearing Stalk Module"],
+  ["ECU-SCSM", "Steering Column Switch Module (SCSM)", ["SCSM", "ISMWLS"], "Steering-column stalk module on FlexRay", "ECU-FZM", "FZ_FR_A", "FlexRay", "10 Mbps", "Stearing Stalk Module"],
   ["ECU-SIH01", "2nd-Row Seat Heat Switch 1 (SIH_Taster_01)", ["SIH_TASTER_01"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
   ["ECU-SIH02", "2nd-Row Seat Heat Switch 2 (SIH_Taster_02)", ["SIH_TASTER_02"], "2nd-row heated-seat switch — LIN slave", "ECU-FZM", "Front_Clima_LIN07", "LIN", "19.2 Kbps", "Second Row Seat Heating"],
   ["ECU-FCP", "Front Climate Panel (FCP)", ["FCP", "BKE"], "Front climate control panel / HVAC switch bar (heated / ventilated seat variants) on CAN FD — release node BKE", "ECU-CCU", "CCU_IVI_CAN01", "CAN FD", "TBD", "HVAC Switchbar"], // CAN FD per the released IVI CAN FD K-Matrix
@@ -474,7 +476,7 @@ SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, 
   ["ECU-HUD", "Head-Up Display (HUD)", ["HUD"], "Head-up display control unit (AR-HUD) on CAN FD", "Head-up display"],
   ["ECU-CCP", "Center Console Panel (CCP)", ["CCP", "CeCoUnit", "BedienDisp_m"], "Centre-console control panel / operating unit (key input over CAN FD)", "Control panel"],
   ["ECU-RCP", "Rear Climate Panel (RCP)", ["RCP", "KPH", "KlimaFond"], "Rear climate control panel (key input, climate status over CAN FD)", "Climate panel"],
-  ["ECU-LSR", "LSR", ["LSR", "LSR_1"], "Key-input unit on CAN FD (release node LSR_1)", "Switch module"],
+  ["ECU-AVK", "Audio Volume Knob (AVK)", ["AVK"], "Audio volume knob — key input on CAN FD", "Audio control"],
 ].forEach(([id, name, codes, deviceClass, subtype]) => {
   NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on the CCU IVI CAN FD (CCU_IVI_CAN01), release node ${codes[1] || codes[0]}`, codes, kind: "peripheral", subtype });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-IVICAN01`, a: "ECU-CCU", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "CCU_IVI_CAN01", rate: "TBD", basis: "Released IVI CAN FD K-Matrix (CCU_IVI_CAN01)", dir: "Bidirectional" });
@@ -806,7 +808,7 @@ const CZM_IO = [
   { id: "CZM-IF-013", conn: "J1356.4", name: "Center Hv CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Hv subsystem", ecuIf: "J1356.4 · D9 CAN High; D10 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-014", conn: "J1356.4", name: "Center Hvrtm CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Hvrtm subsystem", ecuIf: "J1356.4 · D7 CAN High; D20 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-015", conn: "J1356.4", name: "Center Lv CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Lv subsystem", ecuIf: "J1356.4 · D8 CAN High; D21 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
-  { id: "CZM-IF-016", conn: "J1356.2", name: "Center MFL CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Multifunction steering wheel (MFL)", ecuIf: "J1356.2 · B10 CAN High; B11 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
+  { id: "CZM-IF-016", conn: "J1356.2", name: "Center MFL CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Multifunction Steering Wheel (MSW)", ecuIf: "J1356.2 · B10 CAN High; B11 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-017", conn: "J1356.5", name: "Center Platform CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 4, endpoint: "Central Compute Unit (CCU)", ecuIf: "J1356.5 · D13 High In (2046); D12 High Out (2252); D26 Low In (2047); D25 Low Out (2253)", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-018", conn: "J1356.3", name: "Center Rearlighting CAN01", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Rearlighting subsystem", ecuIf: "J1356.3 · F7 CAN High; F20 CAN Low", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
   { id: "CZM-IF-019", conn: "J1356.5", name: "Center Rearlighting CAN02", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 2, endpoint: "Rearlighting subsystem", ecuIf: "J1356.5 · D14 CAN High (2052); D1 CAN Low (2053)", sw: "Body / Zonal gateway", diag: "No", arch: "Zonal / Body" },
@@ -857,7 +859,7 @@ const CZM_IO = [
   { id: "CZM-IF-071", conn: "J1356.2", name: "Glove box actuator supply", cls: "PWR-DIST", proto: "eFUSE/HSS switched", dir: "Out", pins: 1, endpoint: "Glove box actuator", ecuIf: "J1356.2 · D14", sw: "Power distribution", diag: "No", arch: "Power net" },
   { id: "CZM-IF-072", conn: "J1356.2", name: "Steering column adjustment (EVLS/FFA)", cls: "DIO", proto: "Discrete", dir: "Out", pins: 1, endpoint: "Steering column actuator (EVLS/LSMZ)", ecuIf: "J1356.2 · C2", sw: "Body / HMI", diag: "No", arch: "Cabin / Body" },
   { id: "CZM-IF-073", conn: "J1356.2", name: "Steering wheel heating", cls: "PWR-DIST", proto: "eFUSE/HSS switched", dir: "Out", pins: 1, endpoint: "Steering column module (wheel heating)", ecuIf: "J1356.2 · C4", sw: "Power distribution", diag: "No", arch: "Power net" },
-  { id: "CZM-IF-074", conn: "J1356.2", name: "MFL supply (+ GML.WS + PAG Shifter)", cls: "PWR-DIST", proto: "eFUSE/HSS switched", dir: "Out", pins: 1, endpoint: "MFL / steering switches / shifter", ecuIf: "J1356.2 · D8", sw: "Power distribution", diag: "No", arch: "Power net" },
+  { id: "CZM-IF-074", conn: "J1356.2", name: "MFL supply (+ GML.WS + PAG Shifter)", cls: "PWR-DIST", proto: "eFUSE/HSS switched", dir: "Out", pins: 1, endpoint: "MSW / steering switches / shifter", ecuIf: "J1356.2 · D8", sw: "Power distribution", diag: "No", arch: "Power net" },
   { id: "CZM-IF-075", conn: "J1356.3", name: "GND spare (J5-A1)", cls: "PWR-DIST", proto: "Power net", dir: "Ref", pins: 1, endpoint: "Ground (spare)", ecuIf: "J1356.3 · A1 (2302) GND spare (J5-A1)", sw: "Power distribution", diag: "No", arch: "Power net" },
   { id: "CZM-IF-076", conn: "J1356.3", name: "12V jump-start (external)", cls: "PWR-DIST", proto: "Power net", dir: "In", pins: 1, endpoint: "External jump-start 12V", ecuIf: "J1356.3 · A2 (2030) 12V jump-start (external)", sw: "Power distribution", diag: "No", arch: "Power net" },
   { id: "CZM-IF-077", conn: "J1356.3", name: "Redundant supply front zone ECU", cls: "PWR-DIST", proto: "eFUSE/HSS switched", dir: "Out", pins: 1, endpoint: "Front Zonal Module (FZM) redundant supply", ecuIf: "J1356.3 · B1 (2225) Redundant supply front zone ECU", sw: "Power distribution", diag: "No", arch: "Power net" },
@@ -1047,7 +1049,7 @@ const CZM_IO = [
   { id: "CZM-IF-261", conn: "G415.2", name: "NFC antenna & touch sensor, driver door (206_837_207)", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 5, endpoint: "Driver-door NFC antenna + outside-handle touch sensor on CZM Center Door CAN01", ecuIf: "G415.2 · A1 GND; A2 PLC (S.TAG_L); A3 CAN High (D.CAN_H.01_Center_Door); A4 CAN Low; A5 VBATT (V.15A_NFC)", sw: "Body / Access", diag: "No", arch: "Cabin / Body" },
   { id: "CZM-IF-262", conn: "G416.3", name: "Outside-handle touch sensor, passenger door (206_837_206)", cls: "DIO", proto: "Single-wire (Batt+Data)", dir: "In", pins: 2, endpoint: "Passenger-door outside-handle touch sensor (single-wire; 8-pin conn, A3-A8 n.c.)", ecuIf: "G416.3 · A1 Battery + Data (S.TAG_rs); A2 GND (M.GND_Touch_sensor_RH)", sw: "Body / Access", diag: "No", arch: "Cabin / Body" },
   { id: "CZM-IF-263", conn: "R351.1", name: "NFC antenna 2 / sensor surrogate (85E_927_753_A)", cls: "BUS-CAN", proto: "CAN FD", dir: "Bidir", pins: 4, endpoint: "NFC antenna 2 (surrogate) on CZM Center Door CAN01", ecuIf: "R351.1 · A1 VBATT (KL30, V.15A_NFC); A2 GND (KL31, M.31_MB939_A1); A3 CAN H (D.CAN_H.01_Center_Door); A4 CAN L", sw: "Body / Access", diag: "No", arch: "Cabin / Body" },
-  { id: "CZM-IF-264", conn: "F125.2", name: "AUX / multifunction switch (206_941_209)", cls: "BUS-LIN", proto: "LIN", dir: "In", pins: 4, endpoint: "AUX/multifunction switch panel (Multifunktionsschalter) on CZM Body LIN", ecuIf: "F125.2 · A1 LIN (D.LIN_BUS.Body_LIN); A2 KL30 (Battery); A3 KL31 (Ground); A4 n.c.", sw: "Body / Accessories", diag: "No", arch: "Cabin / Body" },
+  { id: "CZM-IF-264", conn: "F125.2", name: "AUX_MFS", cls: "BUS-LIN", proto: "LIN", dir: "In", pins: 4, endpoint: "AUX/multifunction switch panel (Multifunktionsschalter) on CZM Body LIN", ecuIf: "F125.2 · A1 LIN (D.LIN_BUS.Body_LIN); A2 KL30 (Battery); A3 KL31 (Ground); A4 n.c.", sw: "Body / Accessories", diag: "No", arch: "Cabin / Body" },
 ];
 
 const FZM_IO = [
@@ -2248,21 +2250,20 @@ const FEATURE_DOMAINS = [
 const ECU_HOME_RULES = [
   [/^ECU-CCU\b/, "Infotainment Platform"], [/^ECU-ADAS\b/, "Driver Assistance"], [/^ECU-(CZM|FZM)\b/, "Vehicle State & Power Management"],
   [/^ECU-CCM\b/, "Connectivity & Telematics"], [/^ECU-BEC\b/, "High-Voltage Energy Management"], [/^ECU-SES\b/, "High-Voltage Energy Management"],
-  [/^ECU-(RTM|BST)\b|A2B Audio|amplifier|speaker/i, "Audio"],
+  [/^ECU-(RTM|BST|AVK)\b|A2B Audio|amplifier|speaker|volume knob/i, "Audio"],
   [/^ECU-(DDM|HUD)\b|driver display|head-up/i, "Driver Information & Cluster"],
-  [/^ECU-(CDM|PDM)\b|IVI_CAN.*CDM/i, "Infotainment Platform"],
+  [/^ECU-(CDM|PDM|CCP)\b|IVI_CAN.*CDM/i, "Infotainment Platform"],
   [/^ECU-(VAS|NFC)|NFC |Vehicle Access/i, "Vehicle Access & Anti-Theft"],
   [/^ECU-(DCM|DDU|DSU|RRDCU|SRCU|PSCU)\b|tailgate|sunshade|sliding|tilt-roof/i, "Closures"],
   [/^ECU-(SITZMEM|IVB1|SIH)|seat/i, "Occupant Accommodation"],
   [/^ECU-(FCP|RCP)\b|climate/i, "Cabin Climate & Comfort"],
-  [/^ECU-(TPMS|EPS)\b|tire pressure|steering$/i, "Vehicle Dynamics"],
+  [/^ECU-(TPMS|EPS|MSW|SCSM)\b|tire pressure|steering wheel|steering column|steering$/i, "Vehicle Dynamics"],
   [/^ECU-(BBU|EPL)\b|brake backup|park lock/i, "Longitudinal Motion Control"],
   [/camera/i, (n) => /inner rear-view mirror/i.test(n) ? "Occupant Visibility" : /driver monitoring|driver assistance/i.test(n) ? "Driver Assistance" : "Camera & Surround View"],
   [/mirror|wiper|rain\/light/i, "Occupant Visibility"],
-  [/ambient|footwell|armrest|console .*light|light strip|contour lighting|roof module|overhead console \(LIM|LIM_01/i, "Interior Lighting"],
+  [/^ECU-OHC\d|ambient|footwell|armrest|console .*light|light strip|contour lighting|roof module|overhead console/i, "Interior Lighting"],
   [/^ECU-LTM\b|head lamp|tail ?lamp|taillamp|side marker|reverse light|emblem|logo light|rear panel .*light/i, "Exterior Lighting"],
-  [/^ECU-(MFL|ISMWLS|CCP|LSR|SL01)\b|steering wheel|column switch|multifunction switch|switch row/i, "Vehicle Controls Applications"],
-  [/outlet|power hub|USB|accessory switch|trailer/i, "Accessories"],
+  [/outlet|power hub|USB|accessory switch|trailer|AUX_MFS/i, "Accessories"],
 ];
 const SUB_DOMAIN = Object.fromEntries(FEATURE_DOMAINS.flatMap(([d, subs]) => subs.map((s) => [s, d])));
 const ecuHomeDefault = (id, name) => { const t = String(id || "") + " " + String(name || ""); for (const [re, sub] of ECU_HOME_RULES) if (re.test(t)) return typeof sub === "function" ? sub(t) : sub; return null; };
@@ -3910,10 +3911,13 @@ function ethEnsureLoaded() {
 }
 const WS_STORES = { KM_STORE, ICD_STORE, ECUREQ_STORE, SYSREQ_STORE, SWREQ_STORE, ECUTPL_STORE, STANDARDS_STORE, HWREQ_STORE };
 function collectStores() { const o = {}; for (const k in WS_STORES) { try { o[k] = JSON.parse(JSON.stringify(WS_STORES[k].data)); } catch (e) {} } return o; }
-function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } kmFixups(KM_STORE.data); }
+function applyStores(d) { if (!d) return; for (const k in WS_STORES) { if (d[k] !== undefined && d[k] !== null) { try { WS_STORES[k].data = JSON.parse(JSON.stringify(d[k])); } catch (e) {} } } kmFixups(KM_STORE.data); [ICD_STORE, ECUREQ_STORE, ECUTPL_STORE, HWREQ_STORE].forEach((st) => renameEcuKeys(st.data)); }
 /* Corrections applied to K-Matrix data saved before they were made. */
 const KM_NOT_MIRROR = new Set(["TAntr_Cmd_01", "TAntr_Cmd_02", "TSens_Status", "TSens_Target_Pos1", "TSens_Target_Pos2"]);
-const KM_NODE_RENAMES = { BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP" }; // renamed after frames may have been saved
+const KM_NODE_RENAMES = { BKE: "FCP", PI_Disp: "PDM", CeCoUnit: "CCP", KPH: "RCP", LSR: "AVK", MFL: "MSW", ISMWLS: "SCSM", SL01: "OHC1", SL_01: "OHC1" };
+/* ECUs renamed after data may have been saved under their old id (2026-10-24): moved on load. */
+const ECU_ID_RENAMES = { "ECU-LSR": "ECU-AVK", "ECU-MFL": "ECU-MSW", "ECU-ISMWLS": "ECU-SCSM", "ECU-SL01": "ECU-OHC1" };
+const renameEcuKeys = (o) => { if (o && typeof o === "object") for (const [a, b] of Object.entries(ECU_ID_RENAMES)) if (o[a] !== undefined && o[b] === undefined) { o[b] = o[a]; delete o[a]; } return o; }; // renamed after frames may have been saved
 function kmFixups(K) { const rn = (n) => KM_NODE_RENAMES[n] || n;
   (K && K.msgs || []).forEach((m) => { if (KM_NOT_MIRROR.has(m.name) && m.l1 === "Adjusting Exterior Mirrors") m.l1 = ""; if (m.sender) m.sender = rn(m.sender); if (m.recv) m.recv = [...new Set(m.recv.map(rn))];
     m.name = scrubText(m.name); if (m.src) m.src = scrubText(m.src); (m.sig || []).forEach((g) => { g[0] = scrubText(g[0]); }); }); // brand list grows over time
@@ -8848,7 +8852,7 @@ export default function App() {
     if (d.reqEvidence && typeof d.reqEvidence === "object") setReqEvidence(clone(d.reqEvidence));
     if (Array.isArray(d.auditLog)) setAuditLog(clone(d.auditLog));
     if (Array.isArray(d.userEcus)) setUserEcus(clone(d.userEcus));
-    if (d.ecuHome && typeof d.ecuHome === "object") setEcuHome(clone(d.ecuHome));
+    if (d.ecuHome && typeof d.ecuHome === "object") setEcuHome(renameEcuKeys(clone(d.ecuHome)));
     if (d.opsOv) setOpsOv({ edits: {}, added: {}, deleted: {}, ...clone(d.opsOv) });
     if (d.userNodes || d.nodeEdits) setNodes((prev) => {
       const nx = { ...prev, ...(d.userNodes || {}) }; // restore user-created features first
