@@ -4384,6 +4384,9 @@ function EthKMatrixPanel({ canWrite = false, notify = () => {} }) {
 function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHandled }) {
   const [kmOpen, setKmOpen] = useState(false);
   const [kmBus, setKmBus] = useState(""); // "" = all buses, "-" = frames without a bus (SDVsolution-defined), else a bus name
+  const [kmMsg, setKmMsg] = useState(null); // import feedback shown inside the window: { kind: "busy" | "ok" | "err", text }
+  const [kmAll, setKmAll] = useState(false); // opened from an ECU: false = only that ECU's frames, true = every frame
+  const kmChanged = () => { try { window.dispatchEvent(new Event("sdv:changed")); } catch (e) {} }; // re-render the page and save the workspace
   const onBus = (m) => !kmBus || (kmBus === "-" ? !m.bus : m.bus === kmBus);
   const [, setKmV] = useState(0);
   // Open the modal in one step when an external request targets this ECU (e.g. clicking a frame in the Impact view).
@@ -4411,7 +4414,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
     } catch (e) { alert("Could not build the K-Matrix Excel. " + (e && e.message ? e.message : e)); }
   };
   const KM = KM_STORE.data;
-  const ecuMsgsAll = kmMsgsForEcu(ecuId); // this ECU's Tx/Rx subset of the cluster matrix (all messages when ecuId is absent)
+  const ecuMsgsAll = kmAll ? KM.msgs : kmMsgsForEcu(ecuId); // this ECU's Tx/Rx subset of the cluster matrix (all messages when ecuId is absent)
   const busList = canBuses({ msgs: ecuMsgsAll }), hasNoBus = ecuMsgsAll.some((m) => !m.bus);
   const viewMsgs = ecuMsgsAll.filter(onBus);
   const busSelect = (busList.length > 0) && (
@@ -4488,31 +4491,35 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
   const kmFileRef = useRef(null);
   const importKMatrix = async (file) => {
     if (!file) return;
-    let XLSX; try { XLSX = await ensureXLSXLib(); } catch (e) { alert("Excel library unavailable (offline?)."); return; }
+    setKmMsg({ kind: "busy", text: "Importing " + file.name + "…" });
+    let XLSX; try { XLSX = await ensureXLSXLib(); } catch (e) { setKmMsg({ kind: "err", text: "The Excel reader could not be loaded (offline?). Nothing was imported." }); return; }
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED: authoritative for its messages,
-      // SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
+      // A released bus K-Matrix (per-node S/R columns, Value Range sub-header) is MERGED into its bus: authoritative for its
+      // messages, other buses and SDVsolution-defined messages kept. This tool's own export is still re-imported as a whole.
       for (const sn of wb.SheetNames) { const a2 = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" }); if (!isReleasedCanLayout(a2)) continue;
         const rel = parseReleasedCanKm(a2, { scrub: scrubText, scrubTable: scrubValueTable, source: file.name.replace(/\.[^.]+$/, "") + " (" + sn + ")", sheet: sn });
-        if (!rel.msgs.length) { alert("No messages found in sheet " + sn + "."); return; }
-        const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K; kmBump();
-        alert("Merged " + file.name + " (sheet " + sn + ") into bus " + report.bus + ":\n" + report.added + " new message(s), " + report.updated + " updated from the release, " + report.signals + " signals, " + rel.txt.length + " value tables.\n"
-          + "Node names mapped: " + (rel.renamed.join(", ") || "none") + ". Other nodes kept as named: " + rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→"))).join(", ") + ".\n"
-          + (report.otherBuses.length ? "Other buses left unchanged: " + report.otherBuses.join(", ") + ".\n" : "")
-          + (report.keptOnlyInStore.length ? report.keptOnlyInStore.length + " message(s) on this bus not in this release were kept: " + report.keptOnlyInStore.slice(0, 8).join(", ") + (report.keptOnlyInStore.length > 8 ? " …" : "") + ".\n" : "")
-          + (rel.warnings.length ? "Notes: " + rel.warnings.slice(0, 5).join(" | ") : ""));
+        if (!rel.msgs.length) { setKmMsg({ kind: "err", text: "No messages found in sheet " + sn + " of " + file.name + ". Nothing was imported." }); return; }
+        const { K, report } = mergeReleasedCan(KM_STORE.data, rel, { legacyBus: KM_LEGACY_BUS }); KM_STORE.data = K;
+        const onBusNow = K.msgs.filter((m) => m.bus === report.bus), mineN = ecuId ? onBusNow.filter((m) => kmMsgEcus(m).includes(ecuId)).length : onBusNow.length;
+        setKmBus(report.bus); if (ecuId && mineN < onBusNow.length) setKmAll(true); kmBump(); kmChanged();
+        const other = rel.nodes.filter((x) => !rel.renamed.some((r) => r.startsWith(x + "→")));
+        setKmMsg({ kind: "ok", text: "Imported " + file.name + " into bus " + report.bus + ": " + report.added + " new and " + report.updated + " updated message(s), " + report.signals + " signals, " + rel.txt.length + " value tables."
+          + "\nECU names: " + (rel.renamed.join(", ") || "none") + (other.length ? "; kept as named: " + other.join(", ") : "") + "."
+          + (report.keptOnlyInStore.length ? "\n" + report.keptOnlyInStore.length + " message(s) already on this bus but not in the file were kept." : "")
+          + (rel.warnings.length ? "\nNotes: " + rel.warnings.slice(0, 5).join(" | ") : "")
+          + "\nShowing bus " + report.bus + (ecuId ? " — " + mineN + " of its " + onBusNow.length + " messages involve " + KM_ECU_TO_SHORT(ecuId) + (mineN < onBusNow.length ? "; switched to All ECUs so you can see them all" : "") : "") + "." });
         return; }
       const name = wb.SheetNames.find((n) => /k-?matrix/i.test(n)) || wb.SheetNames[wb.SheetNames.length - 1];
       const sheet = wb.Sheets[name];
-      if (!sheet) { alert("No K-Matrix sheet found in the workbook."); return; }
+      if (!sheet) { setKmMsg({ kind: "err", text: "No K-Matrix sheet found in " + file.name + ". Nothing was imported." }); return; }
       const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: "" });
       const parsed = parseKMatrixAoa(aoa);
-      if (!parsed.msgs.length) { alert("Could not read any messages from the sheet. Expected the K-Matrix export layout."); return; }
-      KM_STORE.data = parsed; kmBump();
-      alert("Imported " + parsed.msgs.length + " messages (" + parsed.msgs.reduce((s, m) => s + m.sig.length, 0) + " signals). Applied everywhere.");
-    } catch (e) { alert("Import failed: " + (e && e.message ? e.message : e)); }
+      if (!parsed.msgs.length) { setKmMsg({ kind: "err", text: "Could not read any messages from " + file.name + ". Expected a released bus K-Matrix (Message · Identifier · Signal · … · Sender - Receiver columns) or this tool's own K-Matrix export. Nothing was imported." }); return; }
+      KM_STORE.data = parsed; setKmBus(""); kmBump(); kmChanged();
+      setKmMsg({ kind: "ok", text: "Imported " + parsed.msgs.length + " messages (" + parsed.msgs.reduce((s, m) => s + m.sig.length, 0) + " signals) from " + file.name + " — this replaced the whole K-Matrix." });
+    } catch (e) { setKmMsg({ kind: "err", text: "Import of " + file.name + " failed: " + (e && e.message ? e.message : e) }); }
   };
   const busFileRef = useRef(null);
   const importBus = async (file) => {
@@ -4520,10 +4527,10 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
     try {
       const text = await file.text();
       const { fmt, parsed } = parseBusFile(file.name, text);
-      if (!parsed || !parsed.msgs || !parsed.msgs.length) { alert("No CAN/LIN messages found in " + file.name + ".\n\nDBC and LDF are fully supported; ARXML import is best-effort (CAN frames + I-signal PDU mappings)."); return; }
-      const r = mergeBusIntoKM(parsed.msgs, fmt); kmBump();
-      alert("Imported " + file.name + " (" + fmt + "):\n" + r.added + " new message(s), " + r.updated + " updated, " + r.signals + " signal(s).\n\nMerged into the K-Matrix — applied to the ARXML and all exports. The file stayed in your browser (nothing uploaded).");
-    } catch (e) { alert("Import failed: " + (e && e.message ? e.message : e)); }
+      if (!parsed || !parsed.msgs || !parsed.msgs.length) { setKmMsg({ kind: "err", text: "No CAN/LIN messages found in " + file.name + ".\n\nDBC and LDF are fully supported; ARXML import is best-effort (CAN frames + I-signal PDU mappings)." }); return; }
+      const r = mergeBusIntoKM(parsed.msgs, fmt); kmBump(); kmChanged();
+      setKmMsg({ kind: "ok", text: "Imported " + file.name + " (" + fmt + "):\n" + r.added + " new message(s), " + r.updated + " updated, " + r.signals + " signal(s).\n\nMerged into the K-Matrix — applied to the ARXML and all exports. The file stayed in your browser (nothing uploaded)." });
+    } catch (e) { setKmMsg({ kind: "err", text: "Import of " + file.name + " failed: " + (e && e.message ? e.message : e) }); }
   };
   const kmJsonRef = useRef(null);
   const saveKmJson = () => dl("K-Matrix.json", JSON.stringify(KM_STORE.data, null, 2), "application/json");
@@ -4531,11 +4538,11 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      if (!parsed || !Array.isArray(parsed.msgs) || !Array.isArray(parsed.lin) || !Array.isArray(parsed.txt)) { alert("Not a valid K-Matrix JSON (expected msgs, lin, txt arrays)."); return; }
+      if (!parsed || !Array.isArray(parsed.msgs) || !Array.isArray(parsed.lin) || !Array.isArray(parsed.txt)) { setKmMsg({ kind: "err", text: "Not a valid K-Matrix JSON (expected msgs, lin, txt arrays)." }); return; }
       if (!Array.isArray(parsed.run)) parsed.run = KM_STORE.data.run;
       KM_STORE.data = parsed; kmBump();
-      alert("Loaded " + parsed.msgs.length + " messages from JSON. Applied everywhere.");
-    } catch (e) { alert("Load failed: " + (e && e.message ? e.message : e)); }
+      kmChanged(); setKmMsg({ kind: "ok", text: "Loaded " + parsed.msgs.length + " messages from JSON. Applied everywhere." });
+    } catch (e) { setKmMsg({ kind: "err", text: "Load failed: " + (e && e.message ? e.message : e) }); }
   };
   return (
     <>
@@ -4557,16 +4564,20 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
               <div className="flex items-center gap-2">
                 <input ref={kmFileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importKMatrix(f); }} />
                 <input ref={busFileRef} type="file" accept=".dbc,.ldf,.arxml,.xml" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importBus(f); }} />
+                {ecuId && <button onClick={() => setKmAll((v) => !v)} title="Show only the frames this ECU sends or receives, or every frame in the K-Matrix" style={{ ...btnS, color: "#344054", borderColor: "#D0D5DD" }}>{kmAll ? "All ECUs" : KM_ECU_TO_SHORT(ecuId) + " only"}</button>}
                 {busSelect}
                 {canWrite && <button onClick={autoPack} title="Auto-assign every signal's start bit (base then mux groups) and grow DLC to fit — fixes overlaps, gaps and overflow" style={{ ...btnS, color: "#067647", borderColor: "#A6F4C5" }}>Auto-pack bits</button>}
                 {canWrite && <button onClick={() => busFileRef.current && busFileRef.current.click()} title="Import a real bus database — DBC, LDF or ARXML — and merge its ECUs, messages and signals into the K-Matrix. Parsed in your browser; the file is never uploaded." style={{ ...btnS, color: "#0E7090", borderColor: "#7CD4FD" }}>Import DBC/LDF/ARXML</button>}
-                {canWrite && <button onClick={() => kmFileRef.current && kmFileRef.current.click()} title="Import a K-Matrix Excel file — replaces the live data (use for major changes)" style={{ ...btnS, color: "#B54708", borderColor: "#F0C9A0" }}>Import Excel</button>}
+                {canWrite && <button onClick={() => kmFileRef.current && kmFileRef.current.click()} title="Import a released bus K-Matrix (.xlsx) — merged into its own bus; or re-import this tool's own Excel export, which replaces the whole K-Matrix" style={{ ...btnS, color: "#B54708", borderColor: "#F0C9A0" }}>Import Excel</button>}
                 <button onClick={genKMatrix} title="Export the current K-Matrix as Excel" style={btnS}>Export</button>
                 <button onClick={exportDbc} title="Export a Vector CAN database (.dbc) from the current K-Matrix" style={{ ...btnS, color: "#7A5AF8", borderColor: "#D9D6FE" }}>DBC</button>
                 <button onClick={exportLdf} title="Export a LIN Description File (.ldf) scaffold from the current K-Matrix" style={{ ...btnS, color: "#7A5AF8", borderColor: "#D9D6FE" }}>LDF</button>
                 <button onClick={() => setKmOpen(false)} style={{ ...btnS, color: "#344054", borderColor: "#D0D5DD" }}>Close</button>
               </div>
             </div>
+            {kmMsg && <div style={{ margin: "8px 12px 0", padding: "8px 10px", borderRadius: 7, fontSize: 11.5, lineHeight: 1.5, whiteSpace: "pre-wrap", display: "flex", gap: 8, alignItems: "flex-start",
+              background: kmMsg.kind === "err" ? "#FEF3F2" : kmMsg.kind === "busy" ? "#F2F4F7" : "#ECFDF3", color: kmMsg.kind === "err" ? "#B42318" : kmMsg.kind === "busy" ? "#344054" : "#067647", border: "1px solid " + (kmMsg.kind === "err" ? "#FECDCA" : kmMsg.kind === "busy" ? "#E4E7EC" : "#ABEFC6") }}>
+              <div style={{ flex: 1 }}>{kmMsg.text}</div>{kmMsg.kind !== "busy" && <button onClick={() => setKmMsg(null)} title="Dismiss" style={{ color: "inherit", fontWeight: 700 }}>✕</button>}</div>}
             <div style={{ overflow: "auto", padding: 12 }}>
               <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11 }}>
                 <thead><tr>{["Message", "ID", "Cyc [ms]", "DLC", "Maps to L1", "Signal", "Start bit", "Len", "Mux", "Factor", "Offset", "Unit", "Logical / enum"].map((h) => <th key={h} style={thS}>{h}</th>)}{canWrite && <th style={thS}></th>}</tr></thead>
@@ -4575,7 +4586,7 @@ function KMatrixTool({ canWrite = false, onL1, ecuId, openReq = null, onOpenHand
                     const [sn, st, ln, cm, mux] = sg, lin = KM.lin.find((x) => x[0] === cm), txt = KM.txt.find((x) => x[0] === cm), first = si === 0;
                     const muxVal = mux === "M" ? "M" : (typeof mux === "number" ? String(mux) : ""), isMulti = typeof mux === "number";
                     const inpS = { width: "100%", boxSizing: "border-box", border: "1px solid #E4E7EC", borderRadius: 4, padding: "2px 4px", fontSize: 11, background: canWrite ? "#fff" : "#F9FAFB" };
-                    const NIN = (val, on) => <input type="number" step="any" disabled={!canWrite} value={val} onChange={(e) => on(e.target.value)} style={inpS} />;
+                    const NIN = (val, on) => <input type="number" step="any" disabled={!canWrite} value={val} onChange={(e) => on(e.target.value)} style={{ ...inpS, minWidth: 58 }} />; // min width: wide enum text must not squeeze numbers out of sight
                     const TIN = (val, on) => <input disabled={!canWrite} value={val} onChange={(e) => on(e.target.value)} style={inpS} />;
                     return (
                       <tr key={mi + "-" + si} style={{ background: first ? "#F9FAFB" : (mux === "M" ? "#FEF6EE" : "#fff") }}>
@@ -8785,6 +8796,8 @@ export default function App() {
      event-driven + debounced (no tight interval) to keep the UI responsive. */
   const WSAPI = (typeof window !== "undefined" && window.__sdvWorkspaceApi) || null;
   const [, setWsHydrated] = useState(false);
+  const [, setStoreTick] = useState(0); // bumped by "sdv:changed" so pages reading the module stores re-render
+  useEffect(() => { const t = () => setStoreTick((n) => n + 1); window.addEventListener("sdv:changed", t); return () => window.removeEventListener("sdv:changed", t); }, []);
   const wsReadyRef = useRef(false);   // true once initial load finished (gates autosave)
   const wsOrgRef = useRef(null);
   const wsSigRef = useRef("");        // signature of last-saved doc
@@ -8847,8 +8860,10 @@ export default function App() {
     const onVis = () => { if (document.visibilityState === "hidden") maybeSave(); };
     document.addEventListener("pointerup", schedule, true);
     document.addEventListener("keyup", schedule, true);
+    const onChanged = () => schedule(); // a store changed outside React state (e.g. a K-Matrix import): save it
+    window.addEventListener("sdv:changed", onChanged);
     document.addEventListener("visibilitychange", onVis);
-    return () => { document.removeEventListener("pointerup", schedule, true); document.removeEventListener("keyup", schedule, true); document.removeEventListener("visibilitychange", onVis); clearTimeout(wsTimerRef.current); };
+    return () => { document.removeEventListener("pointerup", schedule, true); document.removeEventListener("keyup", schedule, true); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("sdv:changed", onChanged); clearTimeout(wsTimerRef.current); };
   }, []);
   /* Import the JUnit results of a finished build (results.xml, produced by the runner) into Test Cases — same matching as the manual import,
      stamped with the build label so the result, the audit entry and the build all share one ID. Idempotent per build. */
