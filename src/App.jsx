@@ -488,6 +488,16 @@ SWITCHMAP_PERIPHERALS.forEach(([id, name, codes, deviceClass, host, bus, proto, 
   NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "QM", deviceClass, scope: `${name} on the CZM rear tire / road CAN FD (Rear_TIREROAD_CAN01), release node ${codes[1]}`, codes, kind: "peripheral", subtype });
   NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-TIREROADCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "Rear_TIREROAD_CAN01", rate: "TBD", basis: "Released RearTireRoadCANFD K-Matrix (rear-zone node BZC = CZM)", dir: "Bidirectional" });
 });
+/* Rear fallback CAN FD (released RearFallbackCANFD) — redundant chassis control for automated driving on the rear zone
+   (BZC = CZM). Secondary ECUs named by George 2026-10-23; supplier TBD. The ADAS ECU (ADAS_Scnd) is also on this bus. */
+[
+  ["ECU-BBU", "Brake Backup Unit (BBU)", ["BBU", "BCS2", "BRS_BU"], "Secondary / backup brake control unit (ABS, brake control, deceleration and ESC frames for the fallback path)", "Brake backup"],
+  ["ECU-EPS", "Electric Power Steering (EPS)", ["EPS", "EPS_HAF", "Lenkhilfe"], "Electric power steering for automated driving (release node EPS_HAF)", "Power steering"],
+].forEach(([id, name, codes, deviceClass, subtype]) => {
+  NETWORK.ecus.push({ id, name, vendor: "—", processor: "—", supplier: "TBD", asil: "TBD", deviceClass, scope: `${name} on the CZM rear fallback CAN FD (Rear_FALLBACK_CAN01), release node ${codes[1]}`, codes, kind: "peripheral", subtype });
+  NETWORK.links.push({ id: `NT-${id.replace("ECU-", "")}-FALLBACKCAN`, a: "ECU-CZM", b: id, cls: "zone-to-peripheral", proto: "CAN FD", net: "Rear_FALLBACK_CAN01", rate: "TBD", basis: "Released RearFallbackCANFD K-Matrix (rear-zone node BZC = CZM)", dir: "Bidirectional" });
+});
+NETWORK.links.push({ id: "NT-ADAS-FALLBACKCAN", a: "ECU-CZM", b: "ECU-ADAS", cls: "zone-to-peripheral", proto: "CAN FD", net: "Rear_FALLBACK_CAN01", rate: "TBD", basis: "Released RearFallbackCANFD K-Matrix (release nodes ADAS_Basic / ADAS_Scnd)", dir: "Bidirectional" });
 /* Displays per the switch map: video over LVDS from the CCU; control over CAN. */
 NETWORK.links.push(
   { id: "NT-CDM-LVDS01", a: "ECU-CCU", b: "ECU-CDM", cls: "ECU-to-display", proto: "LVDS", net: "CCU_LVDS_Display_Out_LVDS01", rate: "Video", basis: "Switchmap Arch Mapping, slide \"Center Display\" (replaces H-MTD)", dir: "CCU → Display" },

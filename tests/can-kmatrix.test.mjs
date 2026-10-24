@@ -57,7 +57,7 @@ const subBus = (pos) => {
 t("door sub-bus names", () => {
   assert.equal(releasedBusName("Tueraktor3_SUBCANFD"), "DDU_RL_SUBCAN01");
   assert.equal(releasedBusName("anything", ["Tuer_Sensor_VR"]), "DDU_FR_SUBCAN01");
-  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01"); assert.equal(releasedBusName("RearTailGateCANFD"), "Rear_TAILGATE_CAN01"); assert.equal(releasedBusName("XMM_IVI_CANFD"), "CCU_IVI_CAN01"); assert.equal(releasedBusName("RearTireRoadCANFD"), "Rear_TIREROAD_CAN01");
+  assert.equal(releasedBusName("CenterDoorCANFD"), "Center_DOOR_CAN01"); assert.equal(releasedBusName("RearTailGateCANFD"), "Rear_TAILGATE_CAN01"); assert.equal(releasedBusName("XMM_IVI_CANFD"), "CCU_IVI_CAN01"); assert.equal(releasedBusName("RearTireRoadCANFD"), "Rear_TIREROAD_CAN01"); assert.equal(releasedBusName("RearFallbackCANFD"), "Rear_FALLBACK_CAN01"); assert.equal(releasedBusName("RearOpenCANFD"), "Rear_OPEN_CAN01");
   assert.equal(xmmToCcu("XMM3_SAIL_Heartbeat"), "CCU_Heartbeat"); assert.equal(xmmToCcu("Req_XIX_XMM_IVI_CANFD"), "Req_XIX_CCU_IVI_CANFD");
 });
 t("identical frames on different buses stay separate, in any import order", () => {
