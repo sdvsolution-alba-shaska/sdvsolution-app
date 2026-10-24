@@ -8272,7 +8272,8 @@ function SwArchDiagram({ canWrite = false }) {
 }
 
 export default function App() {
-  const focus0 = (L0S.find((r) => (r.label || "").trim() === "Vehicle Dynamics") || {}).id || GRAPH.focus;
+  // Start on the first SubDomain of the first Domain in the tree (Vehicle Platform ▸ Vehicle Applications), not a fixed feature.
+  const focus0 = (FEATURE_DOMAINS.flatMap(([, subs]) => subs).map((l) => L0S.find((r) => (r.label || "").trim() === l)).find(Boolean) || {}).id || GRAPH.focus;
   const [focus, setFocus] = useState(focus0);
   const [expanded, setExpanded] = useState(() => new Set([focus0, ...(ADJ[focus0] || []).map((a) => a.id)]));
   const [selected, setSelected] = useState(null); // nothing selected by default
@@ -8576,7 +8577,7 @@ export default function App() {
     logAudit("Restored requirements", l0, "deleted requirements restored");
   };
   const [selectedEcu, setSelectedEcu] = useState(null); // selected ECU id for the ECU Requirements page
-  const [ecuOpen, setEcuOpen] = useState(() => new Set([...FEATURE_DOMAINS.map(([d]) => "d:" + d), "d:Unassigned", "s:Vehicle Dynamics"])); // ECU tree: every Domain open and Vehicle Dynamics expanded by default, like the Features tree
+  const [ecuOpen, setEcuOpen] = useState(() => new Set([...FEATURE_DOMAINS.map(([d]) => "d:" + d), "d:Unassigned", "s:" + FEATURE_DOMAINS[0][1][0]])); // ECU tree: every Domain open and Vehicle Dynamics expanded by default, like the Features tree
   const [ecuHome, setEcuHome] = useState({}); // ECU id -> SubDomain chosen by the user (overrides ECU_HOME_RULES); saved with the workspace
   const [execOpen, setExecOpen] = useState(false); // Engineering Readiness dashboard collapsed by default
   const [procOpen, setProcOpen] = useState(null); // "SYS" | "SWE" | null
@@ -11296,10 +11297,11 @@ Example \u2014 user: "show me the CZM" \u2192 you: "Opening the Central Zonal Mo
             <div className="flex items-center gap-1 p-0.5 rounded-md" style={{ background: "#F2F4F7" }}>
               {[["system", "Features"], ["behavior", "Behavior Models"], ["ecu", "ECUs"]].map(([m, lbl]) => (
                 <button key={m} onClick={() => { setTreeMode(m); if (m === "behavior") setView("behavior");
-                  if (m === "ecu") { // like Features: open on an ECU page — the one last viewed, else the first Vehicle Dynamics ECU
+                  if (m === "ecu") { // like Features: open on an ECU page — the one last viewed, else the first ECU at the top of the tree
                     const homeOf = (e) => (ecuHome[e.id] && SUB_DOMAIN[ecuHome[e.id]] && ecuHome[e.id]) || ecuHomeDefault(e.id, e.name);
-                    const first = selectedEcu || ([...NETWORK.ecus, ...userEcus].filter((e) => e.kind !== "pdu" && homeOf(e) === "Vehicle Dynamics" && ecuAllowed(e.id))
-                      .sort((a, b) => (isPrimaryEcu(b.id) - isPrimaryEcu(a.id)) || String(a.name).localeCompare(String(b.name)))[0] || {}).id;
+                    const order = FEATURE_DOMAINS.flatMap(([d, subs]) => ["@" + d, ...subs]), rank = (e) => { const i = order.indexOf(homeOf(e)); return i < 0 ? 1e9 : i; };
+                    const first = selectedEcu || ([...NETWORK.ecus, ...userEcus].filter((e) => e.kind !== "pdu" && rank(e) < 1e9 && ecuAllowed(e.id))
+                      .sort((a, b) => rank(a) - rank(b) || (isPrimaryEcu(b.id) - isPrimaryEcu(a.id)) || String(a.name).localeCompare(String(b.name)))[0] || {}).id;
                     if (first) { setSelectedEcu(first); setView("ecureq"); } } }} style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, padding: "2px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: treeMode === m ? "#fff" : "transparent", color: treeMode === m ? "#175CD3" : "#98A2B3", boxShadow: treeMode === m ? "0 1px 2px rgba(16,24,40,0.08)" : "none" }}>{lbl}</button>
               ))}
             </div>
