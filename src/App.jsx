@@ -2247,7 +2247,7 @@ const FEATURE_DOMAINS = [
    One home per ECU — the subdomain it mainly serves (multi-domain primary ECUs go to the subdomain of their main role).
    First matching rule wins (matched against "<id> <name>"); a user's choice on the ECU page overrides it (ecuHome). */
 const ECU_HOME_RULES = [
-  [/^ECU-(CCU|CZM|FZM)\b/, "@Vehicle Platform"], [/^ECU-ADAS\b/, "Driver Assistance"], // "@Domain" = directly under the domain, no SubDomain
+  [/^ECU-(CCU|ADAS|CZM|FZM)\b/, "@Vehicle Platform"], // "@Domain" = directly under the domain, no SubDomain
   [/^ECU-CCM\b/, "Connectivity & Telematics"], [/^ECU-BEC\b/, "High-Voltage Energy Management"], [/^ECU-SES\b/, "High-Voltage Energy Management"],
   [/^ECU-(RTM|BST|AVK)\b|A2B Audio|amplifier|speaker|volume knob/i, "Audio"],
   [/^ECU-(DDM|HUD)\b|driver display|head-up/i, "Driver Information & Cluster"],
