@@ -2234,13 +2234,13 @@ const L1S = CHILDREN(GRAPH.focus);
 /* Optional Domain grouping for the Features tree — maps L0 group labels into domains.
    L0 groups not listed here stay ungrouped at the top level of the tree. */
 const FEATURE_DOMAINS = [
+  ["Vehicle Platform", ["Vehicle Applications", "Vehicle Controls Applications", "Vehicle Modes & Experiences", "Vehicle State & Power Management", "Identity, Profiles & Personalization"]], // first in every tree (George, 2026-10-24)
   ["Drive", ["Vehicle Dynamics", "Longitudinal Motion Control", "EREV Powertrain"]],
   ["Energy", ["Charging & Bidirectional Energy", "Energy Management", "High-Voltage Energy Management", "Low-Voltage Energy Management"]],
   ["Body", ["Accessories", "Closures", "Exterior Lighting", "Interior Lighting", "Occupant Accommodation", "Occupant Visibility", "Vehicle Access & Anti-Theft", "Cabin Climate & Comfort", "Vehicle Thermal Management", "Vehicle Safety"]],
   ["Infotainment", ["Audio", "Driver Information & Cluster", "Infotainment Applications", "Infotainment Platform", "Navigation", "Connectivity & Telematics", "Mobile App & Remote Services"]],
   ["ADAS", ["Camera & Surround View", "Driver Assistance"]],
   ["Software Platform", ["Security & Privacy", "OTA Update", "Diagnostics"]],
-  ["Vehicle Platform", ["Identity, Profiles & Personalization", "Vehicle Applications", "Vehicle Controls Applications", "Vehicle Modes & Experiences", "Vehicle State & Power Management"]],
   ["Engineering & Operations", ["Engineering & Development Tooling", "Fleet & Aftersales", "Manufacturing & Service"]],
 ];
 /* Where each ECU sits in the ECU tree: Domain ▸ SubDomain, the same grouping as the Features and Behavior Models trees.
